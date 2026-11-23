@@ -21,7 +21,7 @@ def secret(n=8):
 AGAIN = {"error": "Please sign in again."}
 FIRST = {"error": "Choose a new password first."}
 NO_ACCOUNTS = "Accounts need SECRET_KEY in Railway variables."
-PICK_GROUP = "Pick a group."
+PICK_GROUP = "Pick a role."
 ONLY_COMMITTEE = "Only the timetable committee can be admins."
 EXAMS_DATE = "Give the last day of the exams and events access."
 BAD_USERNAME = "A username is 3 to 40 letters, digits, dots, dashes or underscores."
@@ -139,14 +139,13 @@ def the_people_list():
     c = admin()
     assert P.load()["migrated"] is False                                    # nothing has read the admin page yet
     r = c.get("/api/admin/people"); j = r.get_json()
-    assert r.status_code == 200 and list(j) == ["people", "departments", "groups", "hints", "moved", "me"], (r.status_code, j)
+    assert r.status_code == 200 and list(j) == ["people", "departments", "groups", "committees", "hints", "moved", "me"], (r.status_code, j)
     assert j["me"] == ALICIA and j["departments"] == DEPTS
-    assert j["groups"] == [["committee", "Timetable committee"], ["leader", "School leader"], ["hod", "HOD"], ["sh", "SH"], ["teacher", "Teacher"],
-                           ["executive", "Executive"]], j["groups"]
-    assert j["hints"] == dict(heads_on_step4=[DANIEL, MARCUS], no_google=[], heads_no_dept=[SITI]), j["hints"]   # Joseph (Hod) is committee, Siti SH already
+    assert j["groups"] == [["leader", "School leader"], ["hod", "HOD"], ["sh", "SH"], ["teacher", "Teacher"], ["executive", "Executive"]], j["groups"]
+    assert j["hints"] == dict(heads_on_step4=[DANIEL, JOSEPH, MARCUS], no_google=[], heads_no_dept=[SITI]), j["hints"]   # Joseph (Hod): committee, role Teacher; Siti SH already
     real = store.setup_record                                                # no setup saved: the published step 4 (Marcus is no SH there)
     store.setup_record = lambda: dict(spec=None, saved_at=None, ts=0, v=0)
-    try: assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [DANIEL]
+    try: assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [DANIEL, JOSEPH]
     finally: store.setup_record = real
     assert f"{FARID}: Relief team (from relief's Team list)" in j["moved"], j["moved"]                  # relief's team list moved first
     by = {p["name"]: p for p in j["people"]}
@@ -170,7 +169,7 @@ def the_admin_routes_are_for_admins_only():
     before, n = raw(), len(accounts())
     for who in clients:
         for method, url in ROUTES:
-            r = who.open(url, method=method, json=dict(name=LEE, group="committee", extras=dict(admin=True), names=[LEE], action="give", extra="admin",
+            r = who.open(url, method=method, json=dict(name=LEE, group="hod", extras=dict(timetable=True, admin=True), names=[LEE], action="give", extra="admin",
                                                         preview=False, code="teacher", off=True))
             assert r.status_code == 401 and r.get_json() == AGAIN, (method, url, r.status_code, r.get_json())
         r = who.get("/admin")
@@ -186,7 +185,7 @@ def one_person_each_check_has_its_sentence():
     long = "A" * 101
     for body, want in ((dict(name=NUR, group="boss"), PICK_GROUP), (dict(name=NUR, group=None), PICK_GROUP),
                        (dict(name=NUR, extras=dict(admin=True)), ONLY_COMMITTEE), (dict(name=LEE, extras=dict(admin=True)), ONLY_COMMITTEE),
-                       (dict(name=ALICIA, group="teacher"), last_admin(ALICIA)), (dict(name=ALICIA, off=True), last_admin(ALICIA)),
+                       (dict(name=ALICIA, extras=dict(timetable=False)), last_admin(ALICIA)), (dict(name=ALICIA, off=True), last_admin(ALICIA)),
                        (dict(name=ALICIA, extras=dict(admin=False)), last_admin(ALICIA)),
                        (dict(name=ALICIA, username=None), last_admin(ALICIA)), (dict(name=ALICIA, username=""), last_admin(ALICIA)),
                        (dict(name=NUR, extras=dict(exams="")), EXAMS_DATE), (dict(name=NUR, extras=dict(exams=YESTERDAY)), EXAMS_DATE),
@@ -221,10 +220,10 @@ def one_person_changes_each_write_one_entry_and_sign_them_out_when_they_lessen()
     assert went(dan.get("/timetable"), "/login") and "who" not in kept(dan), "a group change signs them out everywhere"
     j, e = change(name=DANIEL, depts=[" SC", "MA", "SC"])
     assert j["depts"] == ["SC", "MA"] and e["what"] == "depts" and e["changes"] == [dict(name=DANIEL, field="depts", was=["SC"], now=["SC", "MA"])], e
-    assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [MARCUS]
+    assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [JOSEPH, MARCUS]
     n0 = rec(RAVI)["n"]
     j, e = change(name=RAVI, extras=dict(relief=True))
-    assert j["extras"] == dict(relief=True, exams=RAVI_UNTIL, admin=False) and e["what"] == "extras" and rec(RAVI)["n"] == n0 + 1
+    assert j["extras"] == dict(timetable=False, relief=True, exams=RAVI_UNTIL, admin=False) and e["what"] == "extras" and rec(RAVI)["n"] == n0 + 1
     assert e["changes"] == [dict(name=RAVI, field="relief", was=False, now=True)], e
     j, e = change(name=RAVI, extras=dict(exams=None))
     assert j["extras"]["exams"] is None and e["changes"] == [dict(name=RAVI, field="exams", was=RAVI_UNTIL, now=None)]
@@ -255,18 +254,23 @@ def one_person_changes_each_write_one_entry_and_sign_them_out_when_they_lessen()
     assert c.get("/api/admin/ways").status_code == 200 and went(other.get("/home"), "/login")
     # Admin for a committee member; leaving the committee ends it, while another admin is left
     j, e = change(name=JOSEPH, extras=dict(admin=True)); assert j["extras"]["admin"] is True and P.admins(P.load()) == [ALICIA, JOSEPH]
-    j, e = change(name=JOSEPH, group="teacher")
-    assert (j["group"], j["extras"]["admin"]) == ("teacher", False) and P.admins(P.load()) == [ALICIA], j
-    assert e["changes"] == [dict(name=JOSEPH, field="group", was="committee", now="teacher"), dict(name=JOSEPH, field="admin", was=True, now=False)], e
+    j, e = change(name=JOSEPH, extras=dict(timetable=False))
+    assert (j["group"], j["extras"]["timetable"], j["extras"]["admin"]) == ("teacher", False, False) and P.admins(P.load()) == [ALICIA], j
+    assert e["what"] == "extras" and e["text"] == f"{JOSEPH}: Timetable committee taken away; Admin taken away", e
+    assert e["changes"] == [dict(name=JOSEPH, field="timetable", was=True, now=False), dict(name=JOSEPH, field="admin", was=True, now=False)], e
     code, j = post(c, "/api/admin/person", name=JOSEPH, group="hod", extras=dict(admin=True)); assert (code, j) == (400, {"error": ONLY_COMMITTEE})
-    change(name=JOSEPH, group="committee")
+    j, e = change(name=JOSEPH, extras=dict(timetable=True)); assert j["group"] == "teacher" and j["extras"]["admin"] is False, j
+    j, e = change(name=ALICIA, group="leader")                                # a role change no longer touches Admin or the tick
+    assert e["changes"] == [dict(name=ALICIA, field="group", was="teacher", now="leader")] and e["text"] == f"{ALICIA}: role Teacher → School leader", e
+    assert (j["extras"]["timetable"], j["extras"]["admin"]) == (True, True) and P.admins(P.load()) == [ALICIA], j
+    change(name=ALICIA, group="teacher")
     # an Admin who cannot sign in (no username, or no password) keeps no one in: the last admin who can is still the last
     for siti in (dict(username=None, pw=None), dict(username="siti.rahmah", pw=None)):
-        P.update(lambda d: d["people"][SITI].update(group="committee", extras=dict(NOBODY_EXTRAS, admin=True), **siti))
+        P.update(lambda d: d["people"][SITI].update(group="sh", extras=dict(NOBODY_EXTRAS, timetable=True, admin=True), **siti))
         assert P.admins(P.load()) == [ALICIA, SITI] and P.usable_admins(P.load()) == [ALICIA]
         before, n = raw(), len(accounts())
         for url, body in (("/api/admin/person", dict(name=ALICIA, extras=dict(admin=False))), ("/api/admin/person", dict(name=ALICIA, off=True)),
-                          ("/api/admin/person", dict(name=ALICIA, username=None)), ("/api/admin/person", dict(name=ALICIA, group="teacher")),
+                          ("/api/admin/person", dict(name=ALICIA, username=None)), ("/api/admin/person", dict(name=ALICIA, extras=dict(timetable=False))),
                           ("/api/admin/bulk", dict(names=[ALICIA], action="take", extra="admin", preview=False)),
                           ("/api/admin/bulk", dict(names=[MARCUS, ALICIA], action="off", preview=True))):
             assert post(c, url, **body) == (400, {"error": last_admin(ALICIA)}), (url, body, post(c, url, **body))
@@ -315,7 +319,7 @@ def ticking_several_with_the_last_admin_is_refused_whole():
     assert P.admins(P.load()) == [ALICIA]
     before, n = raw(), len(accounts())
     for body, want in ((dict(names=[MARCUS, ALICIA], action="off"), last_admin(ALICIA)),
-                       (dict(names=[NUR, ALICIA], action="group", group="teacher"), last_admin(ALICIA)),
+                       (dict(names=[NUR, ALICIA], action="take", extra="admin"), last_admin(ALICIA)),   # a role change no longer takes Admin away
                        (dict(names=[ALICIA], action="take", extra="admin"), last_admin(ALICIA)),
                        (dict(names=[NUR, JOSEPH], action="give", extra="admin"), ONLY_COMMITTEE),
                        (dict(names=FOUR, action="give", extra="exams"), EXAMS_DATE), (dict(names=FOUR, action="give", extra="exams", until=YESTERDAY), EXAMS_DATE),
@@ -476,7 +480,7 @@ def the_first_admin_once_and_only_for_the_committee():
         assert went(r, "/admin"), (r.status_code, r.data[:300])
         s = kept(com); assert (s["who"], s["via"]) == ("Ms Wendy Ang", "password") and "role" not in s, s
         w = rec("Ms Wendy Ang")
-        assert (w["group"], w["extras"]["admin"], w["added"], w["username"], w["must_change"], w["off"]) == ("committee", True, True, "wendy.ang", False, False), w
+        assert (w["group"], w["extras"]["timetable"], w["extras"]["admin"], w["added"], w["username"], w["must_change"], w["off"]) == (None, True, True, True, "wendy.ang", False, False), w
         assert PW.check_pw(w["pw"], good) and P.admins(P.load()) == ["Ms Wendy Ang"]
         got = accounts(); assert len(got) == n + 1
         e = got[0]; assert (e["what"], e["people"], e["who"], e["as"]) == ("first-admin", ["Ms Wendy Ang"], None, "Shared committee code"), e
@@ -484,6 +488,18 @@ def the_first_admin_once_and_only_for_the_committee():
         assert com.get("/api/admin/people").get_json()["me"] == "Ms Wendy Ang"
         for who in (shared("committee"), signed_in(JOSEPH)):
             assert who.get("/admin/first").status_code == 404 and who.post("/admin/first", data=dict(name="X Y", username="x.y", new=good, again=good)).status_code == 404
+        assert P.admins(P.load()) == ["Ms Wendy Ang"]
+        # an HOD makes themselves the first admin: they keep their role and get the Timetable committee and Admin
+        keep = {n: json.loads(json.dumps(P.load()["people"][n])) for n in ("Ms Wendy Ang", DANIEL)}
+        P.update(lambda d: d["people"]["Ms Wendy Ang"]["extras"].update(admin=False))
+        try:
+            assert rec(DANIEL)["group"] == "hod" and rec(DANIEL)["extras"]["timetable"] is False and not rec(DANIEL)["pw"], rec(DANIEL)
+            hod, good2 = shared("committee"), secret()
+            r = hod.post("/admin/first", data=dict(name=DANIEL, username="daniel.wong", new=good2, again=good2)); assert went(r, "/admin"), (r.status_code, r.data[:300])
+            d = rec(DANIEL); assert (d["group"], d["extras"]["timetable"], d["extras"]["admin"], d["username"]) == ("hod", True, True, "daniel.wong"), d
+            assert P.admins(P.load()) == [DANIEL]
+            assert {c["field"] for c in accounts()[0]["changes"]} == {"timetable", "admin", "username"}, accounts()[0]["changes"]
+        finally: P.update(lambda d: d["people"].update(keep))
         assert P.admins(P.load()) == ["Ms Wendy Ang"]
     finally:
         P.update(lambda d: d["people"][ALICIA]["extras"].update(admin=True))
@@ -553,6 +569,53 @@ def no_password_or_code_in_the_history():
     for s in SECRETS: assert s not in text, "a secret reached the history"
     for e in accounts():
         assert not ({"pw", "password", "once"} & set(e)) and all(c["field"] not in ("pw", "password", "once", "must_change") for c in e.get("changes") or []), e
+
+@t
+def the_people_list_shows_roles_and_committees():
+    j = admin().get("/api/admin/people").get_json()
+    assert [g[0] for g in j["groups"]] == ["leader", "hod", "sh", "teacher", "executive"], j["groups"]
+    assert j["committees"] == [["timetable", "Timetable committee"], ["relief", "Relief team"], ["exams", "Exams and events"]]
+    a = next(p for p in j["people"] if p["name"] == ALICIA)
+    assert a["group"] == "teacher" and a["extras"]["timetable"] is True and a["extras"]["admin"] is True, a
+
+@t
+def the_timetable_committee_is_a_tick_beside_the_role():
+    c = admin(); n0 = rec(DANIEL)["n"]
+    code, j = post(c, "/api/admin/person", name=DANIEL, group="hod", extras=dict(timetable=True))
+    assert code == 200 and j["group"] == "hod" and j["extras"]["timetable"] is True, (code, j)
+    assert rec(DANIEL)["n"] == n0 + 1                                             # the new tick signs them out
+    assert "Timetable committee given" in accounts()[0]["text"], accounts()[0]["text"]
+    assert post(c, "/api/admin/person", name=JOSEPH, group="hod")[0] == 200       # Joseph: stored in the committee group, now an HOD too
+    s = signed_in(JOSEPH).get("/api/status").get_json()
+    assert s["role"] == "committee" and s["depts"] is None, s                     # an HOD on the committee changes every department
+    assert "role Teacher → HOD" in accounts()[0]["text"], accounts()[0]["text"]
+    assert s["group"] == "HOD · Timetable committee", s["group"]                  # the role's label, then the committees
+    assert c.get("/api/status").get_json()["group"] == "Teacher · Timetable committee, Admin"   # Admin last
+
+@t
+def admin_goes_with_the_timetable_committee():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(admin=True)) == (400, {"error": ONLY_COMMITTEE})
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
+    code, j = post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))
+    assert code == 200 and j["extras"]["timetable"] is False and j["extras"]["admin"] is False, j
+    assert {x["field"] for x in accounts()[0]["changes"]} == {"timetable", "admin"}
+
+@t
+def the_committee_is_not_a_role():
+    assert post(admin(), "/api/admin/person", name=NUR, group="committee") == (400, {"error": PICK_GROUP})
+
+@t
+def the_last_admin_keeps_the_timetable_committee():
+    c = admin()
+    others = [n for n in P.usable_admins(P.load()) if n != ALICIA]           # earlier tests left other admins: off for this test
+    P.update(lambda d: [d["people"][n].update(off=True) for n in others])
+    try:
+        assert P.usable_admins(P.load()) == [ALICIA]
+        before, n = raw(), len(accounts())
+        assert post(c, "/api/admin/person", name=ALICIA, extras=dict(timetable=False)) == (400, {"error": last_admin(ALICIA)})
+        assert raw() == before and len(accounts()) == n and rec(ALICIA)["extras"]["timetable"] is True and rec(ALICIA)["extras"]["admin"] is True
+    finally: P.update(lambda d: [d["people"][n].update(off=False) for n in others])
 
 import putback  # noqa: E402
 def putback_admin_sentence(): return putback._ADMIN

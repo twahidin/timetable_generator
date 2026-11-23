@@ -1378,15 +1378,24 @@ def pub_info():
                 choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""),
                 compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
 
+def _group_label(p):
+    """the committee page's label for a person: their role's label, then " · " and their committees' labels joined by
+    ", " when they have any (Admin last), e.g. "HOD · Timetable committee, Relief team"
+    """
+    ex, today = p.get("extras") or {}, datetime.date.today().isoformat()
+    on = [label for k, label in people.COMMITTEES if (bool(ex.get(k)) and str(ex[k]) >= today if k == "exams" else ex.get(k) is True)]
+    if ex.get("admin") is True: on.append(EXTRA_LABELS["admin"])
+    return " · ".join(x for x in (people.LABELS.get(p.get("group")), ", ".join(on)) if x) or None
+
 @app.get("/api/status")
 @need("setup")
 def status():
-    """what the committee page shows. who: the person signed in (None for a shared code), group: their group's label; depts: a head's departments
+    """what the committee page shows. who: the person signed in (None for a shared code), group: their role's and committees' label; depts: a head's departments
     when signed in by name (None otherwise); shared: the shared code's role; admin_exists: an admin who can sign in has been named (else the first admin is offered)"""
     have, probs = access.configured()
     _, at = store.load_setup()
     p = who()
-    mine = dict(who=p["name"] if p else None, group=people.LABELS.get(p["group"]) if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
+    mine = dict(who=p["name"] if p else None, group=_group_label(p) if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
                 admin_exists=bool(people.usable_admins(people.load())))
     if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
     return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), versions=versions.count(), typed=typed.enabled(), **mine)
@@ -1678,15 +1687,15 @@ if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on():
     relief_outbox.start()                                         # the Telegram messages, every 5 seconds
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
-# The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the
+# The named admins (Timetable committee tick, Admin extra, signed in with their password) manage people here; every check is the
 # server's. A change is judged whole inside one people.update, so two admins at once cannot both remove the other, and a
-# refused change writes nothing. Any change to a person's rights (their group, the departments they change, an extra
+# refused change writes nothing. Any change to a person's rights (their role, the departments they change, a committee or extra
 # given or taken away), switching them off or on, a username changed or removed, and a password reset raise their
 # sign-in number `n`, so they are signed out everywhere (the design: "changing their rights signs them out everywhere at
 # once", a gain as well as a loss); a note or a first username does not. Each change is one history entry, `changes`
 # [{name, field, was, now}], never a password, recorded under who made it as they were before it (their own change may
 # end their session).
-PICK_GROUP = "Pick a group."
+PICK_GROUP = "Pick a role."
 ONLY_COMMITTEE_ADMIN = "Only the timetable committee can be admins."
 LAST_ADMIN = "{} is the last admin: make another admin first."
 EXAMS_UNTIL = "Give the last day of the exams and events access."
@@ -1708,8 +1717,8 @@ PICK_SHARED = "Pick a shared code."
 UNREAD_CHANGE = "The change could not be read. Reload the page and try again."
 FIRST_ADMIN = "Make the first admin"
 HAS_PASSWORD = "{} has a password already: they make themselves the first admin, signed in with it."
-EXTRA_LABELS = {"relief": "Relief team", "exams": "Exams and events", "admin": "Admin"}
-SIGNS_OUT = {"group", "depts", "relief", "exams", "admin", "off"}   # and a username changed or removed
+EXTRA_LABELS = {"timetable": "Timetable committee", "relief": "Relief team", "exams": "Exams and events", "admin": "Admin"}
+SIGNS_OUT = {"group", "depts", "timetable", "relief", "exams", "admin", "off"}   # and a username changed or removed
 _USERNAME = re.compile(r"[a-z0-9._-]{3,40}")
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -1774,8 +1783,8 @@ def _wanted(b, today):
         want["depts"] = got
     if "extras" in b:
         ex = b["extras"]
-        if not isinstance(ex, dict) or any(not isinstance(ex[k], bool) for k in ("relief", "admin") if k in ex): raise Refused(UNREAD_CHANGE)
-        want.update({k: ex[k] for k in ("relief", "admin") if k in ex})
+        if not isinstance(ex, dict) or any(not isinstance(ex[k], bool) for k in ("timetable", "relief", "admin") if k in ex): raise Refused(UNREAD_CHANGE)
+        want.update({k: ex[k] for k in ("timetable", "relief", "admin") if k in ex})
         if "exams" in ex: want["exams"] = _until(ex["exams"], today)
     if "username" in b: want["username"] = _username(b["username"])
     if "note" in b:
@@ -1798,9 +1807,9 @@ def _change(d, name, item, want):
         put("group", group, want["group"]); r["group"] = want["group"]
         if want["group"] in people.HEADS and not r["depts"] and "depts" not in want and item and item["depts"]:
             want["depts"] = list(item["depts"])                      # a new head changes the map for their step-4 departments
-        if want["group"] != "committee" and "admin" not in want: want["admin"] = False   # the Admin extra is the committee's
+    if want.get("timetable") is False and "admin" not in want: want["admin"] = False   # the Admin extra is the committee's
     if "depts" in want and want["depts"] != r["depts"]: put("depts", r["depts"], want["depts"]); r["depts"] = list(want["depts"])
-    for k in ("relief", "exams", "admin"):
+    for k in ("timetable", "relief", "exams", "admin"):
         if k in want and want[k] != r["extras"][k]: put(k, r["extras"][k], want[k]); r["extras"][k] = want[k]
     if "username" in want and want["username"] != r["username"]:
         put("username", r["username"], want["username"]); r["username"] = want["username"]
@@ -1812,12 +1821,12 @@ def _change(d, name, item, want):
     return out
 
 def _whole(d, touched, before):
-    """the checks of a change as a whole, on d as it leaves it: Admin only in the committee, and an admin left who can
+    """the checks of a change as a whole, on d as it leaves it: Admin only with the Timetable committee tick, and an admin left who can
     sign in (an Admin with no username or password, or switched off, keeps no one in). before: people.usable_admins
     before the change"""
     for n in touched:
         r = people.record(d, n)
-        if r["extras"]["admin"] and r["group"] != "committee": raise Refused(ONLY_COMMITTEE_ADMIN)
+        if r["extras"]["admin"] and not r["extras"]["timetable"]: raise Refused(ONLY_COMMITTEE_ADMIN)
     if not people.usable_admins(d):
         raise Refused(LAST_ADMIN.format(next((n for n in touched if n in before), before[0] if before else touched[0])))
 
@@ -1829,10 +1838,10 @@ def _admin_item(pub, data, name):
 def _said(c):
     f, was, now = c["field"], c["was"], c["now"]
     if f == "added": return "added to the staff list"
-    if f == "group": return f"group {people.LABELS.get(was, was)} → {people.LABELS.get(now, now)}"
+    if f == "group": return f"role {people.LABELS.get(was, was)} → {people.LABELS.get(now, now)}"
     if f == "depts": return "changes the map for " + (", ".join(now) or "no department")
     if f == "exams": return f"Exams and events until {_day(now)}" if now else "Exams and events taken away"
-    if f in ("relief", "admin"): return f"{EXTRA_LABELS[f]} {'given' if now else 'taken away'}"
+    if f in ("timetable", "relief", "admin"): return f"{EXTRA_LABELS[f]} {'given' if now else 'taken away'}"
     if f == "username": return f"username {now}" if now else "username and password removed"
     if f == "note": return "note changed"
     return "switched off" if now else "switched on"
@@ -1842,7 +1851,7 @@ def _what(out):
     fields = [c["field"] for c in out]
     if "added" in fields: return "add"
     if "off" in fields: return "off" if next(c for c in out if c["field"] == "off")["now"] else "on"
-    for f, what in (("group", "group"), ("relief", "extras"), ("exams", "extras"), ("admin", "extras"), ("depts", "depts"), ("username", "username")):
+    for f, what in (("group", "group"), ("timetable", "extras"), ("relief", "extras"), ("exams", "extras"), ("admin", "extras"), ("depts", "depts"), ("username", "username")):
         if f in fields: return what
     return "note"
 
@@ -2087,7 +2096,7 @@ def _field_now(d, item, name, field):
     """what the admin page's _change compares against for one field of one person"""
     r = people.record(d, name)
     if field == "group": return item["group"]
-    if field in ("relief", "exams", "admin"): return r["extras"][field]
+    if field in ("timetable", "relief", "exams", "admin"): return r["extras"][field]
     return r[field]                                   # depts, note, off
 
 def _put_back_account(unit, e):
@@ -2186,7 +2195,7 @@ def admin_people():
         if str(x.get("role") or "").strip().upper() in ("HOD", "SH") and group.get(n) == "teacher" and n not in heads: heads.append(n)
     no_dept = [p["name"] for p in ps if p["group"] in people.HEADS and not people.record(data, p["name"])["depts"]]   # they change no rows (R8)
     return jsonify(people=ps, departments=school_depts(), groups=[[k, people.LABELS[k]] for k in people.GROUPS],
-                   hints=dict(heads_on_step4=heads, no_google=[], heads_no_dept=no_dept), moved=data["moved"] if isinstance(data["moved"], list) else [],
+                   committees=[[k, label] for k, label in people.COMMITTEES], hints=dict(heads_on_step4=heads, no_google=[], heads_no_dept=no_dept), moved=data["moved"] if isinstance(data["moved"], list) else [],
                    me=who()["name"])
 
 @app.post("/api/admin/person")
@@ -2346,7 +2355,7 @@ def admin_first():
         if _taken(d, u, name): raise Refused(TAKEN)
         if people.record(d, name)["pw"] and name != me: raise Refused(HAS_PASSWORD.format(name))   # no one else's password is replaced
         item = next((p for p in people.staff(pub, d) if p["name"] == name), None)
-        out = _change(d, name, item, dict(group="committee", admin=True, username=u, off=False))
+        out = _change(d, name, item, dict(timetable=True, admin=True, username=u, off=False))   # their role stays as it is
         r = people.record(d, name)
         r.update(pw=h, must_change=False, n=r["n"] + 1)
         d["people"][name] = r
