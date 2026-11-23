@@ -4005,4 +4005,24 @@ def a_fault_after_the_plain_papers_went_in_says_what_is_in():
     same(papers_of(env, talk), [("Sec 3", "English Language G3", "Paper 1")]); same(talk.waiting, None)
 
 
+@t
+def a_chat_step_downloads_and_filters_in_the_history():
+    fresh(); no_schedules(); w_records()
+    import io, openpyxl
+    call = Script(reply(use("u1", "start_exam", dict(START_IN))), reply(say("Done.")))
+    with ai_on(call):
+        c = w_committee()
+        id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
+        answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan the mid-year exam")), 200)
+        exam = w_done(c, id)["exam"]["id"]
+        AS = "Timetable committee, with Plan with AI"
+        for q in ("", "?where=Exams%20and%20events", "?who=Timetable"):
+            r = c.get("/api/history/download" + q); same(r.status_code, 200)
+            rows = [[x.value for x in row] for row in openpyxl.load_workbook(io.BytesIO(r.data)).active.iter_rows()]
+            mine = [x for x in rows[1:] if x[2] == AS]
+            assert mine and mine[0][3] == "shared code" and mine[0][4] == "Exams and events" and mine[0][5].startswith("Mid-Year 2027: "), (q, rows[:3])
+        h = answered(c.get("/api/history?where=Exams%20and%20events"), 200)
+        assert any(x.get("exam") == exam and x["as"] == AS for x in h["entries"]), h
+    same(len(call.replies), 0)
+
 print(f"{COUNT} plan tests passed")
