@@ -1850,7 +1850,7 @@ def _history_query(args):
 
 HISTORY_DOWNLOAD_MAX = 20000
 HISTORY_MORE = "There are more entries than one download holds: pick fewer days."
-_VIA = {"password": "password", "code": "code", "shared": "shared code", "personal": "personal code", "app": "by itself", "google": "Google"}
+_VIA = {"password": "password", "code": "code", "shared": "shared code", "personal": "personal code", "app": "by itself", "google": "Google", "telegram": "Telegram"}
 
 @app.get("/api/history/download")
 @need("history")
