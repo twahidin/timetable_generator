@@ -28,7 +28,7 @@ As the lead wrote them, on 23 November 2026, to stage 4's eleven open questions 
 | 10 | Tell a person in the app that their Telegram was unlinked because the bot was blocked? | yes | Built: D |
 | 11 | The copy: anything to change? | Ok | No wording changed |
 | 12 | Follow-up: show the messages other than reliefs that could not be sent? | yes | Built: E |
-| 13 | Follow-up: Today's 12 px more under its buttons without a token? | fix next time | Left until Today is next touched |
+| 13 | Follow-up: Today's 12 px more under its buttons without a token? | fix next time | Built in the send-out, stage 1, Task 5 (d07ceec): the room is kept only while a bot is connected |
 
 Some of these are readings, in case they are not what was meant:
 - **Answer 6, "fixed for both"**, was read as: build the Next button, so that a text and a file both land on the same lesson. If

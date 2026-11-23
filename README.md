@@ -73,7 +73,8 @@ Telegram card.
   next morning message nobody on the team is pinged about a new request.
 - On **Today** a relief is approved with **Approve**, then told with **Send out** (a row's own, or **Send out {n}
   approved** at the top; on Telegram, **📤 Send out to {name}** after **Approve**). Sent out outside school hours (from
-  the earliest send-out time, 06:45, to the cut-off of a school day), it is held and goes at 06:45. A head's own choice in
+  the earliest send-out time, 06:45, to the cut-off of a school day), it is held and goes at the next school day's
+  earliest send-out time (06:45; sent out on a Friday evening, on Monday). A head's own choice in
   Plan relief for a colleague is approved and sent out when it is planned. A relief sent out says when its teacher was
   told, or that they are not on Telegram, with **Remind** beside it and **Remind all not acknowledged** at the top. After
   the cut-off Today opens on the next school day. **Weekly summary** is a new tab with any week's numbers.

@@ -205,14 +205,14 @@ bot's @name). The code works once and runs out in 15 minutes; **Get a new code**
 
 ### When messages go
 
-Three times in **Relief settings**, under **Times**, decide it. Each is a setting; the defaults are:
+These times in **Relief settings**, under **Times**, decide it. Each is a setting; the defaults are:
 
 | Setting | Default | What it does |
 |---|---|---|
 | Morning message to the relief team at | 06:30 | One message to each of the relief team on Telegram with everything waiting for today. Not on weekends or holidays. |
 | Earliest send-out to relief teachers | 06:45 | Nothing reaches a relief teacher before this time of a school day. |
 | Cut-off for the day's relief | 14:00 | After it nobody on the team is pinged about today, and Today opens on the next school day. |
-| Remind the absent teacher to set work at | 18:00 the evening before, and 07:00 on the day | Only while a lesson of that day has no work. |
+| Remind the absent teacher to set work at | 18:00 the evening before, and 07:00 on the day | Only while a lesson of that day has no work. The evening one is not sent after 22:00 of that evening. |
 
 Saving checks the order: "The morning message comes at or before the earliest send-out, and both before the cut-off."
 The old time "Fill open lessons at" is gone: every open lesson is picked at once. Its value stays in the settings file,
@@ -236,28 +236,44 @@ unread.
   after the morning message time and before the cut-off is the late request, once its picks are in. A request to change,
   and the "not yet acknowledged" report, still reach the team after the cut-off for a lesson of today until it starts.
   The team's copy of "Cancelled" and the blocked-bot alert wait for the next morning time.
+- **The "not yet acknowledged" report** also lists, under "Approved, not sent out ({n}):", each relief of today that is
+  approved and not sent out and whose lesson has not started: nobody has told that teacher yet. A morning with only such
+  a relief still gets its report, and no all clear goes while one is left. A relief sent out and held is not listed: it
+  goes by itself. **Remind them again** reminds only those not acknowledged.
+- **After the cut-off**, when Today shows the next school day and today still has lessons to come that are open,
+  waiting for approval, or approved and not sent out, the page says "Today still has {n} to arrange: open Today." above
+  the rows. Nobody is pinged for them.
 - **The teacher who is away** is told at once, as before: "Relief planned for you", "Who covers you" when a relief
-  teacher acknowledges (at whatever hour that is), and the two reminders to set work at 18:00 and 07:00, on purpose.
+  teacher acknowledges (at whatever hour that is), and the two reminders to set work at 18:00 and 07:00, on purpose. The
+  evening one is made only until 22:00 (until midnight when its time is set at or after 22:00): after an outage it is not
+  sent in the night, and the 07:00 one goes.
 - **Files are no longer sent on Telegram.** The relief message says how many there are and has **Open in the app**; they
   are downloaded in **Reliefs I'm covering**. A message queued with files before this version still sends them.
 
 **At the deploy of this version (relief send-out, stage 1), nothing is to be done.** No variable, no step, no change to
 the volume. What is already in the data:
-- A relief approved before the deploy counts as sent out at its approval: nobody is told of it again, it stays in
-  Reliefs I'm covering, and no 24-hours-before or morning reminder is made of it.
+- A relief approved before the deploy counts as sent out at its approval: a relief teacher already told of it is not
+  told again, it stays in Reliefs I'm covering, and no 24-hours-before or morning reminder is made of it. One approved
+  and never told, because no bot was connected then, goes at the first school hours after connecting.
 - A relief planned by a head before the deploy, still waiting for the team, keeps waiting for the team's Approve and
   Send out.
 - A ping of the kind before ("Relief asked for today") still waiting to go is dropped. If such a ping went on the day of
   the deploy, the same absence can be pinged once more as a late request.
 - If the bot is already connected, the first minute after the deploy sends "Covered" to the teacher who is away for each
-  lesson acknowledged since the bot was connected and not yet over.
+  lesson acknowledged since the bot was connected and not yet over, and "Please set work" for each reminder to set work
+  whose time it is then (a deploy between 18:00 and 22:00 sends tomorrow's evening ones at once).
 - The settings keep their values; the three new times and the two work times start at their defaults.
 
-**Rolling back** to the version before: Approve tells the relief teacher again at once, at any hour. Every relief that is
-approved and not sent out, or sent out and held, is then sent at once, whatever the time: roll back in school hours,
-or send out or change those first. Messages of the new kinds still waiting (the morning message, a late request, a
-reminder of a relief, Relief needed again, Who covers you, the alert, Please set work) then go whenever they are sent. A
-Relief settings save made while rolled back drops the new times; forward again, they are at their defaults.
+**Rolling back** to the version before. Worked out from the older code, not tried. The older version tells every
+approved relief at once, at any hour, and does not read the sent-out mark: sending out or changing first stops nothing.
+So roll back between the earliest send-out time (06:45) and the cut-off (14:00) of a school day, because every approved
+relief, sent out or not, is then told at once. Messages of the new kinds still queued (the morning message, a late
+request, a reminder of a relief, Relief needed again, Who covers you, the alert, Please set work) go when they are
+sent. A Relief settings save made while rolled back drops the new times; forward again, they are at their defaults.
+Going forward again: a relief the older version told reads "Approved · not sent out" on Today, and is not in that
+teacher's Reliefs I'm covering, until someone presses **Send out**; that press sends no second message. A takeover done
+by the older version (a teacher's own absence taking over the lesson of an exam's or event's backup) drops the mark, so a cover it moved counts as
+sent out.
 
 ### Turning it off
 
