@@ -39,8 +39,14 @@ Relief needed again, to each of the team, once, when an approved relief went bac
 then (cover.back_to_open, cover.was_away) and the cover is open or waiting again: with its new pick at once, open five minutes
 on (NEW_WAIT); in the team's window alone and claimed once as late is; never of a lesson of today found before that day's
 morning time (the morning message counts it). The teacher who was away hears gone, as anyone told of a relief no longer theirs.
+covered:{absent}:{ckey}:{ack at}, Who covers you, to the teacher who is away, once an acknowledgement of a lesson of theirs: it names
+the relief teacher, whom they may see in the app from then on; never of a backup (exams), nor when the teacher who is away is the
+relief teacher. A relief moved and acknowledged by another is told anew; one moved before it went is dropped.
 
-Only people who can be reached are told. planned, officer, kept and cancelled are for what was done since the bot was
+The relief message carries no files: it says how many there are and has Open in the app, and they are downloaded in Reliefs I'm
+covering (outbox still sends those of a message queued with files before this was so).
+
+Only people who can be reached are told. planned, officer, kept, covered and cancelled are for what was done since the bot was
 connected; nothing is said of a lesson that is over or an absence that is past. No message carries the typed reason, the
 remarks or a pick's history; the officer's alone carries the kind of reason, and the team's alone a request's words and its
 new pick's reason.
@@ -110,7 +116,7 @@ NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 NOT_TOLD = "{officer} is not on Telegram: please tell them yourself."                 # said to a teacher (the form, /relief) when their reporting officer is not on Telegram
 OPEN_TODAY = "Open relief today"                # the button to Today's page (relief/report.py's too)
-TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "needed:", "late:")      # the keys due must know of
+TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "covered:", "needed:", "late:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
 WAITING = ("queued", "sending")                 # ... in which they will be by itself, or are now
 LIVE = (*SENT, *WAITING)
@@ -126,7 +132,8 @@ _log = logging.getLogger("relief.telegram")
 
 # ---- the texts (the plan's messages)
 def relief_text(day, lesson, periods, time, room, absent, work):
-    """work: the lesson's dict(text, link, files); with a link or files and no text, it is not said that none is set"""
+    """work: the lesson's dict(text, link, files); with a link or files and no text, it is not said that none is set. Files are not
+    sent on Telegram: they are downloaded in Reliefs I'm covering"""
     text, link, files = work.get("text"), work.get("link"), work.get("files")
     lines = [f"🔔 Relief for you · {day}", " · ".join(v for v in (lesson, periods, time) if v)]
     if room: lines.append(f"Room {room}")
@@ -134,8 +141,13 @@ def relief_text(day, lesson, periods, time, room, absent, work):
     if text: lines.append(f"Work from {absent}: {text}")
     elif not (link or files): lines.append(NO_WORK)
     if link: lines.append(f"Link: {link}")
-    if files: lines.append(f"Files: {len(files)}, sent after this message.")
+    if files: lines.append(f"Files: {len(files)}. Open the app to download them.")
     return "\n".join(lines)
+
+
+def covered_text(day, lesson, periods, start, who):
+    """Who covers you, to the teacher who is away: who has acknowledged the relief of that lesson"""
+    return f"✅ Covered · {day}\n{lesson} · {periods}{_from(start)}\n{who} has acknowledged. You can reach them if you need to."
 
 
 def repeat_text(day, lesson, periods, time, room, absent, today):
@@ -389,7 +401,7 @@ def _stops(w, key, ref, r, x, c):
     if why:
         if not n or _said_on(w, key, n - 1): yield _item(f"stopped:{key}:{n}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
     elif n and _on_again(w.pub, w.settings.get("calendar") or {}, ref, r, x, c):
-        yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"]), ref=ref_)
+        yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"], w.base), ref=ref_)
 
 
 def _absence(w, r):
@@ -467,27 +479,40 @@ def _of_cover(w, r, x, c, ckey):
     s = _cover.state(r, x, c)
     if s == "approved" and _cover.reached(r, x, c, w.now, w.settings, w.pub): yield from _relief(w, r, x, c, ckey)   # made once it goes, never early
     if s in ("approved", "acknowledged"): yield from _repeats(w, r, x, c, ckey)
+    if s == "acknowledged": yield from _covered(w, r, x, c, ckey)
     if s == "change": yield from _ask(w, r, x, c, ckey)
     if s in ("open", "waiting"): yield from _needed(w, r, x, c, ckey)
     yield from _kept(w, r, x, c, ckey)
 
 
-def _answers(r, x, ckey, who):
-    """the buttons of a relief"""
+def _answers(r, x, ckey, who, base):
+    """the buttons of a relief: its two answers, and Open in the app to Reliefs I'm covering (its work, its files) at base, the app's
+    address (outbox leaves it out unless that is https)"""
     press = dict(id=r["id"], ckey=ckey, who=who, extra=dict(absent=r["teacher"], date=x["date"]))
-    return [[dict(press, text=ACK, what="ack"), dict(press, text=CHANGE, what="change")]]
+    return [[dict(press, text=ACK, what="ack"), dict(press, text=CHANGE, what="change")], [dict(text=OPEN, url=base + "/relief#covering")]]
 
 
 def _relief(w, r, x, c, ckey):
+    """the relief message, with its buttons (_answers); its files stay in the app (none go with it)"""
     who, at = c["relief"], c["approved"].get("at")
     if who not in w.reach or not at: return
     lesson, periods, day, (start, end) = words.class_group(x), words.periods_text(c), words.day(x["date"]), words.times(w.pub, x, c)
     ref = dict(id=r["id"], absent=r["teacher"], ckey=ckey, approved_at=at, who=who, lesson=lesson, periods=periods, start=start, day=day,
                date=x["date"], ends=_ends(x, c, w.bnds).isoformat())
-    work = x.get("work") or {}
     yield _item(_relief_key_for(w.told, ref), who, "relief",
-                relief_text(day, lesson, periods, f"{start}–{end}" if start and end else "", x.get("room"), r["teacher"], work),
-                _answers(r, x, ckey, who), [dict(id=r["id"], file=f["id"], name=f["name"]) for f in work.get("files") or []], ref)
+                relief_text(day, lesson, periods, f"{start}–{end}" if start and end else "", x.get("room"), r["teacher"], x.get("work") or {}),
+                _answers(r, x, ckey, who, w.base), [], ref)
+
+
+def _covered(w, r, x, c, ckey):
+    """Who covers you, to the teacher who is away, once an acknowledgement (its own key: a relief moved and acknowledged anew is
+    told anew): acknowledged since the bot was connected, never of a backup (exams: the person is on duty in school), nor when the
+    teacher who is away is the relief teacher. The lesson is not over (due's covers)"""
+    ack, who = c.get("ack") or {}, c.get("relief")
+    if r.get("exams") or r["teacher"] not in w.reach or not who or who == r["teacher"] or not _since(w, ack.get("at")): return
+    ref = dict(id=r["id"], absent=r["teacher"], ckey=ckey, who=who, at=ack["at"], date=x["date"], ends=_ends(x, c, w.bnds).isoformat())
+    yield _item(f"covered:{r['teacher']}:{ckey}:{ack['at']}", r["teacher"], "covered",
+                covered_text(words.day(x["date"]), words.class_group(x), words.periods_text(c), words.times(w.pub, x, c)[0], who), ref=ref)
 
 
 def _repeats(w, r, x, c, ckey):
@@ -807,6 +832,7 @@ ANY_HOUR = ("planned",                          # to the absent teacher: they ne
             "morning",                          # the morning message: made only from the morning time, claimed once a day, dropped at the cut-off
             "late",                             # the late request keeps the team's window by its own rule (_late, _late_true): it is never made again once
                                                 # dropped, so it must not be dropped as GATES' kinds are while nothing is published (a publish swaps folders)
+            "covered",                          # Who covers you: made at an acknowledgement, which falls in the day (call 13)
             "needed",                           # Relief needed again: as late, the team's window by its own rule (_needed, _needed_true), never made again
             "new")                              # the ping the late request replaced: never made, and dropped by its check if still queued
 
@@ -935,6 +961,16 @@ def _cancelled_true(ref, name):
     return not ref.get("team") or _on_team(name)
 
 
+def _covered_true(ref, name):
+    """the relief is acknowledged still by the same teacher, at that very acknowledgement (one taken back by a change since is not
+    so), its lesson not over nor stopped, not a backup, and its teacher not the one who is away"""
+    got = None if _over(ref) else _now(ref)
+    if got is None: return False
+    r, x, c = got
+    if r.get("exams") or c.get("relief") != ref["who"] or ref["who"] == r["teacher"] or _cover.state(r, x, c) != "acknowledged": return False
+    return (c.get("ack") or {}).get("at") == ref["at"] and _stands_now(x)
+
+
 def _late_true(ref, name):
     """the absence is not cancelled, its day is today still, the team may be pinged now (_team_may: one that comes due after the
     cut-off is dropped, and its key stays claimed), the person is on the team still, and a lesson of it today waits for the team
@@ -966,7 +1002,7 @@ def _needed_true(ref, name):
 # true (relief/report.py puts report, clear and weekly here, relief/morning.py morning)
 CHECKS = dict(relief=_relief_true, repeat=_repeat_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
               askpick=_ask_true, planned=lambda ref, name: _absence_now(ref) is not None, remind=_remind_true,
-              officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true, late=_late_true, needed=_needed_true,
+              officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true, late=_late_true, needed=_needed_true, covered=_covered_true,
               new=lambda ref, name: False)            # new: the ping the late request replaced; one still queued from before is dropped
 
 

@@ -2179,7 +2179,7 @@ CANCELLED_BY_APP = "❌ Cancelled: Ms Evelyn Koh's absence on Tue 13 Oct. Its re
 
 @t
 def every_text_is_the_plans():
-    plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
+    plan = "".join(open(os.path.join(ROOT, "docs", "superpowers", "plans", f), encoding="utf-8").read() for f in ("2026-11-22-relief-stage-4-telegram.md", "2026-11-24-relief-send-out-stage-1.md"))
     pick = dict(who="{name}", reason="{pick reason}")
     got = TE.relief_text("{day}", "{lesson}", "{periods}", "{time}", "{room}", "{absent}", dict(text="{text}", link="{link}", files=[1, 2])).replace("Files: 2", "Files: {n}")
     got += "\n" + TE.planned_text("{days}", "{whole day or periods}", "{by}", 4).replace("4 lessons", "{n} lessons") + "\n" + TE.remind_text("{days}")
@@ -2194,9 +2194,9 @@ def every_text_is_the_plans():
     for label in ("✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"): assert f"`{label}`" in plan
     # whole, in order, with made-up words
     assert TE.relief_text("Tue 13 Oct", "2B Science", "P9–P11", "10:40–11:40", "2-06", EVE, dict(text="Notes, chapter 6.", link="https://x.org/a", files=[dict(id="a"), dict(id="b")])) == \
-        "🔔 Relief for you · Tue 13 Oct\n2B Science · P9–P11 · 10:40–11:40\nRoom 2-06\nFor Ms Evelyn Koh\nWork from Ms Evelyn Koh: Notes, chapter 6.\nLink: https://x.org/a\nFiles: 2, sent after this message."
+        "🔔 Relief for you · Tue 13 Oct\n2B Science · P9–P11 · 10:40–11:40\nRoom 2-06\nFor Ms Evelyn Koh\nWork from Ms Evelyn Koh: Notes, chapter 6.\nLink: https://x.org/a\nFiles: 2. Open the app to download them."
     assert TE.relief_text("Tue 13 Oct", "2B Science", "P9", "", "", EVE, {}) == "🔔 Relief for you · Tue 13 Oct\n2B Science · P9\nFor Ms Evelyn Koh\nNo work set yet: look in Reliefs I'm covering."
-    for work, last in ((dict(text="", link="https://x.org/a", files=[]), ["Link: https://x.org/a"]), (dict(files=[1]), ["Files: 1, sent after this message."])):   # work, with nothing typed: it is not said that none is set
+    for work, last in ((dict(text="", link="https://x.org/a", files=[]), ["Link: https://x.org/a"]), (dict(files=[1]), ["Files: 1. Open the app to download them."])):   # work, with nothing typed: it is not said that none is set
         assert TE.relief_text("d", "l", "P1", "", "", EVE, work).splitlines()[2:] == ["For Ms Evelyn Koh"] + last
     assert TE.planned_text("Tue 13 Oct", "whole day", HUGO, 2) == PLANNED_EVE and "\n1 lesson will be covered.\n" in TE.planned_text("d", "whole day", HUGO, 1)
     assert TE.remind_text("Tue 13 Oct") == REMIND_EVE and TE.officer_text(EVE, "Tue 13 Oct", "whole day", "Medical") == OFFICER_EVE
@@ -2227,7 +2227,7 @@ def the_module_stands_alone():
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "repeat", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "late", "morning", "report", "clear", "weekly", "needed"} == set(TE.CHECKS)
+    assert {"relief", "repeat", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "late", "morning", "report", "clear", "weekly", "needed", "covered"} == set(TE.CHECKS)
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -2459,7 +2459,8 @@ def approve_queues_the_relief_once():
         r, = outs(); ref = json.loads(r["ref"])
         assert r["key"] == f"relief:{EVE}:{K5}:2026-10-12T09:00:00+08:00" and (r["name"], r["kind"], r["text"], r["state"]) == (SAM, "relief", RELIEF_K5, "queued"), r
         assert json.loads(r["buttons"]) == [[dict(text="✅ Acknowledge", what="ack", id=i, ckey=K5, who=SAM, extra=dict(absent=EVE, date="2026-10-13")),
-                                            dict(text="↩ Request to change", what="change", id=i, ckey=K5, who=SAM, extra=dict(absent=EVE, date="2026-10-13"))]]
+                                            dict(text="↩ Request to change", what="change", id=i, ckey=K5, who=SAM, extra=dict(absent=EVE, date="2026-10-13"))],
+                                           [dict(text="Open in the app", url=BASE + "/relief#covering")]]
         assert ref == dict(id=i, absent=EVE, ckey=K5, approved_at="2026-10-12T09:00:00+08:00", who=SAM, lesson="1A, 1B Science (G2)", periods="P6–P7", start="10:30",
                            day="Tue 13 Oct", date="2026-10-13", ends="2026-10-13T11:30:00+08:00"), ref
         assert OB._wake.is_set() and json.loads(r["files"]) == []
@@ -2487,9 +2488,9 @@ def the_work_and_its_files_go_with_the_relief():
         absences.set_work(i, K2, dict(text="Notes, chapter 6.", link="https://example.org/a", files=[dict(id=f["id"], name="Sheet 4.pdf")], known=[]), EVE)
         give(i, K2, SAM); assert swept() == 1
         r, = outs()
-        assert r["text"] == "🔔 Relief for you · Tue 13 Oct\n1C Science · P3–P5 · 09:00–10:30\nFor Ms Evelyn Koh\nWork from Ms Evelyn Koh: Notes, chapter 6.\nLink: https://example.org/a\nFiles: 1, sent after this message."
-        assert json.loads(r["files"]) == [dict(id=i, file=f["id"], name="Sheet 4.pdf")] and r["state"] == "sent" and r["files_failed"] == 0
-        assert [m for m, p in tg.PRACTICE_LOG if m.startswith("send")] == ["sendMessage", "sendDocument"]
+        assert r["text"] == "🔔 Relief for you · Tue 13 Oct\n1C Science · P3–P5 · 09:00–10:30\nFor Ms Evelyn Koh\nWork from Ms Evelyn Koh: Notes, chapter 6.\nLink: https://example.org/a\nFiles: 1. Open the app to download them."
+        assert json.loads(r["files"]) == [] and r["state"] == "sent" and r["files_failed"] == 0, "the files stay in the app"
+        assert [m for m, p in tg.PRACTICE_LOG if m.startswith("send")] == ["sendMessage"]
         FI.delete(i, f["id"])
         # a part of a split lesson: its own periods and times
         j = absent(dates=["2026-10-16"]); CV.split(j, KF, 1, TEAM); give(j, KF + "#0", SAM); swept()
@@ -3086,7 +3087,7 @@ def a_person_who_links_later_gets_what_is_still_to_come():
         at("13:00"); assert swept() == 0
         links.link(SAM, CHATS[SAM], None); swept(); assert [x.splitlines()[0][-6:] for x in said(SAM)] == ["13 Oct", "16 Oct"] and said(SAM)[0] == RELIEF_K5, "in time order; one acknowledged in the app is not asked again"
         at("15:00"); links.link(EVE, CHATS[EVE], None); links.link(ROSA, CHATS[ROSA], None); swept()
-        assert said(EVE) == [PLANNED_EVE, REMIND_EVE] and said(ROSA) == [OFFICER_EVE, "Ms Evelyn Koh is away on Fri 16 Oct (whole day): Medical.\nRelief is being arranged."], (said(EVE), said(ROSA))
+        assert said(EVE) == [PLANNED_EVE, REMIND_EVE, "✅ Covered · Tue 13 Oct\n1C Science · P3–P5 (09:00)\nMr Sam Tan has acknowledged. You can reach them if you need to."] and said(ROSA) == [OFFICER_EVE, "Ms Evelyn Koh is away on Fri 16 Oct (whole day): Medical.\nRelief is being arranged."], (said(EVE), said(ROSA))
         links.link(SAM, 900, None); assert swept() == 0, "another phone: nothing is sent twice"
         # moved while they had no Telegram: told when they have one again
         links.unlink(SAM); at("06:45", 13); give(i, K5, MAYA); assert swept() == 0; links.link(SAM, CHATS[SAM], None); swept(); assert said(SAM)[-1] == MOVED_K5
@@ -3180,7 +3181,7 @@ def unreadable():
 def exam_links(): return RL.Links.load(SCHOOL, TERM)      # what a sweep reads, and gives due
 def relief_buttons(i, ckey=K5, who_=SAM, date="2026-10-13"):
     press = dict(id=i, ckey=ckey, who=who_, extra=dict(absent=EVE, date=date))
-    return [[dict(press, text="✅ Acknowledge", what="ack"), dict(press, text="↩ Request to change", what="change")]]
+    return [[dict(press, text="✅ Acknowledge", what="ack"), dict(press, text="↩ Request to change", what="change")], [dict(text="Open in the app", url=BASE + "/relief#covering")]]
 def told_relief(who_=SAM):
     """the relief of K5, approved to who_ and told -> (the absence's id, its key)"""
     i = absent(by=HUGO); give(i, K5, who_); swept(); return i, f"relief:{EVE}:{K5}:{approved_at(i, K5)}"
@@ -5119,7 +5120,7 @@ def who_is_not_reminded_and_why():
 def a_reminder_is_the_relief_again_and_no_relief_of_its_own():
     with school(SAM, MAYA, TEAM):
         i = today_reliefs((K5, SAM)); change_record(i, lambda r: [x.update(work=dict(text="Read p.4", link="", files=[dict(id="f1", name="a.pdf", size=1)])) for x in r["lessons"] if x["key"] == K5]); at("07:00", 13); remind(asks(i, K5)); r, = [x for x in outs("relief") if x["key"].endswith(":r1")]
-        assert r["text"].endswith("\nWork from Ms Evelyn Koh: Read p.4\nFiles: 1, sent after this message.") and json.loads(r["files"]) == [dict(id=i, file="f1", name="a.pdf")], "the work set since"
+        assert r["text"].endswith("\nWork from Ms Evelyn Koh: Read p.4\nFiles: 1. Open the app to download them.") and json.loads(r["files"]) == [], "the work set since; its files stay in the app"
         put(r["key"], state="sent", sent_at="2026-10-13T07:00:00+08:00"); assert TE.sweep() == 1 and told_of("late") == [("late", TEAM)], "the team's late request alone"; at("07:10", 13); give(i, K5, MAYA); swept(); swept()
         assert told_of("moved") == [("moved", SAM)] and [x["key"] for x in outs("relief", MAYA)] == [relief_key_of(i, K5)], "one moved, and her own message"
         absences.cancel(i, "Better", HUGO); swept(); assert told_of("gone") == [("gone", MAYA)]
@@ -5686,7 +5687,7 @@ def a_lesson_stopped_when_its_absence_was_sent_is_told_once_it_is_on():
             swept(); assert ticked("07:00") == keyed("0700", LEE, TEAM) and "Science (G2)" not in texts_to()[-1]; send(); CV.acknowledge(i, K2, MAYA); assert ticked("07:15") == cleared(1, LEE, TEAM) and texts_to()[-1].endswith("The 1 relief for today is acknowledged."); send()
             assert remind(asks(i, K5))["sent"] == 0 and said(SAM) == [] and {k for k, n in told_of()} <= {"planned", "remind", "relief", "report", "clear"}, told_of()
             # withdrawn: it needs a relief, which is told as any other
-            at("07:20", 13); withdraw(e); assert swept() == 0 and row()["state"] == "open" and FL.run(ids=[i])["picked"] == 1 and swept() == 0 and said(SAM) == [], "a pick is nobody's message"
+            at("07:20", 13); withdraw(e); assert swept() == 1 and told_of("covered") == [("covered", EVE)] and row()["state"] == "open" and FL.run(ids=[i])["picked"] == 1 and swept() == 0 and said(SAM) == [], "a pick is nobody's message"
             on_cover(TEAM, i, K5, "approve", dict(who=SAM)); on_cover(TEAM, i, K5, "send-out", dict(who=SAM)); send(); assert said(SAM) == [RELIEF_K5] and row()["told"] == dict(state="sent", at=clock.now) and not told_of("again")
             assert ticked("07:30") == keyed("0730", LEE, TEAM) and texts_to()[-1] == head("07:30", 1) + SAM_LINE + "sent 07:20" and press(SAM, "ack") == ("✅ Acknowledged 07:30.", False)
             again_on(e); swept(); assert said(SAM)[1:] == [STOPPED_K5] and row()["told"] is None
@@ -6229,7 +6230,7 @@ SET_ROWS, LAST_SET_ROWS = [["Next"], ["Later for all the rest"]], [["Next"]]
 OPEN_MINE = [["Open in the app"]]
 LINE = "a line"
 
-def sent_text(n, m, tail="Ms Rosa Ng will be told."): return f"✅ Sent to the relief team: {n}, {m}. {tail}"
+def sent_text(n, m, tail=""): return f"✅ Sent to the relief team: {n}, {m}." + (f" {tail}" if tail else "")      # nothing is said of an officer on Telegram
 def keyboard(markup):
     """what a message offers: the rows of its buttons' labels, LINE (the line opens for the answer), or None"""
     return None if not markup else LINE if "force_reply" in markup else [[b["text"] for b in row] for row in markup["inline_keyboard"]]
@@ -7593,7 +7594,7 @@ def the_settings_say_what_could_not_be_sent_since_monday():
         assert u == dict(failed=3, unsure=1, since="2026-10-12", more=0, items=[
             dict(what="Relief planned", name=EVE, at="2026-10-13T07:10:00+08:00", state="failed"), dict(what="To the reporting officer", name=ROSA, at="2026-10-12T15:00:00+08:00", state="unsure"),
             dict(what="Weekly summary", name=TEAM, at="2026-10-12T15:00:00+08:00", state="failed"), dict(what="Message", name=ROSA, at="2026-10-12T09:00:00+08:00", state="failed")]), u
-        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "late", "morning", "repeat", "needed"} and tgweb.UNSENT["needed"] == "Relief needed again" and tgweb.UNSENT["late"] == "Late request for today" and tgweb.UNSENT["morning"] == "Morning message"
+        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "late", "morning", "repeat", "needed", "covered"} and tgweb.UNSENT["covered"] == "Who covers you" and tgweb.UNSENT["needed"] == "Relief needed again" and tgweb.UNSENT["late"] == "Late request for today" and tgweb.UNSENT["morning"] == "Morning message"
         call(EVE, "get", ADMIN, code=401)                                                  # need("relief.save"): as before
 
 @t
@@ -8886,6 +8887,78 @@ def a_relief_asked_to_change_whose_teacher_is_away_goes_back_to_open_and_stays_t
         assert [(h["what"], h["who"], h["by"]) for h in c["history"][-3:-1]] == [("dropped", SAM, "app"), ("dropped", MAYA, "app")], "both written down as dropped"
         picked = c["relief"]; absences.cancel(s, "Better", SAM); FL.run(); swept()
         assert covered(i, K5)[2]["relief"] == picked and CV.state(*covered(i, K5)) == "waiting", "the absence cancelled: the old relief does not come back"
+
+# ---- Send-out, Task 11: by link, and who covers you ----
+COVERED_K5 = "✅ Covered · Tue 13 Oct\n1A, 1B Science (G2) · P6–P7 (10:30)\nMr Sam Tan has acknowledged. You can reach them if you need to."
+
+@t
+def files_stay_in_the_app():
+    with school(SAM):
+        i = absent(by=HUGO); f = FI.save(i, "Sheet 4.pdf", b"made-up"); absences.set_work(i, K2, dict(text="Notes.", link="", files=[dict(id=f["id"], name="Sheet 4.pdf")], known=[]), EVE)
+        give(i, K2, SAM); swept(); r, = outs("relief")
+        assert r["text"].endswith("\nFiles: 1. Open the app to download them.") and json.loads(r["files"]) == [] and calls("sendDocument") == []
+        assert buttons_of(r)[-1] == [dict(text="Open in the app", url=BASE + "/relief#covering")]
+
+@t
+def the_absent_teacher_hears_who_covers_each_lesson():
+    with school(EVE, SAM, MAYA):
+        i = absent(); give(i, K5, SAM); give(i, K2, MAYA); swept(); assert told_of("covered") == []
+        on_cover(SAM, i, K5, "acknowledge"); swept(); assert said(EVE)[-1] == COVERED_K5 and told_of("covered") == [("covered", EVE)]
+        on_cover(MAYA, i, K2, "acknowledge"); swept(); assert len(told_of("covered")) == 2, "one a lesson"
+    with school(EVE, SAM):
+        j = absent(); change_record(j, lambda r: r.update(exams=dict(id="made-up", kind="exam"))); give(j, K5, SAM); on_cover(SAM, j, K5, "acknowledge"); swept()
+        assert told_of("covered") == [], "a backup: the person is on duty in school"
+
+@t
+def relief_says_nothing_of_who_will_be_told():
+    assert "will be told" not in AK.SENT and not hasattr(AK, "TOLD") and AK.NOT_TOLD == TE.NOT_TOLD
+
+@t
+def the_open_in_the_app_button_is_never_a_link_that_is_not_https():
+    with school(SAM, base="http://relief.example.org"):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); p, = calls("sendMessage")
+        assert p["text"] == RELIEF_K5 and [[b["text"] for b in row] for row in p["reply_markup"]["inline_keyboard"]] == [["✅ Acknowledge", "↩ Request to change"]], p
+    with school(SAM):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); p, = calls("sendMessage")
+        assert p["reply_markup"]["inline_keyboard"][-1] == [dict(text="Open in the app", url=BASE + "/relief#covering")] and "Files" not in p["text"], "no files: no Files line"
+
+@t
+def who_covers_you_goes_once_to_the_absent_teacher_after_that_acknowledgement():
+    with school(EVE, SAM, MAYA, HUGO, TEAM):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); assert told_of("covered") == [] and COVERED_K5 not in said(EVE), "not before the acknowledgement"
+        on_cover(SAM, i, K5, "acknowledge"); swept(); swept(); on_cover(SAM, i, K5, "acknowledge"); swept()
+        r, = outs("covered"); ack = covered(i, K5)[2]["ack"]["at"]
+        assert (r["key"], r["name"], r["state"], r["text"]) == (f"covered:{EVE}:{K5}:{ack}", EVE, "sent", COVERED_K5) and buttons_of(r) == [], "once, to the teacher who is away"
+        assert COVERED_K5 not in said(HUGO) + said(TEAM) + said(MAYA), "not to the head who planned it, nor anyone else"
+        assert json.loads(r["ref"]) == dict(id=i, absent=EVE, ckey=K5, who=SAM, at=ack, date="2026-10-13", ends="2026-10-13T11:30:00+08:00")
+        at("09:10"); give(i, K5, MAYA); swept(); assert len(outs("covered")) == 1, "moved: nothing until the new one acknowledges"
+        on_cover(MAYA, i, K5, "acknowledge"); swept(); assert said(EVE)[-1] == COVERED_K5.replace(SAM, MAYA) and len(outs("covered", EVE)) == 2, "told of the new one"
+        assert "covered" in TE.ANY_HOUR and "covered" not in TE.GATES and TE.CHECKS["covered"] is TE._covered_true and "covered:" in TE.TOLD
+
+@t
+def who_covers_you_is_not_said_when_it_is_not_so():
+    with school(EVE, SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); CV.acknowledge(i, K5, SAM); TE.sweep(); r, = outs("covered")
+        item_ = lambda: dict(r, ref=json.loads(r["ref"]))
+        at("22:00"); assert TE.still_true(item_()) is True, "at any hour: an acknowledgement falls in the day"
+        at("09:05"); give(i, K5, MAYA); assert TE.still_true(item_()) is False and send() == 0 and outs("covered")[0]["state"] == "dropped" and COVERED_K5 not in said(EVE), "taken back before it went"
+        CV.acknowledge(i, K5, MAYA); TE.sweep(); r, = outs("covered", EVE)[1:]; at("11:30", 13); assert TE.still_true(item_()) is False and send() == 0, "the lesson is over"
+        at("10:00", 13); assert TE.still_true(item_()) is True
+        change_record(i, lambda rec: next(x for x in rec["lessons"] if x["key"] == K5).update(relief=EVE)); assert TE.still_true(item_()) is False and [x for x in dues() if x["kind"] == "covered"] == [], "the absent teacher is the relief teacher"
+    with school(EVE, SAM):
+        i = absent(); give(i, K2, SAM); CV.acknowledge(i, K2, SAM); at("10:30", 13); swept(); assert told_of("covered") == [], "the lesson is over"
+    with school(EVE, SAM, since="2026-10-12T10:00:00+08:00"):
+        i = absent(); give(i, K5, SAM); CV.acknowledge(i, K5, SAM); at("10:00"); swept(); assert told_of("covered") == [], "acknowledged before the bot was connected"
+    with school(EVE, SAM):
+        i = absent(); give(i, K5, SAM); CV.acknowledge(i, K5, SAM); TE.sweep(); r, = outs("covered")
+        change_record(i, lambda rec: rec.update(exams=dict(id="made-up", kind="exam"))); assert TE.still_true(dict(r, ref=json.loads(r["ref"]))) is False, "a backup"
+    with school(EVE, SAM, MAYA):
+        i = absent(); give(i, K5, SAM); CV.acknowledge(i, K5, SAM); TE.sweep(); at("09:05"); give(i, K5, MAYA); at("09:10"); give(i, K5, SAM); CV.acknowledge(i, K5, SAM); TE.sweep(); send()
+        assert [x["state"] for x in outs("covered")] == ["dropped", "sent"] and said(EVE).count(COVERED_K5) == 1, "an acknowledgement taken back and made again: the new one alone"
+
+@t
+def relief_says_the_officer_is_told_by_saying_nothing():
+    assert AK.SENT == "✅ Sent to the relief team: {n}, {work}.{officer}" and sent_text("1 lesson", "no work set yet") == "✅ Sent to the relief team: 1 lesson, no work set yet."
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

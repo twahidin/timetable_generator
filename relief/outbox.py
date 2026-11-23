@@ -34,8 +34,9 @@ and kept with the item, so every try carries the same ones; its row in buttons i
 for BUTTON_DAYS from when the message was queued. A button that opens an address is left out unless it is https (Telegram
 refuses others). keep_buttons does the same for buttons put on a message already sent.
 
-Files follow the message once it is sent, each by sendDocument, to the same chat while it is still that person's. files_failed
-counts those that have not gone: all of them when the message goes, one less as each goes, so a restart in between leaves the
+Files follow the message once it is sent, each by sendDocument, to the same chat while it is still that person's (only a
+message queued with files has any: the relief message is queued with none, its files are downloaded in the app, relief/tell.py;
+one queued before that still has them). files_failed counts those that have not gone: all of them when the message goes, one less as each goes, so a restart in between leaves the
 truth. A file "slow" (a pause of FILE_SLOW seconds at most, waited for at once) or "network" is tried FILE_TRIES times in all;
 after one that is "unsure", or a longer pause, the rest of that message's files are not tried. The message stays sent.
 
