@@ -14,6 +14,7 @@ MAX_NODES = 250      # the most search steps (lists judged) for one warning
 MAX_KEPT = 40        # the timetables, each with its index, kept while looking
 CAND_LESSONS = 4     # the lessons tried for a change
 CAND_SLOTS = 8       # the places tried for a lesson
+FAR_SLOTS = 12       # the places on other days tried for it besides, as the last resort
 TAKEN_SLOTS = 6      # the places in use tried for a missing lesson when none is free
 BUDGET_S = 30.0      # the most seconds for a whole re-fit
 
@@ -98,9 +99,7 @@ def _taken(m, spec, days, pool, ks, n, slots, c, held, own):
     place take the turn of another); a place that meets a lesson of the key which is not in the way of the add is left out"""
     out, b = [], c["busy"]
     for s in sorted(slots, key=lambda s: bool(_meets(own, s["d"], s["p"], n))):
-
         if len(out) == TAKEN_SLOTS: break
-
         if s["state"] != "no" or any(x["d"] == s["d"] and x["p"] <= s["p"] and s["p"] + n <= x["p"] + x["n"] for x in own): continue
         f = dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=""); row, there = [], set(); fixes.apply_one(row, f, spec, days, new_id=c["next_id"])
         while (y := b.blocker(row, s["d"], s["p"], n, ignore=there)) is not None: there.add(y)
@@ -174,30 +173,29 @@ def barred(m, spec, days, lesson_id, d, pool, memo=None):
     if memo is not None: memo[key] = out
     return out
 
-def day_moves(m, spec, days, lesson_id, ctx, memo, moved, limit=CAND_SLOTS):
+def day_moves(m, spec, days, lesson_id, ctx, memo, moved, limit=CAND_SLOTS, far=False, shut=None):
     """the moves and swaps of one lesson the rules allow now, best first -> [dict(fix, other, dist)]: the same day's "ok" slots nearest
-    period first (a swap only with a lesson that is not a band and not in moved), then, only when the lesson's own day is barred
-    (see barred), plain moves to other days (nearest day, then nearest period) with other=True; dist is the periods moved, 10 per
-    day for another day. [] for a band lesson, one in moved, or one not on the timetable. At most limit items (None: all). Never changes m"""
+    period first (a swap only with a lesson that is not a band and not in moved), or, only when the lesson's own day is barred
+    (see barred), plain moves to other days (nearest day, then nearest period): at most limit of them (None: all). far: after those, the
+    "ok" slots of other days that are not among them, a swap with a lesson of that day too (never one put on a day barred for it): the nearest
+    day, a move before a swap, the nearest period; at most FAR_SLOTS (all when limit is None). other: how many lessons change day (an exchange
+    of two days: 2); dist: the periods moved, 10 per day for another day. shut(fix): a place left out, before they are counted.
+    [] for a band lesson, one in moved, or one not on the timetable. Never changes m"""
     pool = m.get("pool") or (); rows = [x for x in m["lessons"] if x["id"] == lesson_id]
     if not rows or lesson_id in moved or fixes._block(rows) or any(x["id"] == lesson_id for x in pool): return []
-    d0, p0 = rows[0]["d"], rows[0]["p"]
+    d0, p0 = rows[0]["d"], rows[0]["p"]; gap = lambda s: (abs(s["d"] - d0), abs(s["p"] - p0))
+    def fix(s): return dict(kind="move", id=lesson_id, d=s["d"], p=s["p"]) if s["swap"] is None else dict(kind="swap", a=lesson_id, b=s["swap"])
+    def free(i): o = [x for x in m["lessons"] if x["id"] == i]; return bool(o) and not fixes._block(o) and i not in moved
+    def may(s): return (s["swap"] is None or free(s["swap"])) and not (shut and shut(fix(s)))
     ok = [s for s in fixes.slots(m, spec, days, lesson_id, pool, extras=False, ctx=ctx) if s["state"] == "ok"]
-    same = []
-    for s in ok:
-        if s["d"] != d0: continue
-        if s["swap"] is not None:
-            o = [x for x in m["lessons"] if x["id"] == s["swap"]]
-            if not o or fixes._block(o) or s["swap"] in moved: continue
-            fix = dict(kind="swap", a=lesson_id, b=s["swap"])
-        else: fix = dict(kind="move", id=lesson_id, d=s["d"], p=s["p"])
-        same.append((abs(s["p"] - p0), s["p"], dict(fix=fix, other=False, dist=abs(s["p"] - p0))))
-    out = [x[2] for x in sorted(same, key=lambda x: x[:2])]
-    if barred(m, spec, days, lesson_id, d0, pool, memo):
-        out = []   # a same-day place keeps the lesson on a barred day, where the Must rule stays broken
-        far = sorted((s for s in ok if s["d"] != d0 and s["swap"] is None), key=lambda s: (abs(s["d"] - d0), s["d"], abs(s["p"] - p0), s["p"]))
-        out += [dict(fix=dict(kind="move", id=lesson_id, d=s["d"], p=s["p"]), other=True, dist=10 * abs(s["d"] - d0) + abs(s["p"] - p0)) for s in far]
-    return out[:limit]
+    if barred(m, spec, days, lesson_id, d0, pool, memo): first = [s for s in ok if s["d"] != d0 and s["swap"] is None]   # a same-day place keeps the lesson on a barred day, where the Must rule stays broken
+    else: first = [s for s in ok if s["d"] == d0]
+    out = [s for s in sorted(first, key=lambda s: (gap(s)[0], s["d"], gap(s)[1], s["p"])) if may(s)][:limit]
+    if far:
+        had = {(s["d"], s["p"]) for s in out}; left = sorted((s for s in ok if s["d"] != d0 and (s["d"], s["p"]) not in had), key=lambda s: (gap(s)[0], s["swap"] is not None, gap(s)[1], s["d"], s["p"]))
+        more = (s for s in left if may(s) and (s["swap"] is None or not barred(m, spec, days, s["swap"], d0, pool, memo)))
+        out += itertools.islice(more, None if limit is None else FAR_SLOTS)
+    return [dict(fix=fix(s), other=(s["d"] != d0) * (1 if s["swap"] is None else 2), dist=10 * gap(s)[0] + gap(s)[1]) for s in out]
 
 
 def direct(m, spec, days, target, pool, held=()):
@@ -238,7 +236,9 @@ def direct(m, spec, days, target, pool, held=()):
 class _Stop(Exception):
     """the search has reached its limit of steps or of time"""
 
-def _ids(fix): return {fix["a"], fix["b"]} if fix["kind"] == "swap" else {fix["id"]}
+def _ids(fix):
+    """the ids of the lessons a fix names (none for an add, a teacher change or a trade)"""
+    return {fix["a"], fix["b"]} if fix["kind"] == "swap" else {fix["id"]} if "id" in fix else set()
 
 def _refusal(c):
     """(the step, the judge's sentence) that rules a chain out, or None for one that is accepted: every step ok, or prefer for allowance lines alone"""
@@ -353,9 +353,9 @@ class _Search:
     """the search for one target. A list looked at is a node (moves, parts): moves the items of day_moves in it, first, each with the
     why of its lesson; parts the changes of step 5 in it after them, each (its place in direct's order, direct's candidate). The lists
     are judged in order of how many moves they have, and nothing of m or of what helper and fixes return is changed"""
-    def __init__(self, m, spec, days, target, moved, deadline, stats, before, room, most):
+    def __init__(self, m, spec, days, target, moved, deadline, stats, before, room, most, far):
         self.m, self.spec, self.days, self.target, self.w = m, spec, days, target, target["w"]
-        self.moved, self.deadline, self.stats, self.before, self.room, self.most = moved, deadline, stats, before, room, most
+        self.moved, self.deadline, self.stats, self.before, self.room, self.most, self.far = moved, deadline, stats, before, room, most, far
         self.memo, self.bars, self.places = {}, {}, {}         # helper.chain's memo; day_moves' memo; lesson id -> the places it may go to
         self.seen, self.solved = set(), []                     # the lists looked at; the answers of the present number of moves
         self.refused, self.many = "", False                    # the judge's sentence about the change itself on m; whether more changes than MAX_DIRECT were needed
@@ -419,15 +419,14 @@ class _Search:
     def _places(self, i):
         """lesson i's day_moves. A lesson that is to have a new teacher goes by that teacher's Must rules: its day is barred, and a place left out, for those"""
         if i not in self.places:
-            self._in_time(); rows = self.rows[i]
-            if i not in self.own: self.places[i] = day_moves(self.m, self.spec, self.days, i, self.ctx, self.bars, self.moved, CAND_SLOTS)
-            else:
+            self._in_time(); rows, bars, shut = self.rows[i], self.bars, None
+            if i in self.own:
                 d, given, now = rows[0]["d"], [x for x in self.given["lessons"] if x["id"] == i], _musts(self.m, self.spec, rows)
-                self.bars["barred", i, d] = barred(self.given, self.spec, self.days, i, d, self.m.get("pool") or ())
+                bars = {**bars, ("barred", i, d): barred(self.given, self.spec, self.days, i, d, self.m.get("pool") or ())}
                 def shut(f):
                     at = (f["d"], f["p"]) if f["kind"] == "move" else (self.rows[f["b"]][0]["d"], self.rows[f["b"]][0]["p"])
                     return any(k not in now for k in _musts(self.m, self.spec, [dict(x, d=at[0], p=at[1]) for x in given]))
-                self.places[i] = [x for x in day_moves(self.m, self.spec, self.days, i, self.ctx, self.bars, self.moved, None) if not shut(x["fix"])][:CAND_SLOTS]
+            self.places[i] = day_moves(self.m, self.spec, self.days, i, self.ctx, bars, self.moved, CAND_SLOTS, self.far, shut)
         return self.places[i]
 
     def _may(self, i):
@@ -479,7 +478,7 @@ class _Search:
 
     # ------------------------------------------------------------ the answer
     def _best(self):
-        """the answer ranked first: the fewest lessons moved (a swap moves two), the fewest moves to another day, the fewest typed rules touched, the
+        """the answer ranked first: the fewest lessons moved (a swap moves two), the fewest of them to another day, the fewest typed rules touched, the
         nearest moves, the fewest allowances gone over, then direct's order, then the words"""
         at = {x["id"]: (x["d"], x["p"]) for x in self.m["lessons"]}
         def entry(node, c):
@@ -499,12 +498,12 @@ class _Search:
         if f["kind"] == "delete": return plan
         return f"Step 3 asks for {row5['room_kind']}." if self.target["kind"] == "venue" else "It needs a room that seats the group."
 
-def solve(m, spec, days, target, pool, moved, deadline, stats=None, max_moves=None):
+def solve(m, spec, days, target, pool, moved, deadline, stats=None, max_moves=None, far=False):
     """the best list of fixes for one target on the timetable m as it is now (the earlier targets' fixes are in it) -> dict(fixes, moved,
     other, typed, why), or None when there is none within the limits. The list is at most max_moves (default MAX_MOVES) moves and swaps
-    (never of a band or of a lesson in moved; each on its own day unless that day is barred for it), then the change itself; it puts no two
+    (never of a band or of a lesson in moved; each on its own day unless that day is barred for it or far is set), then the change itself; it puts no two
     lessons of one key of step 5 in the same period that were not on m. fixes is [] when the warning is gone already; moved: the ids of the
-    lessons whose day or period changes; other: how many moves go to another day; typed: the numbers of the typed rules to check again; why:
+    lessons whose day or period changes; other: how many of them go to another day; typed: the numbers of the typed rules to check again; why:
     a plain sentence for each fix. deadline: a time.monotonic(). stats (a dict, when given) gets nodes (the lists judged), reason (the
     Needs-you sentence when there is no answer, else "") and late (the deadline came first). Nothing it is given is changed"""
     s = {} if stats is None else stats; s.update(nodes=0, reason="", late=False); w = target["w"]
@@ -515,7 +514,7 @@ def solve(m, spec, days, target, pool, moved, deadline, stats=None, max_moves=No
     if w.get("crit") == "noteacher": s["reason"] = helper.NO_TEACHER; return None   # no move gives it one
     if w.get("crit") == "notplaced": s["reason"] = NOT_PLACED; return None
     if w["key"].startswith("clash:bands:"): s["reason"] = BAND; return None
-    search = _Search(m, spec, days, target, moved, deadline, s, before, room, MAX_MOVES if max_moves is None else max_moves); cands, needs = direct(m, spec, days, target, pool, moved)
+    search = _Search(m, spec, days, target, moved, deadline, s, before, room, MAX_MOVES if max_moves is None else max_moves, far); cands, needs = direct(m, spec, days, target, pool, moved)
     if not cands and target["kind"] not in ("clash", "rule"): s["reason"] = needs or NO_FIT; return None
     got = search.run(cands)
     if got is not None: s["late"] = False

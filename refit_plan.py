@@ -9,6 +9,7 @@ LOOK_S = 2.0         # the least seconds of the budget (refit.BUDGET_S) one warn
 SIFT_S = 10.0        # the most seconds for going through the answers when the list as a whole is not one to offer
 BROKEN = "The app could not work this one out: change it on the board."
 TEACHER_FIRST = "Its teachers differ from step 5 too: settle that first, then run Re-fit again."
+ROOMS = ("venue", "half")   # the targets whose answer is another room
 
 _log = logging.getLogger(__name__)
 
@@ -60,7 +61,8 @@ class _Plan:
         self.changes, self.moved = 0, set()                      # how often the timetable changed; the lessons that stay where they are: moved or put in by the list
         self.also, self.broken = set(), set()                    # the targets settled by the fixes of others; those the search broke on
         self.why, self.told = {}, set()                          # target -> the sentence of its last full look; the targets progress was told of
-        self.seen, self.full, self.had = {}, {}, {}              # target -> self.changes at its last look, and at its last full look; the seconds that one had, when it was cut short
+        self.seen, self.full, self.had = {}, {}, {}              # target -> self.changes at its last look, and at its last full look on its own days; the seconds that one had, when it was cut short
+        self.far, self.far_had = {}, {}                          # the same of its last look on other days too
         key = [helper._dep_parts(t["key"])[0] for t in ts]; self.teacher = {i: [j for j, u in enumerate(ts) if u["kind"] == "teachers" and key[j] == key[i]] for i, t in enumerate(ts) if t["kind"] == "periods"}   # a periods target -> the teachers target of its key
         self._start()
 
@@ -81,10 +83,11 @@ class _Plan:
 
     # ------------------------------------------------------------ looking at the targets
     def run(self):
-        """passes without a move until one settles nothing, then a round of the full search, and so on until a round has nothing to look at or the time is up"""
+        """passes without a move until one settles nothing, then a round of the full search with every lesson on its own day, and so on until such a round has nothing
+        to look at; only then a round with other days too, and back to the start when it looked at any. The end is when that has nothing to look at, or the time is up"""
         while True:
             while self._pass(): pass
-            if not self._round(): break
+            if not self._round() and not self._round(True): break
         if self.progress and len(self.told) < len(self.ts): self.progress(len(self.ts), len(self.ts))   # the time ran out, or an add was not looked at
 
     def _open(self):
@@ -107,30 +110,36 @@ class _Plan:
             if self.seen.get(i) != self.changes and not self._waits(i): self._look(i, self.end, 0)
         return self.changes != was
 
-    def _round(self):
+    def _round(self, far=False):
         """the full search for every target not searched in full since the timetable last changed, each with its share of the time left; and
-        again for one whose search was cut short, when its share is more than it had -> whether any was searched"""
-        todo = [i for i in self._open() if (self.full.get(i) != self.changes or i in self.had) and not self._waits(i)]; looked = False
+        again for one whose search was cut short, when its share is more than it had -> whether any was searched. far: with other days too, for those whose
+        search on their own days found nothing on this very timetable, the ones that had no such look yet first, and no further than the first answer: the rest may
+        have one on their own days then"""
+        last, cut = (self.far, self.far_had) if far else (self.full, self.had); was, looked = self.changes, False
+        todo = [i for i in self._open() if (last.get(i) != was or i in cut) and not self._waits(i) and (not far or (self.full.get(i) == was and i not in self.had))]
+        if far: todo.sort(key=lambda i: i in last)
         for left, i in zip(range(len(todo), 0, -1), todo):
             now = time.monotonic()
-            if now >= self.end: break
+            if now >= self.end or (far and self.changes != was): break
             deadline = min(self.end, now + max(LOOK_S, (self.end - now) / left))
-            if self.full.get(i) == self.changes and deadline - now <= self.had[i]: continue
-            looked, self.full[i] = True, self.changes
-            if self._look(i, deadline): self.had[i] = deadline - now
-            else: self.had.pop(i, None)
+            if last.get(i) == self.changes and deadline - now <= cut[i]: continue
+            looked, last[i] = True, self.changes
+            if self._look(i, deadline, None, far): cut[i] = deadline - now
+            else: cut.pop(i, None)
         return looked
 
-    def _look(self, i, deadline, most=None):
-        """look at one target (most: the moves allowed, None: a full look) and take the answer, when there is one -> whether the look was cut short"""
+    def _look(self, i, deadline, most=None, far=False):
+        """look at one target (most: the moves allowed, None: a full look; far: on other days too) and take the answer, when there is one -> whether the look was cut short"""
         self.seen[i], s = self.changes, {}
-        try: got = refit.solve(self.now, self.spec, self.days, self.ts[i], self.m["pool"], self.moved, deadline, s, most)
+        try: got = refit.solve(self.now, self.spec, self.days, self.ts[i], self.m["pool"], self.moved, deadline, s, most, far)
         except Exception as e: self._break(i, e); self._tell(i); return False
-        if got is not None and not all(f[k] in self.first for f in got["fixes"] for k in ("id", "a", "b") if k in f):
-            got, s = None, dict(reason=refit.NO_FIT, late=False)   # it names a lesson the list itself puts in: Apply numbers those its own way
-        if got is not None: self._take(i, got)
-        elif most is None: self.why[i] = s["reason"]
-        if got is not None or most is None: self._tell(i)
+        if got is not None and not all(n in self.first for f in got["fixes"] for n in refit._ids(f)):
+            got, s = None, dict(s, reason=refit.NO_FIT, late=False)   # it names a lesson the list itself puts in: Apply numbers those its own way
+        if got is not None: self._take(i, got); self._tell(i)
+        elif most is None:
+            last = far or self.ts[i]["kind"] in ROOMS or not (s["nodes"] or s["late"])   # no move helps a room, nor one there was nothing to search for: no look on other days is to come
+            if last: self.far[i] = self.changes; self._tell(i)
+            self.why[i] = s["reason"] if last else refit.LATE   # what the look said is not the last word before the one on other days
         return got is None and s["late"]
 
     def _break(self, i, e):
@@ -238,7 +247,7 @@ class _Plan:
 
     def _tags(self, f, lessons, r, pool):
         """what a step (its fix, the lessons before it, _make's dict of it, the lessons not placed before it) is flagged with"""
-        day = f["kind"] == "move" and helper._first(lessons, f["id"])["d"] != f["d"]; bare = f["kind"] == "add" and fixes._no_room(f["room"])
+        day = f["kind"] in ("move", "swap") and any(helper._first(lessons, i)["d"] != helper._first(r["lessons"], i)["d"] for i in refit._ids(f)); bare = f["kind"] == "add" and fixes._no_room(f["room"])
         return ["another day"] * day + ["no room"] * bare + [f"check T{n} again" for n in refit.rechecked(dict(self.m, pool=pool), self.spec, r["lessons"], r["touched"], r["was"], [f])]
 
     def _said(self, i): return {k: self.ts[i][k] for k in ("key", "kind", "text")}
@@ -255,7 +264,7 @@ class _Plan:
 def plan(m, rec, fx, decisions, warnings, progress=None, budget=None):
     """one list of fixes for every target of the warnings (the list step 8 shows), searched for in budget seconds (default refit.BUDGET_S) and checked as a
     whole. m, rec and fx are draft.model_now()'s, decisions the draft's answers; none of what it is given is changed, and nothing is written.
-    progress(done, total) is called as the targets are settled or have had their first full look. -> dict(
+    progress(done, total) is called as the targets are settled or have had their last kind of look (on other days too, when they get one). -> dict(
     stamp: the draft's, so a list made for a draft that has changed since is told apart;
     groups: the targets settled, in that order, each dict(key, kind, text, steps=[dict(n, fix, text, why, tags)]), n from 1 over the whole list;
     fixes: every fix, in order; also: the texts of the targets that others' fixes settle; needs: the rest, in the targets' order, each dict(key, kind, text, why);
