@@ -24,6 +24,8 @@ from accounts import people as _accounts
 from accounts import rights as _rights
 from relief import absences as _absences
 from relief import bot, links, report, tg, tgdb
+from relief import calendar as _calendar
+from relief import outbox as _outbox
 from relief import lessons as _lessons
 from relief import settings as _settings
 from relief import summary as _summary
@@ -200,13 +202,32 @@ def summary():
 
 
 # ---- relief settings
+UNSENT = dict(planned="Relief planned", remind="Reminder to acknowledge", officer="To the reporting officer", ask="Request to change", askpick="New pick for a request to change",
+              kept="Relief kept", cancelled="Absence cancelled", gone="No longer needed", moved="Relief moved", stopped="Not happening", again="On again", weekly="Weekly summary",
+              new="New request for today")
+UNSENT_LEFT_OUT = ("relief", "report", "clear")   # a relief message has its own line on the relief page; a report and a clear are not news to anyone
+UNSENT_SHOWN = 20
+
+
+def _unsent():
+    """dict(failed, unsure, since: the Monday, more, items: [dict(what, name, at, state)]) of the messages (not reliefs) that could not be sent, or may not
+    have been, since Monday: newest first, UNSENT_SHOWN of them; None when there is none. Reads kind, name, state and times only: never a text or a key"""
+    since = _calendar.week_of(_lessons.today())[0].isoformat()
+    with tgdb.db(read=True) as c: rows = c.execute("SELECT kind, name, state, at, sent_at FROM outbox WHERE state IN ('failed', 'unsure')").fetchall()
+    got = [dict(what=UNSENT.get(r["kind"], "Message"), name=r["name"], at=_outbox._state(r)["at"], state=r["state"]) for r in rows if r["kind"] not in UNSENT_LEFT_OUT]
+    got = sorted((x for x in got if (x["at"] or "")[:10] >= since), key=lambda x: x["name"])
+    got.sort(key=lambda x: x["at"], reverse=True)
+    if not got: return None
+    return dict(failed=sum(x["state"] == "failed" for x in got), unsure=sum(x["state"] == "unsure" for x in got), since=since, more=max(0, len(got) - UNSENT_SHOWN), items=got[:UNSENT_SHOWN])
+
+
 def _admin():
-    """people: how many hold relief; not_linked: which of them have no Telegram; linked: every link, so any can be taken away"""
+    """people: how many hold relief; not_linked: which of them have no Telegram; linked: every link, so any can be taken away; unsent: _unsent()"""
     b, got = links.connected(), links.linked()
     able = sorted(p["name"] for p in _accounts.staff(store.published()) if "relief" in _rights.rights(p, links.VIA))
     return jsonify(token_set=tg.on(), practice=tg.practice(), connected=b is not None, bot=b["username"] if b else None, base=b.get("base") if b else None,
                    at=b.get("at") if b else None, linked=[dict(name=n, handle=got[n]["handle"], at=got[n]["at"]) for n in sorted(got)],
-                   not_linked=[n for n in able if n not in got], people=len(able))
+                   not_linked=[n for n in able if n not in got], people=len(able), unsent=_unsent())
 
 
 @bp.get("/api/relief/telegram/admin")

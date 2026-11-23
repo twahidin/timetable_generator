@@ -1069,7 +1069,7 @@ def admin_lists_who_is_not_linked():
     os.environ.pop("TELEGRAM_BOT_TOKEN", None)
     j = com.get(API + "admin").get_json()
     everyone = sorted([CORA, HUGO, ROSA, TEAM, TIA])                                             # by name; not the executive, not whoever is switched off
-    assert j == dict(token_set=False, practice=False, connected=False, bot=None, base=None, at=None, linked=[], not_linked=everyone, people=5), j
+    assert j == dict(token_set=False, practice=False, connected=False, bot=None, base=None, at=None, linked=[], not_linked=everyone, people=5, unsent=None), j
     with telegram():
         links.link(TIA, 501, "tia_t"); links.link(GONE_, 502, None); links.link(EXE, 503, None)
         j = who(TEAM).get(API + "admin").get_json()
@@ -7532,6 +7532,36 @@ def no_ping_of_lessons_an_exam_stops():
         withdraw(e); swept(); assert [x[2] for x in news()] == [NEW_EVE] * 2, "they stand again"
     with exam_school(EVE, TEAM, LEE):
         at("07:00", day=13); i = absent(); at("07:05", day=13); TE.sweep(); exam("1A", "1B", "1C"); send(); assert state(f"new:{i}:{TEAM}") == "dropped", "stopped by the time it goes"
+
+# ---- Answers, Task 4: what could not be sent, on the settings card ----
+ADMIN = "/api/relief/telegram/admin"
+def unsent_rows(*rows_):
+    for key, name, kind, st, when in rows_: q(key, name, kind=kind); put(key, state=st, at=when, sent_at=when if st == "unsure" else None)
+
+@t
+def the_settings_say_what_could_not_be_sent_since_monday():
+    with school(EVE, ROSA, TEAM, LEE):
+        at("09:00", day=13); assert call(TEAM, "get", ADMIN)["unsent"] is None
+        unsent_rows(("planned:a", EVE, "planned", "failed", "2026-10-13T07:10:00+08:00"), ("officer:a", ROSA, "officer", "unsure", "2026-10-12T15:00:00+08:00"),
+                    (f"weekly:w:{TEAM}", TEAM, "weekly", "failed", "2026-10-12T15:00:00+08:00"), ("relief:x", EVE, "relief", "failed", "2026-10-13T07:00:00+08:00"),
+                    (f"report:x:{TEAM}", TEAM, "report", "failed", "2026-10-13T07:15:00+08:00"), (f"clear:x:{LEE}", LEE, "clear", "unsure", "2026-10-13T07:30:00+08:00"),
+                    ("planned:b", EVE, "planned", "failed", "2026-10-11T20:00:00+08:00"), (f"ask:x:{TEAM}", TEAM, "ask", "sent", "2026-10-13T08:00:00+08:00"),
+                    (f"new:x:{LEE}", LEE, "new", "queued", "2026-10-13T08:30:00+08:00"), ("exam:x", ROSA, "exam-made-up", "failed", "2026-10-12T09:00:00+08:00"))
+        u = call(TEAM, "get", ADMIN)["unsent"]
+        assert u == dict(failed=3, unsure=1, since="2026-10-12", more=0, items=[
+            dict(what="Relief planned", name=EVE, at="2026-10-13T07:10:00+08:00", state="failed"), dict(what="To the reporting officer", name=ROSA, at="2026-10-12T15:00:00+08:00", state="unsure"),
+            dict(what="Weekly summary", name=TEAM, at="2026-10-12T15:00:00+08:00", state="failed"), dict(what="Message", name=ROSA, at="2026-10-12T09:00:00+08:00", state="failed")]), u
+        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "new"} and tgweb.UNSENT["new"] == "New request for today"
+        call(EVE, "get", ADMIN, code=401)                                                  # need("relief.save"): as before
+
+@t
+def the_unsent_line_never_holds_a_text_a_key_or_a_reason():
+    with school(EVE, ROSA, TEAM):
+        at("09:00", day=13); i = absent(reason="Other", reason_text="zebra-private")
+        for n in range(25): q(f"planned:{i}:{n}", EVE, text="A made-up message zebra-private", kind="planned"); put(f"planned:{i}:{n}", state="failed", at=f"2026-10-13T07:{n:02d}:00+08:00")
+        got = call(TEAM, "get", ADMIN); u = got["unsent"]
+        assert (u["failed"], len(u["items"]), u["more"], u["items"][0]["at"]) == (25, 20, 5, "2026-10-13T07:24:00+08:00"), "newest first, 20 at most"
+        text = json.dumps(got); assert "made-up message" not in text and "zebra" not in text and "planned:" not in text and i not in text
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
