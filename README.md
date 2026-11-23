@@ -54,9 +54,11 @@ reliefs and absences in the app, as before.
 - **Absent teachers** are told of relief somebody else planned, with a button that opens the app to set work and one to
   cancel (one line saying why, then a second press; not for an exam or event duty's backup, which the exams committee
   or the event's teacher in charge stops), and get one reminder. `/relief` asks for relief on Telegram with the
-  app's own questions, work and files included; What's in then says "asked on Telegram".
+  app's own questions, work and files included; a lesson takes as many messages as wanted (a text, then a file) until
+  **Next**; What's in then says "asked on Telegram".
 - **Reporting officers** are told who is away and when, with the kind of reason alone.
-- **The relief team** gets each request to change with its new pick and an **Approve** button, a report of who has not
+- **The relief team** gets a ping when relief is asked for today, once its picks wait for approval (with **Open relief
+  today**), each request to change with its new pick and an **Approve** button, a report of who has not
   acknowledged (every 15 minutes, a setting, from an hour before the first period) with **Remind them again**, one all
   clear, what was cancelled by a person, and a weekly summary (Friday 15:00, a setting).
 - On **Today** an approved relief says when its teacher was told, or that they are not on Telegram, with **Remind** beside
@@ -77,7 +79,8 @@ Telegram the reporting officer is told its kind alone (Medical, Child sick, Cour
 relief save is one line in the **History**, never with the reason. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
 (the committee page's header link, or the Relief home for the relief team) hold the Flexi Adjunct Teachers' role, the
 relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
-starts as, holidays); they connect the Telegram bot and list who is linked and who is not; they show management, the
+starts as, holidays); they connect the Telegram bot, list who is linked and who is not, and list the messages other than
+reliefs that could not be sent, or may not have been, since Monday; they show management, the
 relief team and the other staff who teach no lessons, which are set
 on the admin page (groups, the **Relief team** extra, and the staff added there). The committee downloads the
 personal teacher codes there as a list (CSV) or as slips to print. Like the personal student codes, they are made from

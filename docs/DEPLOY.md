@@ -194,7 +194,9 @@ bot's @name). The code works once and runs out in 15 minutes; **Get a new code**
   **Unlink**. Do this at once when somebody has lost their phone. Before they link again with the same account, they end
   Telegram on the lost phone (in Telegram: Settings, Devices), or the messages come to it again. What went there before
   stays on it.
-- Somebody who blocks the bot is unlinked by the next message that cannot reach them.
+- Somebody who blocks the bot is unlinked by the next message that cannot reach them. Their **Telegram** card in My
+  absences then says why ("Your Telegram was unlinked on {day}: the bot was blocked there. Unblock it in Telegram, then
+  link again."), until they link again.
 - The relief team sees on **Today** who is not on Telegram. Those people see their relief in the app, in **Reliefs I'm
   covering**.
 
@@ -228,6 +230,8 @@ sent. If the outage began while a message was on its way and no answer came, tha
 (press **Remind**); the rest wait as above. The log has one line when it begins ("network", or "unsure" in that case) and
 "Telegram answers again" once when it ends. A message that fails by
 itself, again and again while others go, is tried six times over about 43 minutes and then shows as "Could not be sent".
+**Relief settings**, on the **Telegram** card, lists the messages that could not be sent, or may not have been, since
+Monday, by kind, name and time, never their text: all but reliefs (their line is on **Today**), reports and all clears.
 
 **When `relief/telegram.db` is damaged** (the Telegram cards say only "Something went wrong. Try again.", **Today** looks as
 it does without a bot, and the log says "the message sender failed" or "a message could not be sent"), relief goes on in the app, but nothing goes to Telegram
@@ -265,9 +269,9 @@ With `TELEGRAM_BOT_TOKEN` set and the bot connected, **Telegram** gets these mes
 | the relief teacher, once the relief team has approved the relief | the absent teacher's name, the day, the lesson (classes, subject, group), its periods, times and room, the work text and the link the absent teacher left, and the work files, sent after it. Later, when that changes: that the relief was moved, kept, is no longer needed, or that the lesson is not happening (with the name of the exam or event and the class) or is on again. A reminder from the team is the relief message once more, with its files |
 | the absent teacher, for relief somebody else planned | the dates, whole day or which periods, who planned it, how many lessons will be covered, and one reminder to acknowledge it |
 | the reporting officer | who is away, on which dates, whole day or which periods, and the kind of reason (Medical, Child sick, Course or Other). This is the only message to somebody else that says anything of why a person is away |
-| the relief team | a request to change: who asks, the lesson, the line they typed, the new pick's name and the reason for it; who has not acknowledged which lesson and when they were told; that all have; whose absence was cancelled, for which dates and by whom (not of an exam's or event's backup that the app ended itself, when a schedule is withdrawn or a duty changes); and once a week the numbers of the week, with the three teachers who took most relief and the departments |
+| the relief team | that relief was asked for today: whose absence, whole day or which periods, and how many lessons wait for approval (once, when its picks are in or five minutes after it was sent; not to who sent it or the absent teacher); a request to change: who asks, the lesson, the line they typed, the new pick's name and the reason for it; who has not acknowledged which lesson and when they were told; that all have; whose absence was cancelled, for which dates and by whom (not of an exam's or event's backup that the app ended itself, when a schedule is withdrawn or a duty changes); and once a week the numbers of the week, with the three teachers who took most relief and the departments |
 | whoever was told of an absence, and whoever planned it (for an event's backup, its teacher in charge at that moment) | whose absence was cancelled, for which dates and by whom. A backup the app ended itself is told only to the person on duty and the reporting officer, if they were told of it, and to its relief teachers (as no longer needed) |
-| anyone asking for relief with `/relief` | the questions and their buttons: their own name, dates, periods, the kinds of reason, the names of staff who match what they type for a reporting officer, their lessons, and a list of what was chosen before **Send**; after it, how many lessons were sent, the reporting officer's name and whether they are on Telegram, and the names of files that could not be attached |
+| anyone asking for relief with `/relief` | the questions and their buttons: their own name, dates, periods, the kinds of reason, the names of staff who match what they type for a reporting officer, their lessons (a lesson takes several messages, each followed by its question again saying what is set, until **Next**), and a list of what was chosen before **Send**; after it, how many lessons were sent, the reporting officer's name and whether they are on Telegram, and the names of files that could not be attached |
 
 Telegram also gets everything people type or send to the bot: the line for **Other**, why they ask to change (which goes on to the relief team) or cancel (which is shown back to them before they confirm), the work they type for a lesson, and the files and photos they send as work (the app fetches those from Telegram after **Send**). Of what Telegram knows about a person, the app keeps the number of their chat and their @name. Connecting sends Telegram the app's address, the password made from SECRET_KEY (section 6, Give the token to the app) and the bot's menu, and the buttons that open the app hold its address.
 
