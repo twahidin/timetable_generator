@@ -309,7 +309,7 @@ def ticking_four_previews_then_applies_all_in_one_entry():
     code, j = post(c, "/api/admin/bulk", names=[NUR, WEI], action="take", extra="relief", preview=True)
     assert j["lines"] == [f"{NUR} is not on the relief team.", f"{WEI} is not on the relief team."], j
     code, j = post(c, "/api/admin/bulk", names=[WEI], action="group", group="hod", preview=True)
-    assert j["lines"] == [f"{WEI} moves to the HOD group.", f"{WEI} changes the map for HU (from step 4)."], j
+    assert j["lines"] == [f"The role of {WEI} becomes HOD.", f"{WEI} changes the map for HU (from step 4)."], j
     code, j = post(c, "/api/admin/bulk", names=[NUR, WEI], action="give", extra="relief", preview=True)
     assert j["lines"] == [f"{NUR} and {WEI} join the relief team."], j
 
@@ -320,6 +320,7 @@ def ticking_several_with_the_last_admin_is_refused_whole():
     before, n = raw(), len(accounts())
     for body, want in ((dict(names=[MARCUS, ALICIA], action="off"), last_admin(ALICIA)),
                        (dict(names=[NUR, ALICIA], action="take", extra="admin"), last_admin(ALICIA)),   # a role change no longer takes Admin away
+                       (dict(names=[JOSEPH, ALICIA], action="take", extra="timetable"), last_admin(ALICIA)),   # leaving the committee takes Admin with it
                        (dict(names=[ALICIA], action="take", extra="admin"), last_admin(ALICIA)),
                        (dict(names=[NUR, JOSEPH], action="give", extra="admin"), ONLY_COMMITTEE),
                        (dict(names=FOUR, action="give", extra="exams"), EXAMS_DATE), (dict(names=FOUR, action="give", extra="exams", until=YESTERDAY), EXAMS_DATE),
@@ -578,9 +579,13 @@ def the_people_list_shows_roles_and_committees():
     a = next(p for p in j["people"] if p["name"] == ALICIA)
     assert a["group"] == "teacher" and a["extras"]["timetable"] is True and a["extras"]["admin"] is True, a
 
+def as_left(name):
+    """a person's record as the tests after read it: no sign-in counts or times, and the stored committee group read as Teacher"""
+    r = {k: v for k, v in rec(name).items() if k not in ("n", "signins")}; r["group"] = r["group"] or "teacher"; return r
+
 @t
 def the_timetable_committee_is_a_tick_beside_the_role():
-    c = admin(); n0 = rec(DANIEL)["n"]
+    c = admin(); n0 = rec(DANIEL)["n"]; was = {x: as_left(x) for x in (DANIEL, JOSEPH)}
     code, j = post(c, "/api/admin/person", name=DANIEL, group="hod", extras=dict(timetable=True))
     assert code == 200 and j["group"] == "hod" and j["extras"]["timetable"] is True, (code, j)
     assert rec(DANIEL)["n"] == n0 + 1                                             # the new tick signs them out
@@ -591,15 +596,19 @@ def the_timetable_committee_is_a_tick_beside_the_role():
     assert "role Teacher → HOD" in accounts()[0]["text"], accounts()[0]["text"]
     assert s["group"] == "HOD · Timetable committee", s["group"]                  # the role's label, then the committees
     assert c.get("/api/status").get_json()["group"] == "Teacher · Timetable committee, Admin"   # Admin last
+    for x in (DANIEL, JOSEPH):                                                     # undone for the tests after
+        assert post(c, "/api/admin/person", name=x, group=was[x]["group"], depts=was[x]["depts"], extras=dict(timetable=was[x]["extras"]["timetable"]))[0] == 200
+    assert {x: as_left(x) for x in (DANIEL, JOSEPH)} == was, "Daniel and Joseph are as before, apart from being signed out"
 
 @t
 def admin_goes_with_the_timetable_committee():
-    c = admin()
+    c = admin(); was = as_left(NUR)
     assert post(c, "/api/admin/person", name=NUR, extras=dict(admin=True)) == (400, {"error": ONLY_COMMITTEE})
     assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
     code, j = post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))
     assert code == 200 and j["extras"]["timetable"] is False and j["extras"]["admin"] is False, j
     assert {x["field"] for x in accounts()[0]["changes"]} == {"timetable", "admin"}
+    assert as_left(NUR) == was, "Nur is as before, apart from being signed out"
 
 @t
 def the_committee_is_not_a_role():
@@ -616,6 +625,51 @@ def the_last_admin_keeps_the_timetable_committee():
         assert post(c, "/api/admin/person", name=ALICIA, extras=dict(timetable=False)) == (400, {"error": last_admin(ALICIA)})
         assert raw() == before and len(accounts()) == n and rec(ALICIA)["extras"]["timetable"] is True and rec(ALICIA)["extras"]["admin"] is True
     finally: P.update(lambda d: [d["people"][n].update(off=False) for n in others])
+
+@t
+def ticking_several_onto_the_timetable_committee():
+    c = admin()
+    code, j = post(c, "/api/admin/bulk", names=[RAVI, NUR, JOSEPH], action="give", extra="timetable")
+    assert code == 200 and j["applied"] is False and j["lines"] == [f"{RAVI} and {NUR} join the Timetable committee.", f"{JOSEPH} is on the Timetable committee already."], j
+    n = len(accounts())
+    code, j = post(c, "/api/admin/bulk", names=[RAVI, NUR, JOSEPH], action="give", extra="timetable", preview=False)
+    assert code == 200 and j["applied"] is True and len(accounts()) == n + 1 and accounts()[0]["people"] == [RAVI, NUR]
+    assert rec(RAVI)["extras"]["timetable"] and rec(RAVI)["group"] is None       # their role is untouched
+    code, j = post(c, "/api/admin/bulk", names=[RAVI, NUR, WEI], action="take", extra="timetable", preview=False)   # undone for the tests after
+    assert code == 200 and j["lines"] == [f"{RAVI} and {NUR} leave the Timetable committee.", f"{WEI} is not on the Timetable committee."], j
+    assert not rec(RAVI)["extras"]["timetable"] and not rec(NUR)["extras"]["timetable"]
+
+@t
+def taking_the_committee_from_an_admin_says_so():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
+    before, n = raw(), len(accounts())
+    want = [f"{NUR} leaves the Timetable committee.", f"{NUR} stops being an admin: only the timetable committee can be admins."]
+    code, j = post(c, "/api/admin/bulk", names=[NUR], action="take", extra="timetable")
+    assert code == 200 and j == dict(lines=want, applied=False), (code, j)
+    assert raw() == before and len(accounts()) == n, "a preview changes nothing"
+    code, j = post(c, "/api/admin/bulk", names=[NUR], action="take", extra="timetable", preview=False)   # undone for the tests after
+    assert code == 200 and j == dict(lines=want, applied=True), (code, j)
+    assert (rec(NUR)["extras"]["timetable"], rec(NUR)["extras"]["admin"]) == (False, False), rec(NUR)
+    assert {(x["field"], x["was"], x["now"]) for x in accounts()[0]["changes"]} == {("timetable", True, False), ("admin", True, False)}
+
+@t
+def make_them_management_keeps_the_committee():          # Review Focus 3
+    c = admin(); was = as_left(JOSEPH)
+    assert rec(JOSEPH)["group"] in (None, "teacher") and rec(JOSEPH)["extras"]["timetable"] is True   # stored in the committee group, step 4 role HOD
+    code, j = post(c, "/api/admin/bulk", names=[JOSEPH], action="group", group="hod", preview=False)
+    assert code == 200 and j["applied"] is True and j["lines"][0] == f"The role of {JOSEPH} becomes HOD.", j
+    assert not any("admin" in x for x in j["lines"]), "a role change says nothing about Admin"
+    r = rec(JOSEPH); assert r["group"] == "hod" and r["extras"]["timetable"] is True, r
+    assert accounts()[0]["text"] == f"Set the role of {JOSEPH} to HOD", accounts()[0]["text"]
+    code, j = post(c, "/api/admin/bulk", names=[JOSEPH, NUR], action="group", group="hod")
+    assert j["lines"][0] == f"The role of {NUR} becomes HOD." and j["lines"][-1] == f"{JOSEPH} is HOD already.", j
+    code, j = post(c, "/api/admin/bulk", names=[PRIYA, GRACE], action="group", group="executive")
+    assert j["lines"] == [f"The role of {GRACE} becomes Executive.", f"{PRIYA} is Executive already."], j
+    code, j = post(c, "/api/admin/bulk", names=[NUR, GRACE], action="group", group="leader")
+    assert j["lines"] == [f"The role of {NUR} and {GRACE} becomes School leader."], j
+    assert post(c, "/api/admin/person", name=JOSEPH, group=was["group"], depts=was["depts"])[0] == 200   # undone for the tests after
+    assert as_left(JOSEPH) == was, "Joseph is as before, apart from being signed out"
 
 import putback  # noqa: E402
 def putback_admin_sentence(): return putback._ADMIN
@@ -770,5 +824,39 @@ def shared_codes_and_an_admin_s_code_never_put_back_accounts():
     assert back(shared("head"), e["id"]) == (403, {"error": "Only the timetable committee can put back someone else's change."})
     assert back(as_person(ALICIA, "code"), e["id"]) == (401, AGAIN)        # an admin's personal code opens neither the setup nor the admin page
     assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "not by a code"
+
+@t
+def put_back_the_timetable_committee_tick():
+    c = admin()
+    assert post(c, "/api/admin/person", name=WEI, extras=dict(timetable=True))[0] == 200 and rec(WEI)["extras"]["timetable"] is True
+    e = accounts()[0]; assert e["changes"] == [dict(name=WEI, field="timetable", was=False, now=True)], e["changes"]
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is True and mine["back"]["why"] is None, mine.get("back")
+    assert back(c, accounts()[0]["id"]) == (200, {"done": True, "text": "Put back."})
+    assert rec(WEI)["extras"]["timetable"] is False
+    assert accounts()[0]["changes"] == [dict(name=WEI, field="timetable", was=True, now=False)], accounts()[0]["changes"]
+
+OLD_GROUP = "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
+
+@t
+def an_old_committee_group_entry_is_not_put_back():
+    H.add({"kind": "account", "what": "group", "where": "Admin", "people": [GRACE], "text": f"Moved {GRACE} to the Timetable committee group",
+           "changes": [{"name": GRACE, "field": "group", "was": "teacher", "now": "committee"}], "who": ALICIA, "as": ALICIA, "via": "password"})
+    c = admin(); before, n = raw(), len(accounts())
+    e = accounts()[0]; code, j = back(c, e["id"])
+    assert code == 409 and j["error"] == "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
+    assert raw() == before and len(accounts()) == n and rec(GRACE)["group"] != "committee"
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
+    # out of the committee group, with Admin and a note in the same entry: refused whole, nothing written
+    P.update(lambda d: d["people"][PRIYA].update(note="mixed"))
+    m = H.add({"kind": "account", "what": "group", "where": "Admin", "people": [JOSEPH, PRIYA], "text": f"Moved {JOSEPH} to the HOD group",
+               "changes": [dict(name=JOSEPH, field="group", was="committee", now="teacher"), dict(name=JOSEPH, field="admin", was=True, now=False),
+                           dict(name=PRIYA, field="note", was="before", now="mixed")], **H.by_of(ALICIA, "password")})
+    before, n = raw(), len(accounts())
+    assert back(c, m["id"]) == (409, {"error": OLD_GROUP})
+    assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "mixed" and rec(JOSEPH)["extras"]["admin"] is False
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == m["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
 
 print(f"{COUNT} admin tests passed")

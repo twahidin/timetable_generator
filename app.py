@@ -1877,8 +1877,10 @@ def _update_as(me, fn):
 def _and(names):
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
-_BULK_SAY = {("give", "relief"): (("joins", "join"), "the relief team", "{} is on the relief team already."),
+_BULK_SAY = {("give", "timetable"): (("joins", "join"), "the Timetable committee", "{} is on the Timetable committee already."),
+             ("give", "relief"): (("joins", "join"), "the relief team", "{} is on the relief team already."),
              ("give", "admin"): (("gets", "get"), "the admin page", "{} is an admin already."),
+             ("take", "timetable"): (("leaves", "leave"), "the Timetable committee", "{} is not on the Timetable committee."),
              ("take", "relief"): (("leaves", "leave"), "the relief team", "{} is not on the relief team."),
              ("take", "exams"): (("loses", "lose"), "the exams and events pages", "{} does not have the exams and events pages."),
              ("take", "admin"): (("loses", "lose"), "the admin page", "{} is not an admin.")}
@@ -1896,17 +1898,18 @@ def _bulk_lines(act, key, val, names, done, d):
     elif act in ("give", "take"):
         verbs, what, already = _BULK_SAY[(act, key)]
         if moved: lines.append(f"{_and(moved)} {verb(*verbs)} {what}.")
+        if act == "take" and key == "timetable":
+            lines += [f"{n} stops being an admin: only the timetable committee can be admins." for n in moved if had(n, "admin")]
         lines += [already.format(n) for n in same]
     elif act == "group":
         label = people.LABELS[val]
-        if moved: lines.append(f"{_and(moved)} {verb('moves', 'move')} to the {label} group.")
+        if moved: lines.append(f"The role of {_and(moved)} becomes {label}.")
         for n in moved:
-            if had(n, "admin"): lines.append(f"{n} stops being an admin: only the timetable committee can be admins.")
             if val in people.HEADS:
                 ds = people.record(d, n)["depts"]
                 if not ds: lines.append(f"{n} has no department on step 4: tick their departments on their panel, or they can change no rows.")
                 else: lines.append(f"{n} changes the map for {', '.join(ds)}{' (from step 4)' if any(c['field'] == 'depts' for c in done[n]) else ''}.")
-        lines += [f"{n} is in the {label} group already." for n in same]
+        lines += [f"{n} is {label} already." for n in same]
     elif act == "off":
         if moved: lines.append(f"{_and(moved)} {verb('is', 'are')} switched off and signed out everywhere.")
         lines += [f"{n} is switched off already." for n in same]
@@ -1944,7 +1947,7 @@ def _bulk(d, pub, b, today):
     if touched: _whole(d, touched, before)
     them = ", ".join(touched)
     text = {"give": lambda: f"Gave {EXTRA_LABELS[key]}{' until ' + _day(val) if key == 'exams' else ''} to {them}",
-            "take": lambda: f"Took away {EXTRA_LABELS[key]} from {them}", "group": lambda: f"Moved {them} to the {people.LABELS[val]} group",
+            "take": lambda: f"Took away {EXTRA_LABELS[key]} from {them}", "group": lambda: f"Set the role of {them} to {people.LABELS[val]}",
             "off": lambda: f"Switched off {them}", "on": lambda: f"Switched on {them}"}[act]()
     return dict(lines=_bulk_lines(act, key, val, names, done, d), touched=touched, changes=[c for n in touched for c in done[n]],
                 what="extras" if act in ("give", "take") else act, text=text)

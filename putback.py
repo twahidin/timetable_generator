@@ -9,13 +9,14 @@ import history
 import sync
 
 TOUCH_KINDS = {"setup", "app", "setup-replaced", "account"}
-PUTTABLE = {"group", "depts", "relief", "exams", "admin", "note", "off"}
+PUTTABLE = {"group", "depts", "timetable", "relief", "exams", "admin", "note", "off"}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 _ADMIN = "Can't put back a new person, a username or a password here: change it on the admin page."
 _OLD = "Can't put back: this change was recorded before Put back existed. Change it on its step."
 _SINCE = "Can't put back: this was changed again since."
 _TAKEN = "Can't put back: another band is called {} now."
 _JOINED = "Can't put back: lessons or rules joined {} after this change."
+OLD_GROUP = "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
 
 
 def _readable(changes):
@@ -128,6 +129,8 @@ def why_not(unit_entries, newer, today=None):
     account = first.get("kind") == "account"
     if account:
         changes = [c for e in unit_entries for c in e.get("changes") or [] if isinstance(c, dict)]
+        if any(c.get("field") == "group" and "committee" in (c.get("was"), c.get("now")) for c in changes):
+            return OLD_GROUP     # the committee was a group then and is a tick now: the entry is refused whole
         if any(c.get("field") not in PUTTABLE for c in changes):
             return _ADMIN
         today = today or datetime.datetime.now(history.SCHOOL_TZ).date()
