@@ -1090,7 +1090,7 @@ def slots_are_inside_the_window_and_keep_every_students_rules():
 @t
 def slots_offer_nothing_for_a_paper_with_a_time_or_a_sits_with_group_with_a_time():
     pub = F.sample_pub()
-    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00", id="a", together="Pair"), a_paper("Sec 3", "Maths", id="b", together="Pair"),
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00", id="a", together="Pair"), a_paper("Sec 4", "Maths", id="b", together="Pair"),
                  a_paper("Sec 3", "Art", id="c", date="2026-10-06"), a_paper("Sec 3", "Music", id="d", start="08:00"), a_paper("Sec 3", "Free", id="e")], pub)
     for i in "abcd": same(facts.slots(s, pub, CAL, xs(), i), [])
     same(facts.slots(s, pub, CAL, xs(), "nope"), [])
@@ -1436,5 +1436,69 @@ def a_draft_that_cannot_be_checked_never_reads_as_clear():
     same(facts.checks(dict(an_exam([], pub), papers=[None]), pub, CAL, x)["unchecked"], "The checks could not run on this exam: open it on the exam page.")
     facts.slots(dict(an_exam([a_paper("Sec 3", "English", id="n")], pub), times=dict(min_break=None, max_papers=2)), pub, CAL, x, "n")
     for bad in (None, {}, dict(model=None)): facts.overview(an_exam([], pub), bad, CAL, x); facts.school(bad, x); facts.checklist(an_exam([], pub), bad, CAL, x, None)
+
+@t
+def the_checks_use_the_exam_settings_rules_and_a_sits_with_group_with_any_date_or_start_has_no_offers():
+    pub = F.sample_pub()
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="09:05", id="a")], pub, end="2026-10-05")
+    s["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "09:00", "to": "12:20"})}
+    hit = lambda r, w: [x for x in facts.checks(s, pub, CAL, xs(rules=rules(**r)))["warnings"] if w in x]
+    assert hit(dict(arrive=15, stay=0), "less than 15 minutes after the exam time begins") and not hit(dict(arrive=0, stay=0), "after the exam time begins")
+    s["papers"][0].update(start="11:20")
+    assert hit(dict(arrive=0, stay=30), "less than 30 minutes before the exam time ends") and not hit(dict(arrive=0, stay=0), "before the exam time ends")
+    for extra in (dict(date="2026-10-05"), dict(start="09:00"), dict()):
+        s = an_exam([a_paper("Sec 3", "English", id="a", together="Pair"), a_paper("Sec 4", "Art", id="b", together="Pair", **extra)], pub)
+        same(bool(facts.slots(s, pub, CAL, xs(), "a")), not extra)                          # a mate with only a date or only a start: no offers
+
+@t
+def an_arrive_that_is_not_a_multiple_of_five_is_rounded_up():
+    pub = F.sample_pub()
+    s = an_exam([a_paper("Sec 3", "Science", id="n", minutes=40)], pub, end="2026-10-05")
+    s["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "09:00", "to": "12:20"})}
+    got = [g["start"] for g in facts.slots(s, pub, CAL, xs(rules=rules(arrive=7, stay=0)), "n", limit=99)]
+    assert got[0] == "09:10" and "09:07" not in got, got
+
+@t
+def extra_time_past_the_window_is_judged_as_the_apps_check_judges_it():
+    pub = F.sample_pub(); model = pub["model"]
+    def offered(who, window, start_after, extra=50):
+        s = an_exam([a_paper("Sec 3", "Science", id="n", minutes=60, who=who, students=["3A-01"] if who == "students" else [])], pub, end="2026-10-05",
+                    access=[dict(student="3A-01", extra=extra, room=False)])
+        s["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=window is None, **({} if window is None else {"from": window[0], "to": window[1]}))}
+        x = xs(rules=rules(arrive=0, stay=0))
+        got = {g["start"] for g in facts.slots(s, pub, CAL, x, "n", limit=999)}
+        for st in got & {start_after}:
+            assert not new_lines(P.check(dict(s, papers=[]), model, CAL, x["rules"]), P.check(put_in(s, {"n"}, dict(date="2026-10-05", start=st)), model, CAL, x["rules"])), st
+        return got
+    assert "11:00" not in offered("level", ("07:40", "12:20"), "11:00")                      # 12:00 plain, 12:30 with extra time: the window ends before the day
+    assert "11:00" in offered("level", ("07:40", "12:20"), "11:00", extra=0)
+    assert "15:20" in offered("level", None, "15:20")                                       # a window that ends with the day: the check says nothing
+    assert "11:00" in offered("students", ("07:40", "12:20"), "11:00")                      # a list of students: the check does not look at the window
+
+@t
+def the_overview_is_a_copy_and_a_paper_it_cannot_count_does_not_stop_it():
+    pub = F.sample_pub(); x = xs()
+    s = an_exam([a_paper("Sec 3", "English", id="a"), dict(a_paper("Sec 3", "Art", id="b", who="students"), students=5)], pub)
+    ov = facts.overview(s, pub, CAL, x)
+    same([p["count"] for p in ov["papers"]], [60, None]); same(len(ov["days"]), 5)
+    ov["choices"]["times"]["report"] = "01:00"; ov["choices"]["seating"]["order"] = "name"; ov["levels"].append("x"); ov["papers"][0]["label"] = "x"
+    same(s["times"]["report"], "07:30"); same(s["seating"]["order"], "class"); same(s["levels"], ["Sec 3", "Sec 4"])
+    same(facts.overview(s, None, CAL, x)["no_paper"], None); same(facts.overview(s, {}, CAL, x)["no_paper"], None)
+
+@t
+def the_choices_line_says_spacing_and_where_the_scripts_go_and_one_minute_is_singular():
+    pub = F.sample_pub(); s = an_exam([], pub)
+    old = an_exam([], pub, created_at="2026-01-01T00:00:00"); old.update(seating=dict(s["seating"], spacing="gap"), scripts="the hall")
+    s["scripts"] = "the staff room"; s["times"]["min_break"] = 1
+    last = facts.last_values(s, [old])
+    mine = {l["key"]: l for l in facts.checklist(s, pub, CAL, xs(), None)}
+    assert "every seat" in mine["choices"]["text"].lower() and "the staff room" in mine["choices"]["text"], mine["choices"]
+    assert "1 minute between" in mine["times"]["text"]
+    s["scripts"] = ""; s["times"]["min_break"] = 20
+    c = {l["key"]: l for l in facts.checklist(s, pub, CAL, xs(), dict(last, scripts=""))}
+    same(c["choices"]["state"], "last"); assert "a seat left between" in c["choices"]["text"], c["choices"]
+    s["seating"]["spacing"] = "gap"; own = {l["key"]: l for l in facts.checklist(dict(s, seating=dict(s["seating"], spacing="every")), pub, CAL, xs(), None)}["choices"]["text"]
+    c = {l["key"]: l for l in facts.checklist(an_exam([], pub), pub, CAL, xs(), last)}
+    assert c["choices"]["text"] != "As last time: " + own and "the hall" in c["choices"]["text"], c["choices"]
 
 print(f"{COUNT} plan tests passed")

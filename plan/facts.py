@@ -134,7 +134,7 @@ def _slots(sched, pub, cal, xset, paper_id, limit) -> list:
         return []
     together = str(paper.get("together") or "").strip()
     mates = [q for q in papers if q is not paper and together and str(q.get("together") or "").strip() == together]
-    if any(_timed(q) for q in mates):
+    if any(q.get("date") or q.get("start") for q in mates):      # a group with any date or start has no offers, as a paper with one has none
         return []
     group = [paper] + mates                                      # the untimed papers that must start together
     if not all(isinstance(m.get("minutes"), int) for m in group):
@@ -175,7 +175,7 @@ def _slots(sched, pub, cal, xset, paper_id, limit) -> list:
                     break
                 for sid in who:
                     ivs, end = busy.get(d, {}).get(sid, ()), st + own[sid]
-                    if end > last or len(ivs) + 1 > max_papers or any((st < b and a < end) or 0 <= a - end < min_break or 0 <= st - b < min_break for a, b in ivs):
+                    if (last < day1 and m.get("who") in ("level", "groups") and end > last) or len(ivs) + 1 > max_papers or any((st < b and a < end) or 0 <= a - end < min_break or 0 <= st - b < min_break for a, b in ivs):
                         most = None
                         break
                     most = max(most, len(ivs))
@@ -214,15 +214,16 @@ def _plural(n, one, many) -> str:
 
 def _times_text(t) -> str:
     t = t if isinstance(t, dict) else {}
-    return f"Report {t.get('report') or 'not set'}, {t.get('min_break', 20)} minutes between papers, {t.get('max_papers', 2)} a day at most."
+    return f"Report {t.get('report') or 'not set'}, {_plural(t.get('min_break', 20), 'minute', 'minutes')} between papers, {t.get('max_papers', 2)} a day at most."
 
 
 def _choices_text(seating, supervision, scripts) -> str:
     s = seating if isinstance(seating, dict) else {}
     return (f"Seated by {s.get('order', 'class')}, {SHARED.get(s.get('shared'), 'levels alternate')}, "
-            f"{'own class in own home room' if s.get('home_rooms', True) else 'classes mixed'}; "
+            f"{'own class in own home room' if s.get('home_rooms', True) else 'classes mixed'}, "
+            f"{'a seat left between' if s.get('spacing') == 'gap' else 'every seat used'}; "
             f"{'supervised by invigilators' if supervision == 'invigilators' else 'supervised by the lesson teacher'}; "
-            f"{'scripts place set' if scripts else 'scripts place not set'}.")
+            f"{'scripts go to ' + str(scripts) if scripts else 'no place for scripts yet'}.")
 
 
 def _own_supervision(sched) -> str:
@@ -311,6 +312,14 @@ def school(pub, xset) -> dict:
     return dict(levels=levels, subjects=subjects, periods=periods, days=list(model.get("days") or []), rooms=rooms, students=len(students))
 
 
+def _count(paper, model):
+    """how many students sit a paper, None when the app cannot tell"""
+    try:
+        return len(_papers.who_sits(paper, model))
+    except ODD:
+        return None
+
+
 def overview(sched, pub, cal, xset) -> dict:
     """the exam as the AI sees it: its name, every date of it with the levels and window, its papers (who sits as a word and a
     count only), the subjects of its levels with no paper, and its choices. days and no_paper are None when they cannot be read"""
@@ -318,7 +327,7 @@ def overview(sched, pub, cal, xset) -> dict:
     suggested = set(x for x in (sched.get("suggested") if isinstance(sched.get("suggested"), list) else []) if isinstance(x, str))
     papers = [dict(id=p.get("id"), label=_papers.label(p), level=p.get("level"), subject=p.get("subject"), paper=p.get("paper") or "",
                    minutes=p.get("minutes"), date=p.get("date"), start=p.get("start"), who=p.get("who"), together=p.get("together") or "",
-                   suggested=p.get("id") in suggested, count=len(_papers.who_sits(p, model)))
+                   suggested=p.get("id") in suggested, count=_count(p, model))
               for p in _dicts(sched, "papers")]
     try:
         days = [dict(date=d["date"], nice=_days.nice(d["date"]), school_day=d["day"] is not None, levels=list(d["levels"]),
@@ -326,10 +335,12 @@ def overview(sched, pub, cal, xset) -> dict:
     except ODD:
         days = None
     try:
+        if not model:
+            raise ValueError("no published timetable")
         no_paper = [dict(level=p["level"], subject=p["subject"]) for p in _papers.fill_from_subjects(sched, model)]
     except ODD:
         no_paper = None
     return dict(id=sched.get("id"), name=sched.get("name"), kind=sched.get("kind"), levels=list(sched.get("levels") or []),
                 classes=list(sched.get("classes") or []), start=sched.get("start"), end=sched.get("end"), days=days, papers=papers,
-                no_paper=no_paper, choices=dict(times=_dict(sched, "times"), seating=_dict(sched, "seating"),
+                no_paper=no_paper, choices=dict(times=dict(_dict(sched, "times")), seating=dict(_dict(sched, "seating")),
                                                 supervision=sched.get("supervision"), scripts=sched.get("scripts") or ""))
