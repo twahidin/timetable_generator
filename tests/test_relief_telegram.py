@@ -389,9 +389,9 @@ BAD_CODE_KEPT = "That code is not right or has run out. Get a new one in the app
 @t
 def the_bots_sentences_are_the_plans():
     assert (bot.HELLO, bot.NOT_LINKED, bot.BAD_CODE, bot.MOVED_LINK, bot.TAKEN, bot.STOPPED) == (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK, TAKEN, STOPPED)
-    assert bot.BAD_CODE_KEPT == BAD_CODE_KEPT                                          # not in the plan's table
+    assert bot.BAD_CODE_KEPT == BAD_CODE_KEPT
     plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
-    for text in (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK, TAKEN, STOPPED): assert f"`{text}`" in plan, text
+    for text in (HELLO, NOT_LINKED, BAD_CODE, BAD_CODE_KEPT, MOVED_LINK, TAKEN, STOPPED): assert f"`{text}`" in plan, text
 
 @t
 def a_code_links_once_and_then_is_gone():
@@ -2141,7 +2141,7 @@ PLANNED_EVE = "📋 Relief planned for you\nTue 13 Oct · whole day\nPlanned by 
 REMIND_EVE = "⏰ Reminder: please acknowledge your relief for Tue 13 Oct and set work."
 OFFICER_EVE = "Ms Evelyn Koh is away on Tue 13 Oct (whole day): Medical.\nRelief is being arranged."
 CANCELLED_EVE = "❌ Cancelled by {}: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."
-CANCELLED_BY_APP = "❌ Cancelled: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."        # not in the plan's table
+CANCELLED_BY_APP = "❌ Cancelled: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."
 
 @t
 def every_text_is_the_plans():
@@ -2153,9 +2153,10 @@ def every_text_is_the_plans():
     got += "\n" + TE.gone_text("{lesson}", "{periods}", "{start}", "{day}") + "\n" + TE.moved_text("{lesson}", "{periods}", "{day}") + "\n" + TE.kept_text("{lesson}", "{periods}", "{day}")
     got += "\n" + TE.ask_text("{who}", "{lesson}", "{periods}", "{start}", "{day}", "{why}", pick=pick)
     got += "\n" + TE.ask_text("", "", "", "x", "", "", nobody=True).splitlines()[-1] + "\n" + TE.ask_text("", "", "", "x", "", "").splitlines()[-1]
-    got += "\n" + TE.relief_text("", "x", "", "", "", "", {}).splitlines()[-1]
+    got += "\n" + TE.relief_text("", "x", "", "", "", "", {}).splitlines()[-1] + "\n" + TE.cancelled_text("app", "{absent}", "{days}")
+    got += "\n" + TE.stopped_text("{lesson}", "{periods}", "{start}", "{day}", "{why}") + "\n" + TE.again_text("{lesson}", "{periods}", "{start}", "{day}")
     for line in got.splitlines(): assert f"`{line}`" in plan, line
-    assert len(got.splitlines()) == 7 + 5 + 1 + 2 + 1 + 1 + 1 + 1 + 5 + 3, got
+    assert len(got.splitlines()) == 7 + 5 + 1 + 2 + 1 + 1 + 1 + 1 + 5 + 3 + 3, got
     for label in ("✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"): assert f"`{label}`" in plan
     # whole, in order, with made-up words
     assert TE.relief_text("Tue 13 Oct", "2B Science", "P9–P11", "10:40–11:40", "2-06", EVE, dict(text="Notes, chapter 6.", link="https://x.org/a", files=[dict(id="a"), dict(id="b")])) == \
@@ -3565,9 +3566,9 @@ def at_once(*fs):
 @t
 def the_answers_are_the_plans():
     assert (bot.OLD_BUTTON, bot.NOT_YOURS_BUTTON, bot.WHY_CHANGE, bot.WHY_CANCEL) == (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE, WHY_CANCEL)
-    assert (bot.SENT_CHANGE, bot.SENT_CANCEL, bot.NOTHING, bot.WENT_WRONG, bot.LAST_ONE, bot.KEEP, bot.YES, bot.SURE_CANCEL) == (SENT_CHANGE, SENT_CANCEL, NOTHING, WENT_WRONG, LAST_ONE, "Keep it", "Yes, cancel it", "Cancel {days}? Your reason: {why}")       # not in the plan's table
+    assert (bot.SENT_CHANGE, bot.SENT_CANCEL, bot.NOTHING, bot.WENT_WRONG, bot.LAST_ONE, bot.KEEP, bot.YES, bot.SURE_CANCEL) == (SENT_CHANGE, SENT_CANCEL, NOTHING, WENT_WRONG, LAST_ONE, "Keep it", "Yes, cancel it", "Cancel {days}? Your reason: {why}")
     plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
-    for text in (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE): assert f"`{text}`" in plan, text        # WHY_CANCEL was ruled anew after the plan
+    for text in (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE, WHY_CANCEL, bot.SURE_CANCEL, SENT_CHANGE, SENT_CANCEL, NOTHING, LAST_ONE, bot.REMINDED, WENT_WRONG, bot.KEEP, bot.YES): assert f"`{text}`" in plan, text
     rights = {k: v[0] for k, v in bot.ACTIONS.items()}
     assert bot.TALK_MINUTES == 15 and {k: rights[k] for k in ("ack", "change", "cancel", "approve", "keep", "cancel-yes")} == {"ack": "relief", "change": "relief", "cancel": "relief", "approve": "relief.team", "keep": "relief", "cancel-yes": "relief"}
     assert not hasattr(bot, "NOT_CANCEL"), "no list of phrases decides what is cancelled"
