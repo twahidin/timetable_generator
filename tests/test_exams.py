@@ -2947,6 +2947,10 @@ def each_event_save_and_step_writes_one_history_entry():
         none(a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Daniel Koh")), 400)
         wrote(a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Ben Ong")), "away",
               "someone away replaced at once (Mon 5 Oct, going: Mr Hafiz Rahman (away) \u2192 Mr Ben Ong)", "Ms Aisha Rahman")
+        none(a.post(f"/api/events/{id}/in-charge", json=dict(name="Mr Ben Ong")), 403)
+        none(c.post(f"/api/events/{id}/in-charge", json=dict(name="Ms Aisha Rahman")), 400)
+        wrote(c.post(f"/api/events/{id}/in-charge", json=dict(name="Mr Ben Ong")), "in-charge", "teacher in charge changed (Ms Aisha Rahman \u2192 Mr Ben Ong)", "Shared committee code")
+        wrote(c.post(f"/api/events/{id}/in-charge", json=dict(name="Ms Aisha Rahman")), "in-charge", "teacher in charge changed (Mr Ben Ong \u2192 Ms Aisha Rahman)", "Shared committee code")
         none(a.delete(f"/api/events/{id}"), 409)
         wrote(c.post(f"/api/events/{id}/withdraw"), "withdraw", "withdrawn from the main site", "Shared committee code")
         none(c.post(f"/api/events/{id}/withdraw"), 400)
@@ -2955,6 +2959,100 @@ def each_event_save_and_step_writes_one_history_entry():
         assert H.read(kinds=["exams"], limit=1)[0]["link"] == "/exams", "a deleted event's entry links to the list"
     _reset()
 
+
+# ---- the teacher in charge, changed by the timetable committee
+BY_NAME = "Only the timetable committee can change the teacher in charge."
+
+@t
+def in_charge_goes_to_both_copies_and_stays_as_sent():
+    e = dict(id="e", kind="event", name="E", status="waiting", in_charge="Ms A", going=["Ms A"], duties=[dict(duty="Bus", who="Ms A", time="")], approved=None, log=[])
+    AP.send(dict(e), _PUB["model"], "Ms A", "t0", False, [])
+    AP.send(e, _PUB["model"], "Ms A", "t0", False, [])
+    assert AP.set_in_charge(e, "Mr B", "Timetable committee", "t1") == "Ms A \u2192 Mr B"
+    assert e["in_charge"] == "Mr B" and e["going"] == ["Ms A"] and e["duties"][0]["who"] == "Ms A", "being in charge is not going"
+    assert e["log"][-1] == dict(at="t1", by="Timetable committee", what="in charge", detail="Ms A \u2192 Mr B")
+    AP.approve(e, "Timetable committee", "t2")          # the sent copy is still the one the committee reads
+    assert e["approved"]["in_charge"] == "Mr B" and AP.changes(e, _PUB["model"]) == []
+    AP.set_in_charge(e, "Ms C", "x", "t3")
+    assert e["in_charge"] == e["approved"]["in_charge"] == "Ms C" and AP.changes(e, _PUB["model"]) == [] and e["status"] == "approved"
+    assert AP.fp(e) == e["sent_fp"], "nothing is waiting: the fingerprint moved with it"
+    raises(ValueError, lambda: AP.set_in_charge(e, "Ms C", "x", "t4"), "Ms C is in charge already.")
+    assert len([x for x in e["log"] if x["what"] == "in charge"]) == 2
+    e["where"] = "Elsewhere"                            # an edit not sent yet is still not sent
+    AP.set_in_charge(e, "Mr B", "x", "t5")
+    assert AP.fp(e) != e["sent_fp"] and [c["kind"] for c in AP.changes(e, _PUB["model"])] == ["where"]
+    n = dict(id="n", kind="event", name="N", status="draft", going=[], approved=None)
+    assert AP.set_in_charge(n, "Mr B", "x", "t") == "nobody \u2192 Mr B" and n["in_charge"] == "Mr B" and "sent_fp" not in n
+
+@t
+def the_committee_changes_an_events_teacher_in_charge():
+    _setup()
+    with published(_PUB):
+        a, b, c, g = staff("Ms Aisha Rahman"), staff("Mr Ben Ong"), committee(), staff("Ms Grace Yeo")
+        e = _event(a); id = e["id"]; url = f"/api/events/{id}/in-charge"
+        for k, want in ((a, BY_NAME), (b, A.ONLY_IN_CHARGE), (g, A.ONLY_IN_CHARGE)):      # the teacher in charge may open it, and still may not
+            r = k.post(url, json=dict(name="Mr Ben Ong")); assert r.status_code == 403 and r.get_json() == {"error": want}, r.data
+        for kind in ("head", "teacher", "student"):
+            r = as_role(kind).post(url, json=dict(name="Mr Ben Ong")); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_OWN_EVENTS}, r.data
+        for bad, want in ((dict(), A.PICK_IN_CHARGE), (dict(name=""), A.PICK_IN_CHARGE), (dict(name="  "), A.PICK_IN_CHARGE), (dict(name=["x"]), A.PICK_IN_CHARGE),
+                          (dict(name=None), A.PICK_IN_CHARGE), (dict(name="Mr Nobody"), "Mr Nobody is not on the published timetable or the staff list."),
+                          (dict(name="Ms Aisha Rahman"), "Ms Aisha Rahman is in charge already.")):
+            r = c.post(url, json=bad); assert r.status_code == 400 and r.get_json() == {"error": want}, (bad, r.data)
+        r = c.post(url, data="[1]", content_type="application/json"); assert r.status_code == 400 and r.get_json() == {"error": A.PICK_IN_CHARGE}, r.data
+        assert c.post("/api/events/ffff/in-charge", json=dict(name="Mr Ben Ong")).status_code == 404
+        assert SC.load(id)["in_charge"] == "Ms Aisha Rahman" and [x["what"] for x in SC.load(id).get("log") or []] == []
+        r = c.post(url, json=dict(name="Mr Ben Ong")); assert r.status_code == 200 and r.get_json()["status"] == "draft", r.data
+        s = SC.load(id)
+        assert s["in_charge"] == "Mr Ben Ong" and s["created_by"] == "Ms Aisha Rahman" and s["saved_by"] == "Timetable committee", s
+        # the event goes with it
+        assert b.get(f"/api/events/{id}").status_code == 200 and [x["id"] for x in b.get("/api/events").get_json()["schedules"]] == [id]
+        assert a.get(f"/api/events/{id}").status_code == 403 and a.get("/api/events").get_json()["schedules"] == []
+        r = a.put(f"/api/events/{id}", json=dict(e, in_charge="Ms Aisha Rahman")); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_IN_CHARGE}
+        r = b.put(f"/api/events/{id}", json=dict(e, in_charge="Ms Aisha Rahman")); assert r.status_code == 200 and r.get_json()["in_charge"] == "Mr Ben Ong", "a page opened before takes nothing back"
+        # waiting: still approved as it was sent; approved: on the main site at once
+        r = b.post(f"/api/events/{id}/fill", json=dict(way="form teachers")); assert r.status_code == 200, r.data
+        assert b.post(f"/api/events/{id}/send").status_code == 200
+        r = c.post(url, json=dict(name="Mr Daniel Koh")); assert r.status_code == 200 and r.get_json()["status"] == "waiting" and r.get_json()["changed"] is False, r.data
+        r = c.post(f"/api/events/{id}/approve"); assert r.status_code == 200, r.data
+        assert SC.load(id)["approved"]["in_charge"] == "Mr Daniel Koh"
+        r = c.post(url, json=dict(name="Ms Chloe Tan")); j = r.get_json()
+        assert r.status_code == 200 and j["status"] == "approved" and j["unsent"] == [] and j["changed"] is False, j
+        with _today(date(2026, 9, 28)):
+            assert [x["in_charge"] for x in c.get("/api/published/exams").get_json()["schedules"] if x["id"] == id] == ["Ms Chloe Tan"], "the main site too"
+        assert c.post(f"/api/events/{id}/withdraw").status_code == 200
+        assert c.post(url, json=dict(name="Mr Ben Ong")).status_code == 200 and SC.load(id)["status"] == "withdrawn", "in any state"
+        ex = c.post("/api/exams", json=dict(kind="exam", name="Sec 3 Exam", levels=["Sec 3"], start="2026-10-05", end="2026-10-05")).get_json()
+        assert c.post(f"/api/events/{ex['id']}/in-charge", json=dict(name="Mr Ben Ong")).status_code == 404, "an exam has no teacher in charge"
+    _reset()
+
+@t
+def a_committee_member_by_password_changes_it_and_by_code_does_not():
+    from werkzeug.security import generate_password_hash
+    _setup()
+    pw, code = "Ms Cora Lim", "Mr Leo Tan"
+    ACC.update(lambda d: (d["people"].setdefault(pw, {}).update(group="committee", added=True, username="cora.lim", pw=generate_password_hash(secrets.token_hex(8))),
+                          d["people"].setdefault(code, {}).update(group="committee", added=True)))
+    try:
+        with published(_PUB):
+            a = staff("Ms Aisha Rahman"); id = _event(a)["id"]; url = f"/api/events/{id}/in-charge"
+            assert staff(code).post(url, json=dict(name=code)).status_code == 403
+            r = staff(pw, via="password").post(url, json=dict(name=code)); assert r.status_code == 200, r.data      # staff added in the accounts may be in charge
+            s = SC.load(id); assert s["in_charge"] == code and s["saved_by"] == pw and s["log"][-1]["by"] == pw, s
+            r = staff(code).post(url, json=dict(name=pw)); assert r.status_code == 403 and r.get_json() == {"error": BY_NAME}, "in charge, and by code no committee"
+    finally:
+        ACC.update(lambda d: (d["people"].pop(pw, None), d["people"].pop(code, None)))
+        _reset()
+
+@t
+def a_new_publish_does_not_stop_the_change():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        id = _event(a)["id"]
+        s = SC.load(id); s["classes"] = ["9Z"]; s["levels"] = []; SC.save(s, _PUB, F.CAL, "x", check=False)      # a class the timetable no longer has
+        r = c.post(f"/api/events/{id}/in-charge", json=dict(name="Mr Ben Ong")); assert r.status_code == 200, r.data
+        assert SC.load(id)["in_charge"] == "Mr Ben Ong"
+    _reset()
 
 # ---- events on the main site (stage 4, task 5)
 _EVK = {"start", "end", "label", "room", "seat_note", "exam", "kind", "p", "n"}

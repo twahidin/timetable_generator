@@ -26,5 +26,6 @@ def rights(person, via, shared=None, today=None):
         if g == "committee":
             r |= {"committee", "setup", "history", "codes"}
             if ex.get("admin"): r.add("admin")
-        if g in ("hod", "sh"): r.add("setup")
+        if g in ("hod", "sh"): r |= {"setup", "history.dept"}
+    r.add("history.own")   # anyone signed in by name can change something (ask for relief, start an event), so sees their own history
     return frozenset(r)

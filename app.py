@@ -5,7 +5,7 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, datetime, gzip, hmac, io, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
+import copy, datetime, gzip, hmac, io, json, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, compare, draft, history, store, sync, typed, versions
+import access, checks, compare, draft, history, putback, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from relief import absences as relief_absences
@@ -139,7 +139,7 @@ def _must_change_first():
     return redirect("/account/password")
 
 # every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
-RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "codes", "admin", "own", "exams",
+RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "history.dept", "history.own", "codes", "admin", "own", "exams",
                     "relief", "relief.plan", "relief.settings", "relief.save", "relief.team"})
 
 def need(*names):
@@ -202,6 +202,7 @@ def page(title, body):
 
 # ------------------------------------------------------------------------------------------------ signing in
 CODE_LABEL = "Your personal code (on the slip from the school)"
+CODE_LABEL_SHARED = "Your code (the one the school gave you)"   # while a shared code still opens the site
 TO_USERNAME = "Committee and management: sign in with your username"
 WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
@@ -233,10 +234,19 @@ def school_name():
 def _warnings():
     return "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
 
+def _code_label():
+    """the code box's words: the plain ones people already know while any shared code is set and not turned off (a teacher
+    with the shared teacher code is not told they need a personal one); "personal code" once every shared code is off.
+    Accounts that cannot be read count as on, as the sign-in does (a turned-off code works again then)"""
+    have, _ = access.configured()
+    try: off = people.load()["ways"]["off"]
+    except Exception: off = {}
+    return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in people.SHARED) else CODE_LABEL
+
 def _code_page(msg=""):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="/login"><label for="code">{esc(CODE_LABEL)}</label>
+<div class="login one"><form method="post" action="/login"><label for="code">{esc(_code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
 <button type="submit">Open</button></form>{err}
 <p class="way"><a href="/login/password">{esc(TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
@@ -440,7 +450,8 @@ TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("se
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
          ("Exams and events", "", "/exams", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
-         ("History", "Who changed what, and when", "/history", ("history",)))
+         ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
+OWN_HISTORY = "Your own changes"
 GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
 DUTIES_TILE = ("My exam and event duties", "Your duties, your events and the lessons that don't happen")   # in place of Exams and events for everyone else
 TO_PASSWORD = "Sign in with your password to open this."
@@ -460,25 +471,64 @@ def _tiles(p):
         if link == "/exams" and not _route_exists("/exams"): continue
         if mine & set(need_):
             until = p["extras"].get("exams") if link == "/exams" else None
+            if link == "/history" and not mine & {"history", "history.dept"}: line = OWN_HISTORY     # only their own changes are there
             out.append((title, f"Until {_day(until)}" if until else line, link, False))
         elif title in GREYED and strong & set(need_): out.append((title, TO_PASSWORD, "/login/password", True))
         elif link == "/exams": out.append((*DUTIES_TILE, link, False))   # anyone else signed in by name: their own exam duties there
     return out
 
+def _since_box(p):
+    """the "Since you last signed in" box for the person p, or "" (no previous sign-in, hidden with Later, or nothing to say)"""
+    s = people.record(people.load(), p["name"])["signins"]
+    if len(s) < 2 or session.get("later") == s[-1]: return ""
+    previous = s[-2]
+    scope, allow, _ = history_scope()
+    if scope in (None, "own"): allow = lambda e: False     # only the committee and heads get the summary; everyone gets the published line
+    try: got = history.summary(previous, allow, p["name"])
+    except Exception as e:
+        print(f"WARNING: the summary since the last sign-in could not be made ({type(e).__name__})", file=sys.stderr, flush=True)
+        return ""
+    if not got["n"] and not got["published"]: return ""
+    out = ['<section class="since"><h2>Since you last signed in</h2>']
+    if got["n"]:
+        n, pe = got["n"], got["people"]
+        out.append(f'<p class="muted small">{esc(history.when_text(previous))} · {n} change{"" if n == 1 else "s"} by {pe} {"person" if pe == 1 else "people"}</p><ul>')
+        out += [f'<li><span>{esc(who)} · {esc(where)}</span><b>{c}</b></li>' for who, where, c in got["rows"]]
+        if got["more"]: out.append(f'<li class="muted">and {got["more"]} more</li>')
+        out.append("</ul>")
+    if got["published"]:
+        out.append(f'<p>{esc("The timetable was published again on " + history.when_text(got["published"]) + ".")}</p>')
+    out.append('<div class="row">')
+    if scope and got["n"]: out.append(f'<a href="/history?since={int(previous)}">See them</a>')
+    out.append('<form method="post" action="/home/later"><button type="submit">Later</button></form></div></section>')
+    return "".join(out)
+
+@app.post("/home/later")
+@need("timetable")
+def home_later():
+    """hides the box until the next sign-in"""
+    p = who()
+    if p is None: return redirect("/")
+    s = people.record(people.load(), p["name"])["signins"]
+    if s: session["later"] = s[-1]
+    return redirect("/home")
+
 @app.get("/home")
 @need("timetable")
 def home():
-    """a person's tiles: only what they may open; with one tile (and nothing waiting for the password) it opens at once"""
+    """a person's tiles: only what they may open; with one tile (and nothing waiting for the password) it opens at once
+    (someone signed in by name has several now)"""
     p = who()
     if p is None: return redirect("/")   # a shared code is nobody's: its own page
     got = _tiles(p)
-    if len(got) == 1 and not got[0][3]: return redirect(got[0][2])
+    since_box = _since_box(p)
+    if len(got) == 1 and not got[0][3] and not since_box: return redirect(got[0][2])
     tiles = "".join(f'<a class="tile{" off" if off else ""}" href="{link}"><b>{esc(title)}</b><span class="muted small">{esc(line)}</span></a>'
                     for title, line, link, off in got)
     change = ' · <a href="/account/password">Change password</a>' if via() == "password" else ""
     return page("Home", f"""<main class="home"><header class="hello"><h1>Hello, {esc(p["name"])}</h1>
 <p class="muted small">{esc(_HOW.get(via(), "Signed in"))}{change} · <a href="/logout">Sign out</a></p></header>
-<nav class="tiles">{tiles}</nav><p class="muted small foot">{esc(school_name())}</p></main>""")
+{since_box}<nav class="tiles">{tiles}</nav><p class="muted small foot">{esc(school_name())}</p></main>""")
 
 # ------------------------------------------------------------------------------------------------ every request
 @app.before_request
@@ -602,6 +652,18 @@ def import_xlsx():
     finally: os.unlink(path)
     return jsonify(spec)
 
+def unfilled_rows(spec):
+    """a sentence about the teaching-group rows of step 5 with no subject, which the workbook leaves out ("+ Add teaching group"
+    makes such a row, and a row nobody filled in is saved with no fields at all); "" when every row has its subject"""
+    rows = [x if isinstance(x, dict) else {} for x in spec.get("lessons") or []]
+    rows = [x for x in rows if not str(x.get("subject") or "").strip()]
+    if not rows: return ""
+    said = lambda x: " ".join(str(v) for v in (x.get("block") or "", ", ".join(str(c) for c in x.get("classes") or [] if c) or "", ", ".join(str(t) for t in x.get("teachers") or [] if t) or "") if v)
+    part = [said(x) for x in rows if said(x)]; n, e = len(rows), len(rows) - len(part)
+    which = ([f"{e} with nothing filled in"] if e else []) + ([f"{len(part)} with {'; '.join(part[:6])}{' and more' if len(part) > 6 else ''}"] if part else [])
+    return (f"{n} teaching group row{'s' if n > 1 else ''} on step 5 {'have' if n > 1 else 'has'} no subject, so {'they are' if n > 1 else 'it is'} left out of the workbook and of the timetable "
+            f"({', '.join(which)}). On step 5's Table view, give {'each' if n > 1 else 'it'} a subject or delete {'them' if n > 1 else 'it'}.")
+
 def normalise(spec):
     """the editor's JSON -> the exact spec an agent would read from the workbook (codes, periods and lesson lengths worked out)"""
     for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices"): spec.setdefault(k, [])
@@ -622,6 +684,7 @@ def check_setup():
         norm = normalise(copy.deepcopy(spec)); found = checks.findings(norm)
         fall = checks.with_fallbacks(norm) if norm.get("choices") else None
     except Exception as e: return {"error": f"The setup could not be checked: {e}"}, 400
+    if (left := unfilled_rows(spec)): found.append(dict(level=checks.WARNING, area="lessons", text=left))
     crit = sum(1 for f in found if f["level"] == checks.CRITICAL)
     return jsonify(findings=found, critical=crit, warnings=len(found) - crit, fallbacks=fall)
 
@@ -1738,47 +1801,204 @@ HISTORY_MAX = 500
 _SAFE_LINK = re.compile(r"^/(?![/\\\s])")   # a link inside this app: one leading slash, not followed by /, \ or whitespace
 HISTORY_TOP = "Pick a day as year-month-day, like 2026-11-19."
 
-def _history_day(text):
-    try: return datetime.datetime.strptime(text, "%Y-%m-%d")
-    except ValueError: return None
+def history_scope():
+    """(scope, allow, depts) of the signed-in person's history: "all" with right history; "dept" with history.dept (entries by
+    them, or about a department of theirs); "own" with history.own (entries by them); (None, None, []) otherwise"""
+    if has("history"): return "all", None, []
+    p = who(); me = p["name"] if p else None
+    if has("history.dept") and p:
+        mine = list(people.record(people.load(), me)["depts"])
+        def about_mine(e):   # a line whose departments are not a list of names is no one's department
+            ds = e.get("depts")
+            return isinstance(ds, list) and any(isinstance(d, str) and d in mine for d in ds)
+        return "dept", (lambda e: e.get("who") == me or about_mine(e)), mine
+    if has("history.own") and p:
+        shut = via() == "code"     # a personal code does not open the setup or the admin page: nor their history
+        return "own", (lambda e: e.get("who") == me and not (shut and e.get("kind") in _NOT_BY_CODE)), []
+    return None, None, []
+
+_NOT_BY_CODE = {"setup", "setup-refused", "setup-replaced", "app", "account"}
+
+def _own_line():
+    """the piece of text a stored line about the signed-in person must hold, for history.read's raw (own scope only)"""
+    return json.dumps(who()["name"], ensure_ascii=False)
 
 @app.get("/history")
-@need("history")
+@need("history", "history.dept", "history.own")
 def history_page():
     return app.send_static_file("history.html")
 
-@app.get("/api/history")
+def _history_query(args):
+    """the filters of /api/history as keyword arguments for history.read, or ({"error": …}, 400)"""
+    q = args
+    since = until = None
+    if q.get("from"):
+        since = history.day_start(q["from"])
+        if since is None: return {"error": HISTORY_TOP}, 400
+    if q.get("to"):
+        d = history.day_start(q["to"])
+        if d is None: return {"error": HISTORY_TOP}, 400
+        until = d + 86400 - 0.001
+    if q.get("since"):
+        try: after = float(q["since"])
+        except ValueError: return {"error": "Pick a time as a number of seconds."}, 400
+        if after != after or after in (float("inf"), float("-inf")): return {"error": "Pick a time as a number of seconds."}, 400
+        since = after if since is None else max(since, after)
+    if since is not None and until is not None and since > until: return {"error": "The first day is after the last day."}, 400
+    return dict(where=q.get("where") or None, dept=q.get("dept") or None, since=since, until=until,
+                signins=q.get("signins") == "1", who_contains=(q.get("who") or "").strip().lower() or None)
+
+HISTORY_DOWNLOAD_MAX = 20000
+HISTORY_MORE = "There are more entries than one download holds: pick fewer days."
+_VIA = {"password": "password", "code": "code", "shared": "shared code", "personal": "personal code", "app": "by itself", "google": "Google"}
+
+@app.get("/api/history/download")
 @need("history")
+def history_download():
+    """the history with the page's filters as an Excel file, newest first, up to HISTORY_DOWNLOAD_MAX entries"""
+    import openpyxl
+    f = _history_query(request.args)
+    if isinstance(f, tuple): return f
+    found = history.read(limit=HISTORY_DOWNLOAD_MAX + 1, **f)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "History"
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    txt = lambda v: ILLEGAL_CHARACTERS_RE.sub("", v)       # Excel refuses control characters
+    def put(cells): ws.append([txt(c) for c in cells])
+    put(["Day", "Time", "Who", "Signed in with", "Where", "What", "Was", "Became", "Departments"])
+    for e in found[:HISTORY_DOWNLOAD_MAX]:
+        day = clock = ""
+        try:
+            d = datetime.datetime.fromtimestamp(history.ts_of(e), history.SCHOOL_TZ)
+            day, clock = d.strftime("%Y-%m-%d"), f"{d.hour % 12 or 12}:{d.minute:02d} {'am' if d.hour < 12 else 'pm'}"
+        except (TypeError, ValueError, OverflowError, OSError): pass
+        via = str(e.get("via") or "")
+        setup = e.get("kind") == "setup"
+        depts = e.get("depts")
+        put([day, clock, str(e.get("as") or e.get("who") or ""), _VIA.get(via) or via, str(e.get("where") or ""),
+             str(e.get("text") or ""), history._show(e.get("was")) if setup else "", history._show(e.get("now")) if setup else "",
+             ", ".join(str(x) for x in depts) if isinstance(depts, list) else ""])
+    if len(found) > HISTORY_DOWNLOAD_MAX: put([HISTORY_MORE])
+    for row in ws.iter_rows():
+        for c in row: c.data_type = "s"                    # text is never read as a formula
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    name = datetime.datetime.now(history.SCHOOL_TZ).strftime("history-%Y-%m-%d.xlsx")
+    return send_file(out, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=name)
+
+@app.get("/api/history")
+@need("history", "history.dept", "history.own")
 def api_history():
-    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (local days, `to`
-    included), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
+    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (school days, `to`
+    included), since (seconds since 1970), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
     q = request.args
     try: limit = int(q.get("limit") or 200)
     except ValueError: return {"error": "The number of entries must be a number."}, 400
     if limit < 1: return {"error": "The number of entries must be at least 1."}, 400
     limit = min(limit, HISTORY_MAX)
-    since = until = None
-    if q.get("from"):
-        d = _history_day(q["from"])
-        if not d: return {"error": HISTORY_TOP}, 400
-        since = d.timestamp()
-    if q.get("to"):
-        d = _history_day(q["to"])
-        if not d: return {"error": HISTORY_TOP}, 400
-        until = (d + datetime.timedelta(days=1)).timestamp() - 0.001
-    if since is not None and until is not None and since > until: return {"error": "The first day is after the last day."}, 400
-    who_ = (q.get("who") or "").strip().lower()
-    where = q.get("where") or None
-    dept = q.get("dept") or None
-    signins = q.get("signins") == "1"
+    f = _history_query(q)
+    if isinstance(f, tuple): return f
+    dept = f["dept"]
     before = q.get("before") or None
-    found = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=limit + 1,
-                         who_contains=who_ or None)
+    scope, allow, mine = history_scope()
+    if scope == "dept" and dept is not None and dept not in mine: return jsonify(entries=[], more=False, admin=has("admin"), depts=mine, scope=scope, download=False)
+    found = history.read(before=before, limit=limit + 1, allow=allow, raw=_own_line() if scope == "own" else None, **f)
+    if scope != "all":
+        for e in found: e.pop("addr", None)     # where a refused try came from is the committee's to read
+    shown = found[:limit]
+    times = [t for t in map(history.ts_of, shown) if t is not None]     # a line whose ts cannot be read is skipped here
+    if times and (has("setup") or has("admin")):
+        putback.annotate(shown, history.read(since=min(times) - 60, kinds=putback.TOUCH_KINDS, limit=10 ** 7), may_put_back)
     for e in found:
         if "link" in e and not _SAFE_LINK.match(e["link"] if isinstance(e["link"], str) else ""): del e["link"]
     try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]
     except Exception: depts = []
-    return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts)
+    if scope == "dept": depts = mine
+    return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts, scope=scope, download=has("history"))
+
+CANT_BACK = "This change cannot be put back here."
+
+def may_put_back(es):
+    """may the signed-in person put back this unit (its entries, oldest first)? The committee any setup change, a head
+    signed in by name their own (the app's follow-ups to it are nobody's); an admin an account change. The shared heads'
+    code never puts back"""
+    es = putback.own(es)
+    if not es: return False
+    if putback.unit_of(es[0]).startswith("a:"): return has("admin")
+    if has("committee"): return True
+    p = who()
+    return is_head() and p is not None and all(e.get("who") == p["name"] for e in es)
+
+AGAIN_SINCE = "Can't put back: this was changed again since."
+REPLACED_MEANWHILE = "Can't put back: the whole setup was replaced meanwhile. Use a saved copy on the committee page."
+
+def _field_now(d, item, name, field):
+    """what the admin page's _change compares against for one field of one person"""
+    r = people.record(d, name)
+    if field == "group": return item["group"]
+    if field in ("relief", "exams", "admin"): return r["extras"][field]
+    return r[field]                                   # depts, note, off
+
+def _put_back_account(unit, e):
+    """put back an admin-page change: every field of every person goes back to what the entry says it was, all in one
+    people.update and only while each is still as the entry left it; nothing is written when any check refuses"""
+    me, by_, pub = who()["name"], by(), store.published()
+    text = "Put back: " + str(e.get("text") or "")
+    per = {}
+    for c in e.get("changes") or []:
+        per.setdefault(c["name"], {})[c["field"]] = (c.get("was"), c.get("now"))
+    def go(d):
+        items = {p["name"]: p for p in people.staff(pub, d)}
+        for n in per:
+            if n not in items: raise Refused(f"Can't put back: {n} is no longer on the staff list.")
+        for n, fs in per.items():
+            if any(_field_now(d, items[n], n, f) != now for f, (was, now) in fs.items()): raise Refused(AGAIN_SINCE)
+        before = people.usable_admins(d)
+        def want(n, fs):   # a head again keeps the departments they have now: _change would otherwise give them step 4's
+            w = {f: was for f, (was, now) in fs.items()}
+            if w.get("group") in people.HEADS and "depts" not in w: w["depts"] = list(people.record(d, n)["depts"])
+            return w
+        done = {n: _change(d, n, items[n], want(n, fs)) for n, fs in per.items()}
+        touched = [n for n in per if done[n]]
+        if not touched: raise Refused(AGAIN_SINCE)
+        _whole(d, touched, before)
+        return touched, [c for n in touched for c in done[n]]
+    try: touched, changes = _update_as(me, go)
+    except Refused as x: return {"error": str(x)}, 409
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    _account_entry("putback", touched, changes, text, by_=by_, putback=unit, putback_of=e.get("as"), putback_ts=e.get("ts"))
+    return {"done": True, "text": "Put back."}
+
+@app.post("/api/history/back")
+@need("setup", "admin")
+def history_back():
+    """put back one setup change (the whole save it was made in): the reverse operations are applied under the store's
+    lock, only when every row and field is still as the save left it and no band is left under another's name or
+    named by lessons or rules once it is gone"""
+    body = request.get_json(force=True, silent=True)
+    eid = body.get("id") if isinstance(body, dict) else None
+    e = history.find(eid)
+    if e is None: return {"error": "That entry is not in the history."}, 404
+    if putback.unit_of(e) is None: return {"error": CANT_BACK}, 409
+    v0 = store.setup_record()["v"]    # the setup the history is read against: a whole replacement after it refuses the put back
+    got = putback.gather(eid)
+    if got is None: return {"error": CANT_BACK}, 409
+    unit, es, newer = got
+    if not may_put_back(es): return {"error": "Only the timetable committee can put back someone else's change."}, 403
+    why = putback.why_not(es, newer)
+    if why: return {"error": why}, 409
+    if unit.startswith("a:"): return _put_back_account(unit, es[0])
+    ops = putback.reverse(es)
+    depts = head_depts() if is_head() else None
+    def check(spec, o):
+        sentence = putback.changed_since(spec, es) or putback.band_clash(spec, o)
+        if sentence or not is_head(): return sentence
+        refused = sync.head_split(spec, o, depts)[1]
+        return refused[0][1] if refused else None
+    tag = {"putback": unit, "putback_of": es[0].get("as"), "putback_ts": es[0].get("ts")}
+    try: store.apply_changes(ops, "history", check=check, since=v0, by=by(), tag=tag)
+    except store.Replaced: return {"error": REPLACED_MEANWHILE}, 409
+    except store.Refused as x: return {"error": str(x)}, 409
+    except LookupError: return {"error": "There is no saved setup to change yet."}, 409
+    return {"done": True, "text": "Put back."}
 
 ONLY_ADMIN = "Only an admin can open this page."
 
@@ -1995,6 +2215,7 @@ NO_EXAM = "That exam is not there any more."
 NO_EVENT = "That event is not there any more."
 ONLY_IN_CHARGE = "Only the teacher in charge and the timetable committee can open this event."
 PICK_IN_CHARGE = "Pick the teacher in charge."
+ONLY_GIVES = "Only the timetable committee can change the teacher in charge."
 EVENT_KEEPS = ("id", "kind", "in_charge", "created_at", "created_by", "status", "approved", "approved_at", "approved_by", "sent_at",
                "sent_by", "sent_fp", "note", "log", "handled")
 ONLY_APPROVE = "Only the timetable committee can approve, send back or withdraw."
@@ -2578,24 +2799,25 @@ EXAM_STEPS = {"sent": "sent to the timetable committee", "sent again": "sent to 
               "changes sent": "changes sent to the timetable committee", "approved": "approved: on the main site",
               "changes approved": "changes approved: on the main site", "sent back": "sent back to {who}",
               "changes sent back": "changes sent back to {who}", "withdrawn": "withdrawn from the main site",
-              "replaced": "someone away replaced at once"}
+              "replaced": "someone away replaced at once", "in charge": "teacher in charge changed"}
 
 def _exam_step_words(s):
     """the history's words for the step act() has just logged on s: its log's newest entry"""
     e = (s.get("log") or [{}])[-1]
     words = EXAM_STEPS.get(e.get("what"), str(e.get("what") or "changed")).replace("{who}", exams_approval.WHO.get(s.get("kind"), "the exams committee"))
-    return f"{words} ({e['detail']})" if e.get("what") in ("changes sent", "replaced") and e.get("detail") else words
+    return f"{words} ({e['detail']})" if e.get("what") in ("changes sent", "replaced", "in charge") and e.get("detail") else words
 
 def _exam_approval(id, act, what, approver=False, check=False, event=False):
     """run act(pub, sched, who, now, body) on the stored schedule, save, record it in the history (what: the entry's kind
     of step) and answer with the review; locked from loading to saving, as _exam_changed is. Only Send checks the schedule
     against the timetable (check=True): approve, send back, withdraw and someone is away still work after a new publish.
-    event=True: the same for an event (its rights, wording and reply)"""
+    event=True: the same for an event (its rights, wording and reply). approver: the timetable committee's alone (True, or
+    the sentence anyone else is refused with)"""
     with exams_schedules.editing():
         if event: pub, who, s, _, err = _event_gate(id)
         else: (pub, who, err), s = _exams_gate(), None
         if err: return err
-        if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE}, 403
+        if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE if approver is True else approver}, 403
         if not event:
             s, err = _exam_or_404(id)
             if err: return err
@@ -2737,6 +2959,11 @@ def events_one_page(id):
     if _event_rights(None) is None: return redirect("/")
     return app.send_static_file("exams.html")
 
+def _may_be_in_charge(pub, name):
+    """raises unless name is someone the timetable committee may put in charge of an event: anyone relief and exams know"""
+    if not isinstance(name, str) or not name.strip(): raise ValueError(PICK_IN_CHARGE)
+    if name not in {p["name"] for p in relief_staff(pub)}: raise ValueError(f"{name} is not on the published timetable or the staff list.")
+
 @app.get("/api/events")
 @need("committee", "timetable")
 def events_list():
@@ -2756,8 +2983,8 @@ def events_create():
     b = _exam_json()
     in_charge = b.get("in_charge")
     if every:
-        if not isinstance(in_charge, str) or not in_charge.strip(): return {"error": PICK_IN_CHARGE}, 400
-        if in_charge not in {p["name"] for p in relief_staff(pub)}: return {"error": f"{in_charge} is not on the published timetable or the staff list."}, 400
+        try: _may_be_in_charge(pub, in_charge)
+        except ValueError as e: return {"error": str(e)}, 400
     else: in_charge = who
     try: sched = exams_schedules.new_event(b["name"], b["levels"], b.get("classes") or [], b["start"], b["end"], who, in_charge)
     except ValueError as e: return {"error": str(e)}, 400
@@ -2878,6 +3105,16 @@ def events_handled(id):
     with exams_schedules.editing():
         pub, who, s, _, err = _event_gate(id)
         return err or _handled(pub, who, s, True)
+
+def _event_in_charge(pub, s, by, now, b):
+    _may_be_in_charge(pub, b.get("name"))
+    exams_approval.set_in_charge(s, b["name"], by, now)
+
+@app.post("/api/events/<id>/in-charge")
+@need("committee", "timetable")
+def events_in_charge(id):
+    """{name}: the timetable committee gives the event to another teacher in charge, at once (exams.approval.set_in_charge)"""
+    return _exam_approval(id, _event_in_charge, "in-charge", approver=ONLY_GIVES, event=True)
 
 @app.get("/api/events/<id>/who")
 @need("committee", "timetable")

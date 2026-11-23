@@ -554,4 +554,158 @@ def no_password_or_code_in_the_history():
     for e in accounts():
         assert not ({"pw", "password", "once"} & set(e)) and all(c["field"] not in ("pw", "password", "once", "must_change") for c in e.get("changes") or []), e
 
+import putback  # noqa: E402
+def putback_admin_sentence(): return putback._ADMIN
+def back(c, eid): return post(c, "/api/history/back", id=eid)
+
+@t
+def a_changed_username_keeps_the_password_and_signs_out():
+    c, old = admin(), signed_in(LEE)
+    n0, pw0 = rec(LEE)["n"], rec(LEE)["pw"]
+    try:
+        r = c.post("/api/admin/person", json=dict(name=LEE, username="Lee.New")); assert r.status_code == 200 and r.get_json()["username"] == "lee.new", r.get_json()
+        assert rec(LEE)["pw"] == pw0 and rec(LEE)["n"] == n0 + 1 and r.get_json()["has_password"] is True
+        assert old.get("/api/history").status_code == 401, "their old session ends"
+        _, r = pw_in("lee.kokhwa", PWS[LEE]); assert r.status_code != 302, "the old username does not work"
+        c2, r = pw_in("LEE.new", PWS[LEE]); assert r.status_code == 302 and r.headers["Location"].endswith("/home"), "the new one works with the same password"
+        e = H.read(kinds={"account"}, limit=1)[0]
+        assert e["what"] == "username" and e["changes"] == [dict(name=LEE, field="username", was="lee.kokhwa", now="lee.new")], e
+    finally:
+        c.post("/api/admin/person", json=dict(name=LEE, username="lee.kokhwa"))
+    assert pw_in("lee.kokhwa", PWS[LEE])[1].status_code == 302
+
+@t
+def put_back_a_bulk_change():
+    c = admin()
+    P.update(lambda d: [d["people"].setdefault(n, {}).setdefault("extras", {}).update(exams=None) for n in (NUR, WEI)])
+    n0, ns = len(accounts()), {x: rec(x)["n"] for x in (NUR, WEI)}
+    assert post(c, "/api/admin/bulk", names=[NUR, WEI], action="give", extra="exams", until=UNTIL, preview=False)[0] == 200
+    e = accounts()[0]; assert len(accounts()) == n0 + 1
+    code, j = back(c, e["id"]); assert (code, j) == (200, dict(done=True, text="Put back.")), (code, j)
+    assert all(rec(x)["extras"]["exams"] is None and rec(x)["n"] == ns[x] + 2 for x in (NUR, WEI)), "gone, and signed out again"
+    got = accounts(); assert len(got) == n0 + 2
+    p = got[0]
+    assert (p["what"], p["people"], p["text"], p["putback_of"], p["putback_ts"]) == ("putback", [NUR, WEI], "Put back: " + e["text"], e["as"], e["ts"]), p
+    assert p["putback"].startswith("a:"), p
+    assert p["changes"] == [dict(name=x, field="exams", was=UNTIL, now=None) for x in (NUR, WEI)], p["changes"]
+    assert back(c, e["id"])[0] == 409, "put back twice is refused"
+
+@t
+def put_back_a_group_change():
+    c = admin()
+    assert rec(NUR)["group"] in (None, "teacher") and not rec(NUR)["depts"]
+    assert post(c, "/api/admin/person", name=NUR, group="hod")[0] == 200 and rec(NUR)["depts"] == ["HU"]
+    e = accounts()[0]
+    code, j = back(c, e["id"]); assert code == 200, (code, j)
+    r = rec(NUR); assert (r["group"] or "teacher") == "teacher" and r["depts"] == [], r
+    assert accounts()[0]["changes"] == [dict(name=NUR, field="group", was="hod", now="teacher"), dict(name=NUR, field="depts", was=["HU"], now=[])]
+
+@t
+def put_back_refused_after_a_later_change():
+    c = admin()
+    assert post(c, "/api/admin/person", name=WEI, group="hod")[0] == 200
+    first = accounts()[0]
+    assert post(c, "/api/admin/person", name=WEI, group="executive")[0] == 200
+    before, n = raw(), len(accounts())
+    code, j = back(c, first["id"])
+    assert code == 409 and j["error"].startswith(f"Can't put back: {ALICIA} changed this again on "), (code, j)
+    assert raw() == before and len(accounts()) == n
+
+@t
+def put_back_refused_when_the_value_moved_under_it():
+    c = admin()
+    assert post(c, "/api/admin/person", name=GRACE, extras=dict(relief=True))[0] == 200
+    e = accounts()[0]
+    P.update(lambda d: d["people"][GRACE]["extras"].update(relief=False))      # changed outside the history
+    before, n = raw(), len(accounts())
+    assert back(c, e["id"]) == (409, {"error": "Can't put back: this was changed again since."})
+    P.update(lambda d: d["people"][GRACE]["extras"].update(relief=True))
+    # a person no longer on the staff list
+    P.update(lambda d: d["people"].setdefault("Mr Ghost", {}).update(added=True, group="executive"))
+    assert post(c, "/api/admin/person", name="Mr Ghost", note="x")[0] == 200
+    g = accounts()[0]
+    P.update(lambda d: d["people"]["Mr Ghost"].update(added=False))
+    code, j = back(c, g["id"]); assert (code, j) == (409, {"error": "Can't put back: Mr Ghost is no longer on the staff list."}), (code, j)
+    P.update(lambda d: d["people"].pop("Mr Ghost", None))
+
+@t
+def put_back_keeps_an_admin():
+    c = admin()
+    assert post(c, "/api/admin/person", name=JOSEPH, extras=dict(admin=True))[0] == 200
+    e = accounts()[0]
+    assert post(c, "/api/admin/person", name=ALICIA, off=True)[0] == 200
+    others = [n for n in P.admins(P.load()) if n != JOSEPH]                  # earlier tests left another admin: off for this test
+    P.update(lambda d: [d["people"][n].update(off=True) for n in others])
+    assert P.usable_admins(P.load()) == [JOSEPH]
+    jc = signed_in(JOSEPH)
+    before, n = raw(), len(accounts())
+    got =back(jc, e["id"]); assert got == (409, {"error": last_admin(JOSEPH)}), got
+    assert raw() == before and len(accounts()) == n and rec(JOSEPH)["extras"]["admin"] is True
+    P.update(lambda d: [d["people"][n].update(off=False) for n in others + [ALICIA]])
+    P.update(lambda d: d["people"][JOSEPH]["extras"].update(admin=False))
+
+@t
+def put_back_an_added_person_says_where():
+    c = admin()
+    assert post(c, "/api/admin/person", name="Mr Zed Added", added=True)[0] == 200
+    e = accounts()[0]
+    code, j = back(c, e["id"])
+    assert code == 409 and j["error"] == putback_admin_sentence(), (code, j)
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == j["error"], mine.get("back")
+
+@t
+def only_an_admin_puts_back_accounts():
+    c = admin()
+    assert post(c, "/api/admin/person", name=PRIYA, note="back me")[0] == 200
+    e = accounts()[0]
+    P.update(lambda d: d["people"][JOSEPH]["extras"].update(admin=False))
+    jc = signed_in(JOSEPH)                                                   # committee, with a password, no Admin
+    j = jc.get("/api/history", query_string=dict(where="Admin")).get_json()
+    assert all("back" not in x for x in j["entries"] if x["id"] == e["id"]), j["entries"][:1]
+    before = raw()
+    code, k = back(jc, e["id"]); assert code == 403, (code, k)
+    assert raw() == before and rec(PRIYA)["note"] == "back me"
+
+@t
+def put_back_a_broken_account_line_says_so():
+    c = admin()
+    g = dict(field="group", was="teacher", now="hod")
+    for changes in ([g], [dict(name=NUR)], [dict(g, name=["x"])], [dict(g, name=NUR, field=5)], "group", [3]):
+        e = H.add({"kind": "account", "what": "group", "where": "Admin", "people": [NUR], "changes": changes, "text": "hand-edited", **H.by_of(ALICIA, "password")})
+        before = raw()
+        assert back(c, e["id"]) == (409, {"error": "This change cannot be put back here."}), changes
+        assert raw() == before
+        mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]]
+        assert mine and "back" not in mine[0], mine
+
+@t
+def put_back_a_head_with_no_departments():
+    c = admin()
+    P.update(lambda d: d["people"][SITI].update(group="sh", depts=[]))     # an SH with no departments on the admin page (step 4 says MA)
+    assert post(c, "/api/admin/person", name=SITI, group="teacher")[0] == 200
+    e = accounts()[0]; assert e["changes"] == [dict(name=SITI, field="group", was="sh", now="teacher")], e["changes"]
+    assert back(c, e["id"]) == (200, dict(done=True, text="Put back."))
+    r = rec(SITI); assert (r["group"], r["depts"]) == ("sh", []), r
+    assert accounts()[0]["changes"] == [dict(name=SITI, field="group", was="teacher", now="sh")], accounts()[0]["changes"]
+
+@t
+def put_back_of_a_line_with_no_text_is_still_recorded():
+    c = admin()
+    P.update(lambda d: d["people"][PRIYA].update(note="now"))
+    e = H.add({"kind": "account", "what": "note", "where": "Admin", "people": [PRIYA], "text": None,
+               "changes": [dict(name=PRIYA, field="note", was="before", now="now")], **H.by_of(ALICIA, "password")})
+    got = back(c, e["id"]); assert got == (200, dict(done=True, text="Put back.")) and rec(PRIYA)["note"] == "before", got
+    p = accounts()[0]; assert (p["what"], p["text"], p["putback"]) == ("putback", "Put back: ", "a:" + e["id"]), p
+
+@t
+def shared_codes_and_an_admin_s_code_never_put_back_accounts():
+    c = admin()
+    assert post(c, "/api/admin/person", name=PRIYA, note="not by a code")[0] == 200
+    e = accounts()[0]; before, n = raw(), len(accounts())
+    assert back(shared("committee"), e["id"]) == (403, {"error": "Only the timetable committee can put back someone else's change."})
+    assert back(shared("head"), e["id"]) == (403, {"error": "Only the timetable committee can put back someone else's change."})
+    assert back(as_person(ALICIA, "code"), e["id"]) == (401, AGAIN)        # an admin's personal code opens neither the setup nor the admin page
+    assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "not by a code"
+
 print(f"{COUNT} admin tests passed")
