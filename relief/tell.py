@@ -17,7 +17,8 @@ kept:{absent}:{ckey}:{when} to the teacher who asked to change; ask:{absent}:{ck
 with the new pick, or two minutes after the request without one, and then askpick:… once when a pick (another than the ask
 carried) is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer;
 cancelled:{id}:{name} to the team, the planner, and the absent teacher and the officer who were told of the absence (planned,
-remind or officer sent or unsure), never to who cancelled.
+remind or officer sent or unsure), never to who cancelled; of a backup (exams) that ended by itself ("app": withdrawn, a changed
+duty, handled by the committee) to those told of it alone, since a whole exam's end at once.
 
 Only people who can be reached are told. planned, officer, kept and cancelled are for what was done since the bot was
 connected; nothing is said of a lesson that is over or an absence that is past. No message carries the typed reason, the
@@ -339,12 +340,13 @@ def _since(w, v):
 def _cancelled(w, r):
     gone = r["cancelled"]
     if not _since(w, gone.get("at")) or _taken_over(r): return []
+    by_itself = bool(r.get("exams")) and gone.get("by") == "app"
     told = [w.told.get(f"{kind}:{r['id']}") for kind in ("planned", "remind", "officer")]
-    names = [r.get("by")] if r.get("how") == "planned" else []
+    names = [r.get("by")] if r.get("how") == "planned" and not by_itself else []
     names = {n for n in names + [t["name"] for t in told if t and t["state"] in SENT] if n in w.reach}
     text = cancelled_text(gone.get("by"), r["teacher"], words.days(r))
     return [_item(f"cancelled:{r['id']}:{n}", n, "cancelled", text, ref=dict(id=r["id"], team=n not in names))        # team: as the team alone
-            for n in sorted((names | set(w.team)) - {gone.get("by")})]
+            for n in sorted((names | set(() if by_itself else w.team)) - {gone.get("by")})]
 
 
 def _taken_over(r):
@@ -353,12 +355,13 @@ def _taken_over(r):
 
 
 def _planned(w, r):
-    """the absence planned for a teacher who has not acknowledged it, and the reminder: never for an absence with no lesson to
-    cover, or sent at or after the time the reminder goes (remind_at on the school day before; today or not)"""
+    """the absence planned for a teacher who has not acknowledged it (with no button to cancel a backup: the next sync with the
+    exams would make it again), and the reminder: never for an absence with no lesson to cover, or sent at or after the time the
+    reminder goes (remind_at on the school day before; today or not)"""
     out, ref, days, n = [], dict(id=r["id"]), words.days(r), _to_cover(w.links, r)
     if _since(w, r.get("at")):
-        out.append(_item(f"planned:{r['id']}", r["teacher"], "planned", planned_text(days, words.away(r), r.get("by"), n),
-                         [[dict(text=SET_WORK, url=w.base + "/relief#mine")], [dict(text=NOT_NEEDED, what="cancel", id=r["id"])]], ref=ref))
+        buttons = [[dict(text=SET_WORK, url=w.base + "/relief#mine")]] + ([] if r.get("exams") else [[dict(text=NOT_NEEDED, what="cancel", id=r["id"])]])
+        out.append(_item(f"planned:{r['id']}", r["teacher"], "planned", planned_text(days, words.away(r), r.get("by"), n), buttons, ref=ref))
     if n and _fill.nudge(r, w.pub, w.settings, w.now, w.today):
         first, at = min([x["date"] for x in r.get("lessons") or []] or r["dates"]), _time(r.get("at"))
         remind = _fill.due_at(w.settings.get("calendar") or {}, ((w.pub or {}).get("model") or {}).get("days") or [], first,

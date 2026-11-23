@@ -43,7 +43,8 @@ An absence is cancelled by a press alone, never by a typed line (it cannot be un
 (SURE_CANCEL) with two buttons, TALK_MINUTES from then; another line is another why, shown again. Yes, cancel it (its token is the
 talk's `yes`, a new one for each why, so it cancels for the reason it is shown with) is judged as a press is, by absences.cancel at
 that moment. Keep it, on that question and on the one before (its token is the talk's `key`), ends the talk. Pressed once the
-talk is over, each is OLD_BUTTON.
+talk is over, each is OLD_BUTTON. A backup (exams) is never cancelled here, the next sync with the exams would make it again: it has
+no such button, and one on an older message is refused at each step (A_DUTY).
 
 One press or line at a time (_pressing), so two at once save once. It is let go, as the absences lock is, before anything is said
 to Telegram; what was saved is written down and followed up first, then the press is answered, then its message is changed. A
@@ -78,6 +79,7 @@ KEEP, YES = "Keep it", "Yes, cancel it"
 LAST_ONE = "Answer the question I asked last."
 SENT_CHANGE = "Sent to the relief team. Until they reply, this relief is still yours."
 SENT_CANCEL = "Cancelled. The relief team will see it."
+A_DUTY = "This is for an exam or event duty, so it cannot be cancelled here. Ask the exams committee, or the event's teacher in charge."
 NOTHING = "Nothing was changed."
 REMINDED = "Reminded {n}."
 WENT_WRONG = "Something went wrong. Try again in the app."
@@ -421,10 +423,12 @@ def _change(chat, b, why, talk):
 
 
 def _may_cancel(b):
-    """the absence of the button, while its person may cancel it: theirs, or the one they planned (never by the team's right)"""
+    """the absence of the button, while its person may cancel it: theirs, or the one they planned (never by the team's right), and no
+    backup now"""
     _published()
     r = _absences._editable(b["id"])
     _absences._may_change(r, b["name"], False)
+    if r.get("exams"): raise ValueError(A_DUTY)
     if tell._last(r) < _lessons.today().isoformat(): raise ValueError(_absences.PAST_ABSENCE)
     return r
 
@@ -452,6 +456,7 @@ def _yes(p):
     """cancels the absence, for the reason the button is shown with"""
     b, pub, d = p.button, _published(), _mine(p, "yes")["d"]
     def cancel():
+        _may_cancel(b)
         r = _absences.cancel(b["id"], d["why"], b["name"], team=False)
         return _Out(SENT_CANCEL, line=SENT_CANCEL, also=f"❌ Cancelled {_hm(r['cancelled']['at'])}.", after=_after("cancel", r, b, pub))
     out = _acted(b, cancel)                      # refused: both messages say why

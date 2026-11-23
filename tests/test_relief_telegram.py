@@ -3107,6 +3107,14 @@ def exam(*classes, name=EXAM, date="2026-10-13", duties=(), event=False):
     s["made"] = dict(seats=[], unseated=[], published_at=None, duties=[dict(key=f"{date} {a}", date=date, start=a, end=b, room="Hall", names=[n]) for n, a, b in duties])
     saved_exam(s); return again_on(s["id"])
 def withdraw(id_): s = SC.load(id_); s.update(status="withdrawn", approved=None); saved_exam(s)
+def backed_up(kind, going=(EVE,), in_charge=HUGO):
+    """an approved exam these people (5A's) invigilate during P6-P7, or in_charge's event of 5A they go with all day, and relief's backups made
+    from it -> (the schedule's id, the first one's backup)"""
+    if kind == "exam": e = exam("5A", name=EXAM2, duties=[(n, 630, 690) for n in going])
+    else:
+        s = SC.new_event(JOURNEY, [], ["5A"], "2026-10-13", "2026-10-13", in_charge, in_charge); s["going"] = list(going); saved_exam(s); e = again_on(s["id"])
+    RL.sync_all(SCHOOL, TERM, LS.today()); return e, backup_of(going[0])
+def backup_of(name): return next(r["id"] for r in absences.all_records() if r.get("exams") and not r["cancelled"] and r["teacher"] == name)
 @contextlib.contextmanager
 def unreadable():
     """what exams.relief_links reads cannot be read (the line fill logs of it is not printed here)"""
@@ -3399,8 +3407,42 @@ def a_takeover_of_the_absence_changes_nothing_of_a_stopped_relief():
         assert swept() == 0 and said(SAM) == [RELIEF_K5, STOPPED_K5] and said(TEAM) == []; withdraw(e); assert swept() == 1 and said(SAM)[2:] == [AGAIN_K5] and buttons_of(outs("again")[0]) == relief_buttons(j)
     with exam_school(SAM, EVE, TEAM):                                                      # in step with the exams: a stopped lesson leaves the backup, so its relief is gone
         d, b = backup(); e = exam(); RL.sync_all(SCHOOL, TERM, LS.today()); assert absences.load(b)["lessons"] == [] and [x["key"] for x in absences.load(b)["gone"]] == [K5]
-        swept(); assert said(SAM) == [RELIEF_K5, GONE_K5] and said(TEAM) == said(EVE)[1:] == [CANCELLED_BY_APP], "that backup is over, cancelled by nobody"
+        swept(); assert said(SAM) == [RELIEF_K5, GONE_K5] and said(EVE)[1:] == [CANCELLED_BY_APP] and said(TEAM) == [], "that backup is over, cancelled by nobody: whoever was told of it hears"
         withdraw(e); RL.sync_all(SCHOOL, TERM, LS.today()); c = [r["id"] for r in absences.all_records() if r.get("exams") and not r["cancelled"]]; assert len(c) == 1; at("09:30"); give(c[0], K5, SAM); swept(); assert said(SAM)[2:] == [RELIEF_K5]
+
+@t
+def a_backup_that_ends_by_itself_is_told_to_who_was_told_of_it_alone():
+    """an exam withdrawn, its duties made anew, or handled by the committee: forty at once, and none of them to the team or the teacher in charge"""
+    crowd = [f"Ms Made Up {k:02d}" for k in range(40)]; big = json.loads(json.dumps(SCHOOL)); text = "❌ Cancelled: {}'s absence on Tue 13 Oct. Its reliefs are no longer needed.".format
+    for k, n in enumerate(crowd): big["model"]["setup"]["teachers"].append(dict(name=n, dept="Science")); big["model"]["lessons"].append(lesson(TUE, 5, 2, ["1C"], "Science", [n], group=f"X{k}"))
+    with exam_school(TEAM, LEE, HUGO, SAM, ROSA), no_pub(big):
+        for k, n in enumerate(crowd[1:]): links.link(n, 3001 + k, None)                    # all but the first
+        e = exam("5A", name=EXAM2, duties=[(n, 630, 690) for n in crowd]); RL.sync_all(big, TERM, LS.today()); ids = {n: backup_of(n) for n in crowd}
+        change_record(ids[crowd[5]], lambda r: r.update(reporting_officer=ROSA)); x = absences.load(ids[crowd[6]])["lessons"][0]["key"]; CV.change(ids[crowd[6]], x, SAM, TEAM, big, RS.load(big))
+        assert TE.sweep() == 39 + 1 + 1; put(f"planned:{ids[crowd[1]]}", state="failed"); put(f"planned:{ids[crowd[2]]}", state="unsure"); put(f"planned:{ids[crowd[3]]}", state="failed"); send()
+        at("15:00"); TE.sweep(); [put(r["key"], state="failed") for r in outs("remind") if r["name"] != crowd[3]]; send(); assert state(f"remind:{ids[crowd[3]]}") == "sent" and len(said(SAM)) == len(said(ROSA)) == 1
+        at("15:30"); withdraw(e); RL.sync_all(big, TERM, LS.today()); assert all(absences.load(i)["cancelled"]["by"] == "app" for i in ids.values())
+        TE.sweep(); assert sorted((r["name"], r["key"], r["text"]) for r in outs("cancelled")) == sorted([(n, f"cancelled:{ids[n]}:{n}", text(n)) for n in crowd[2:]] + [(ROSA, f"cancelled:{ids[crowd[5]]}:{ROSA}", text(crowd[5]))])
+        assert [(r["kind"], r["name"]) for r in outs("gone")] == [("gone", SAM)] and all(json.loads(r["ref"])["team"] is False for r in outs("cancelled")); send(); send()
+        assert said(TEAM) == said(LEE) == said(HUGO) == [] and {r["state"] for r in outs("cancelled")} == {"sent"} and collections.Counter(x for c, x in sent() if x.startswith("❌ Cancelled")) == collections.Counter([text(n) for n in crowd[2:]] + [text(crowd[5])])
+        assert swept() == 0 and len(outs("cancelled")) == 39, "each hears once"
+    for end in ("withdrawn", "made anew", "handled"):                                      # an event's: not its teacher in charge either, who is the planner
+        with exam_school(EVE, SAM, HUGO, TEAM, LEE):
+            e, b = backed_up("event"); give(b, K5, SAM); swept(); assert said(EVE)[0].splitlines()[2] == "Planned by Mr Hugo Ong" and said(SAM) == [RELIEF_K5]; at("09:10")
+            if end == "withdrawn": withdraw(e)
+            else:
+                s = SC.load(e)
+                if end == "made anew": s["going"] = [BUSY]
+                else: s["handled"] = [f"{EVE}|{k}" for k in (K2, K5)]
+                saved_exam(s); again_on(e)
+            RL.sync_all(SCHOOL, TERM, LS.today()); assert absences.load(b)["cancelled"]["by"] == "app", end
+            swept(); assert said(EVE)[1:] == [CANCELLED_BY_APP] and said(SAM) == [RELIEF_K5, GONE_K5] and said(HUGO) == said(TEAM) == said(LEE) == [], end
+    with record(EVE, extras=dict(relief=True, exams=None, admin=False)), exam_school(EVE, TEAM):  # told of it, and on the team: once, as the one told
+        e, b = backed_up("exam"); swept(); withdraw(e); RL.sync_all(SCHOOL, TERM, LS.today()); swept(); r, = outs("cancelled"); assert r["name"] == EVE and json.loads(r["ref"]) == dict(id=b, team=False)
+    with exam_school(EVE, HUGO, TEAM, LEE):                                                # a person who cancels one tells the team and the teacher in charge, as ever
+        e, b = backed_up("event"); swept(); call(EVE, "post", f"/api/relief/absences/{b}/cancel", dict(why="x")); send(); assert said(HUGO)[:1] == said(TEAM) == said(LEE) == [CANCELLED_EVE.format(EVE)]
+    with exam_school(EVE, HUGO, TEAM):                                                     # what is no backup too, whoever ended it
+        i = absent(by=HUGO); swept(); change_record(i, lambda r: r.update(cancelled=dict(at=clock.now, by="app", why="x"))); swept(); assert said(HUGO) == said(TEAM) == said(EVE)[1:] == [CANCELLED_BY_APP]
 
 @t
 def only_the_two_messages_name_an_exam():
@@ -3474,6 +3516,7 @@ SENT_CHANGE, SENT_CANCEL = "Sent to the relief team. Until they reply, this reli
 LAST_ONE, ACKED = "Answer the question I asked last.", "This was acknowledged already."
 SURE = "Cancel {}? Your reason: {}"
 NOTHING, WENT_WRONG = "Nothing was changed.", "Something went wrong. Try again in the app."
+A_DUTY = "This is for an exam or event duty, so it cannot be cancelled here. Ask the exams committee, or the event's teacher in charge."
 ENTRY = "Relief for Ms Evelyn Koh on Tue 13 Oct: "
 ON_K5 = "1A, 1B Science (G2) P6–P7 on Tue 13 Oct"
 FORCE = dict(force_reply=True)
@@ -3572,7 +3615,8 @@ def the_answers_are_the_plans():
     assert (bot.OLD_BUTTON, bot.NOT_YOURS_BUTTON, bot.WHY_CHANGE, bot.WHY_CANCEL) == (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE, WHY_CANCEL)
     assert (bot.SENT_CHANGE, bot.SENT_CANCEL, bot.NOTHING, bot.WENT_WRONG, bot.LAST_ONE, bot.KEEP, bot.YES, bot.SURE_CANCEL) == (SENT_CHANGE, SENT_CANCEL, NOTHING, WENT_WRONG, LAST_ONE, "Keep it", "Yes, cancel it", "Cancel {days}? Your reason: {why}")
     plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
-    for text in (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE, WHY_CANCEL, bot.SURE_CANCEL, SENT_CHANGE, SENT_CANCEL, NOTHING, LAST_ONE, bot.REMINDED, WENT_WRONG, bot.KEEP, bot.YES): assert f"`{text}`" in plan, text
+    assert bot.A_DUTY == A_DUTY
+    for text in (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE, WHY_CANCEL, bot.SURE_CANCEL, SENT_CHANGE, SENT_CANCEL, A_DUTY, NOTHING, LAST_ONE, bot.REMINDED, WENT_WRONG, bot.KEEP, bot.YES): assert f"`{text}`" in plan, text
     rights = {k: v[0] for k, v in bot.ACTIONS.items()}
     assert bot.TALK_MINUTES == 15 and {k: rights[k] for k in ("ack", "change", "cancel", "approve", "keep", "cancel-yes")} == {"ack": "relief", "change": "relief", "cancel": "relief", "approve": "relief.team", "keep": "relief", "cancel-yes": "relief"}
     assert not hasattr(bot, "NOT_CANCEL"), "no list of phrases decides what is cancelled"
@@ -3905,6 +3949,43 @@ def what_stops_a_lesson_is_said_as_the_page_says_it():
     with exam_school(SAM, EVE, TEAM):                                                      # cancelling an absence of one's own gives its lesson back to the backup at once
         exam("5A", name=EXAM2, duties=[(EVE, 630, 690)]); j = told_planned(); backups = lambda: [r for r in absences.all_records() if r.get("exams") and not r["cancelled"]]
         assert backups() == []; press(EVE, "cancel"); say(EVE, "Better"); assert backups() == [] and press_yes(EVE) == (SENT_CANCEL, False) and absences.load(j)["cancelled"] and [x["key"] for r in backups() for x in r["lessons"]] == [K5]
+
+@t
+def a_backup_is_not_cancelled_on_telegram():
+    """an exam's or event's backup would be made again at once: no button for it, and one on an older message is refused, at each step"""
+    OLDER = [[dict(text="❌ Not needed: cancel", what="cancel", id=None)]]
+    def older(i):
+        """a message with the button, as it was before -> its token"""
+        OB.queue("older", EVE, "An older message", kind="made-up", buttons=[[dict(OLDER[0][0], id=i)]]); send(); return tok(EVE, "cancel")
+    for kind, by in (("exam", "Exams committee"), ("event", HUGO)):
+        with exam_school(EVE, SAM, HUGO, TEAM):
+            e, b = backed_up(kind); give(b, K5, SAM); swept(); r, = outs("planned")
+            assert r["name"] == EVE and f"\nPlanned by {by}\n" in r["text"] and buttons_of(r) == [[dict(text="✅ Acknowledge and set work", url=BASE + "/relief#mine")]], (kind, buttons_of(r))
+            assert not any(x["what"] == "cancel" for x in rows("buttons")), kind
+            token, was, h, n = older(b), file_of(b), Since(), len(sent()); assert press(EVE, "cancel") == (A_DUTY, True) and len(A_DUTY) <= bot.ANSWER_MOST
+            assert taken_off(EVE, "cancel", A_DUTY) and rows("talks") == [] and file_of(b) == was and h.new() == [] and len(sent()) == n and swept() == 0 and state_of(b) == "approved", kind
+            at("09:20"); absences.update_exams(b, (), [], None, None, LS.today()); assert press(EVE, "cancel") == (absences.CANCELLED, True), "over meanwhile: that is what is said"
+    with exam_school(EVE, HUGO, TEAM):                                                     # on the page as before: it goes, and comes back
+        e, b = backed_up("exam"); call(EVE, "post", f"/api/relief/absences/{b}/cancel", dict(why="x")); assert absences.load(b)["cancelled"]["by"] == EVE and backup_of(EVE) != b
+    # judged as it is at that moment: a backup by the time its why is typed, or by the second press
+    becomes = lambda i: change_record(i, lambda r: r.update(exams=dict(id="abcd1234", kind="exam")))
+    with exam_school(EVE, TEAM):
+        i = told_planned(); press(EVE, "cancel"); becomes(i); was, h = file_of(i), Since(); assert talk_to(EVE, lambda: say(EVE, "The course is off")) == [(A_DUTY, None)] and file_of(i) == was and h.new() == []
+        assert rows("talks") == [] and taken_off(EVE, "cancel", A_DUTY)
+    with exam_school(EVE, TEAM):
+        i = told_planned(); press(EVE, "cancel"); say(EVE, "The course is off"); becomes(i); x, e, m, was, h = sure(EVE), talk_of(EVE), under(tok(EVE, "cancel")), file_of(i), Since(); tg.PRACTICE_LOG.clear()
+        assert press_keep(e["yes"], x) == (A_DUTY, True) and file_of(i) == was and h.new() == [] and rows("talks") == [] and sent() == []
+        assert edits() == [(CHATS[EVE], x["message_id"], f"{x['text']}\n\n{A_DUTY}"), (CHATS[EVE], m["message_id"], f"{m['text']}\n\n{A_DUTY}")] and press_keep(e["yes"], x) == (OLD_BUTTON, True)
+    # ... and one that is none any more, whatever it was when it was told: its own absence, which took the backup's lesson over, is cancelled as any other
+    with exam_school(EVE, TEAM):
+        i = told_planned(); becomes(i); token = tok(EVE, "cancel"); change_record(i, lambda r: r.pop("exams")); press(EVE, "cancel"); say(EVE, "The course is off"); assert press_yes(EVE) == (SENT_CANCEL, False) and absences.load(i)["cancelled"]["by"] == EVE
+    with exam_school(EVE, TEAM):
+        e, b = backed_up("exam"); swept(); j = absences.new(dict(teacher=EVE, dates=["2026-10-13"], periods=None, reason="Course", reason_text="", remarks="", reporting_officer=ROSA, lessons=[]), SCHOOL, HUGO, "planned", may_choose=True, links=exam_links())["id"]
+        assert absences.load(b)["cancelled"]["by"] == "app" and "exams" not in absences.load(j); swept(); r = outs("planned")[-1]; assert json.loads(r["ref"]) == dict(id=j) and buttons_of(r)[1:] == [[dict(text="❌ Not needed: cancel", what="cancel", id=j)]]
+        press(EVE, "cancel"); say(EVE, "The course is off"); assert press_yes(EVE) == (SENT_CANCEL, False) and absences.load(j)["cancelled"] and older(b) and press(EVE, "cancel") == (absences.CANCELLED, True)
+    # not theirs at all: that comes first
+    with exam_school(EVE, TEAM):
+        e, b = backed_up("exam"); OB.queue("older", TEAM, "An older message", kind="made-up", buttons=[[dict(OLDER[0][0], id=b)]]); send(); assert press(TEAM, "cancel") == (absences.NOT_YOURS, True)
 
 @t
 def the_history_names_the_person_and_telegram():
