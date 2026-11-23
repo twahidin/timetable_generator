@@ -4476,77 +4476,112 @@ class _Refused(Exception):
 def _refusal(msg, kind="invalid_request_error", code=400):
     return _Refused(code, {"error": {"type": kind, "message": msg}})
 
-def _fault_line(e):
+def _fault_line(e, refusal=True):
     h = logged()
-    try: AI._fault(e)
+    try: AI._fault(e, refusal=refusal)
     finally: logging.getLogger("plan").removeHandler(h)
     same(len(h.lines), 1)
     return h.lines[0]
 
 @t
-def a_refused_request_logs_the_providers_short_reason_without_what_is_quoted():
+def a_refused_request_logs_the_providers_short_reason_up_to_the_first_quote():
     msg = "tools.3.custom.input_schema: value 'Ms Tan Wei Ling' and \"8am on Tuesday\" are wrong"
     h = logged()
     got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), _refusal(msg)))
     logging.getLogger("plan").removeHandler(h)
     same((got["status"], len(msgs)), ("failed", 3))
     sendable(msgs)
-    assert len(h.lines) == 1, h.lines
+    same(len(h.lines), 1)
     line = h.lines[0]
-    assert "status 400 invalid_request_error: tools.3.custom.input_schema" in line and "are wrong" in line, line
-    assert all(w not in line for w in ("Tan", "Tuesday", "8am", "Ling")), line
-    assert line.startswith("plan.ai fault _Refused at ") and " | status 400 " in line, line
-    credit = "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."
-    same(_fault_line(_refusal(credit)).split(" | ")[1], "status 400 invalid_request_error: " + credit)
+    assert line.startswith("plan.ai fault _Refused at ") and line.endswith(" | status 400 invalid_request_error: tools.3.custom.input_schema: value \u2026"), line
+    assert all(w not in line for w in ("Tan", "Tuesday", "8am", "Ling", "wrong")), line
+
+# the messages the provider really sends (the reviewer's list of nine) and what the log keeps of each
+REAL_REASONS = [
+    ("Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.",
+     "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."),
+    ("tools.3.custom.input_schema: JSON schema is invalid. It must match JSON Schema draft 2020-12 (https://json-schema.org/draft/2020-12). Learn more about tool use at https://docs.claude.com/en/docs/tool-use.",
+     "tools.3.custom.input_schema: JSON schema is invalid. It must match JSON Schema draft 2020-12 (https://json-schema.org/draft/2020-12). Learn more about tool use at https://docs.claude.com/en/docs/tool-use."),
+    ("messages.1.content.0.text: text content blocks must be non-empty", "messages.1.content.0.text: text content blocks must be non-empty"),
+    ("messages.1.content.0.tool_result: unexpected `tool_use_id` found in `tool_result` blocks: toolu_01ABC. Each `tool_result` block must have a corresponding `tool_use` block in the previous message.",
+     "messages.1.content.0.tool_result: unexpected \u2026"),
+    ("tool_choice: Input tag 'x' found using 'type' does not match any of the expected tags: 'auto', 'any', 'tool'", "tool_choice: Input tag \u2026"),
+    ("max_tokens: 32000 > 8192, which is the maximum allowed number of output tokens for claude-x",
+     "max_tokens: 32000 > 8192, which is the maximum allowed number of output tokens for claude-x"),
+    ("model: Field required", "model: Field required"),
+    ("tools.0.custom.name: String should match pattern '^[a-zA-Z0-9_-]{1,64}$'", "tools.0.custom.name: String should match pattern \u2026"),
+    ("Number of function parameters with union types or optional parameters exceeds the limit of 16 for strict tools (found 28). Reduce optional parameters.",
+     "Number of function parameters with union types or optional parameters exceeds the limit of 16 for strict tools (found 28). Reduce optional parameters."),
+]
 
 @t
-def reason_takes_out_quoted_stretches_and_cuts_and_never_raises():
+def the_real_kinds_of_messages_keep_what_comes_before_a_quote():
+    for text, want in REAL_REASONS:
+        same(AI._reason(text), want)
+        same(_fault_line(_refusal(text)).split(" | ")[1], "status 400 invalid_request_error: " + want)
+
+@t
+def reason_stops_at_the_first_quote_mark_whatever_follows():
     R = AI._reason
-    same(R('a "b c" d'), "a … d")
-    same(R("a 'b c' d"), "a … d")
-    same(R("a `b c` d"), "a … d")
-    same(R("a \u201cb c\u201d d"), "a … d")
-    same(R("a \u2018b c\u2019 d"), "a … d")
-    same(R('a "b c'), "a …")                                  # never closes: takes the rest
-    same(R("a 'b c"), "a …")
-    same(R("it don't matter, the teachers' rooms are fine"), "it don't matter, the teachers' rooms are fine")
-    same(R('"all of it"'), "…")
-    same(R('"x" and "y"'), "… and …")
-    same(R("\"'\"nested'\" tail"), "…nested'…")
-    same(R("'a' 'b"), "…")                                    # the last mark opens a value that never closes: to the end (was "…b")                                  # greedy: the last single mark ends the stretch
-    same(R("a\nb\t\tc\r\n  d\x00e"), "a b c d e")
+    for text, want, secrets_ in (
+            ("x 'a' and \"Ms O'Brien\" y", "x \u2026", ("Brien", "Ms")),                                    # the review's Important 1
+            ("Input tag 'x' is wrong, input_value=\"Ms Tan's class\" end", "Input tag \u2026", ("Tan", "class")),
+            ("input_value={'a': 1, 'name': \"Ms Tan's class\"}, input_type=dict", "input_value={\u2026", ("Tan", "class", "dict")),
+            ("a `x` and `Ms O'Brien` y", "a \u2026", ("Brien",)),
+            ("a \u2018x\u2019 and \u201cMs O\u2019Brien\u201d y", "a \u2026", ("Brien",)),
+            ("x 'a' and f='Tan Wei", "x \u2026", ("Tan", "Wei")),                                              # Important 2
+            ("x f:'Tan Wei", "x f:\u2026", ("Tan", "Wei")),
+            ("x f-'Tan Wei", "x f-\u2026", ("Tan", "Wei")),
+            ("x \"'Tan Wei", "x \u2026", ("Tan", "Wei")),
+            ("value \"say \\\"Tan\\\" now\" x", "value \u2026", ("Tan", "now")),                          # Important 3
+            ("value `say \\`Tan\\` now` x", "value \u2026", ("Tan", "now")),
+            ("value \"he said \"Tan Wei\" ok\" x", "value \u2026", ("Tan", "Wei", "ok")),
+            ("a'Tan' b", "a\u2026", ("Tan",)), ("the teachers' room", "the teachers\u2026", ("room",)), ("James' class", "James\u2026", ("class",))):
+        got = R(text)
+        same(got, want)
+        assert not any(w in got for w in secrets_), (text, got)
+    for m in "\u2032\u00b4\u201a\u201e\u00ab\u00bb\u300c\u300e\uff02\uff07\uff40\u2033\u300d\u300f\u2018\u2019\u201c\u201d\u2039\u203a":
+        same(R(f"a {m}Tan Wei{m} b"), "a \u2026")
+
+@t
+def contractions_are_kept_but_a_quote_after_one_still_cuts():
+    R = AI._reason
+    for kept in ("This model doesn't support that", "don\u2019t", "the model's limit", "you're over", "we've", "they'll go", "I'd", "I'm here", "it\u2019s fine"):
+        same(R(kept), kept)
+    same(R("it doesn't match 'Tan' here"), "it doesn't match \u2026")
+    same(R("the model's limit: \"Ms Tan\""), "the model's limit: \u2026")
+    same(R("x doesn'tx 'Tan'"), "x doesn\u2026")                  # not an ending followed by a non-letter: a quote mark
+
+@t
+def reason_drops_format_characters_cleans_space_and_cuts_at_300():
+    R = AI._reason
+    same(R("a\u200bb\u202ec \u2060d"), "abc d")
+    same(R("a\nb\t\tc\r\n  d\x00e\u2028f"), "a b c d e f")
+    same(R(" \u200b'Tan'"), "\u2026")
     same(R(""), "")
-    same(R('"""'), "……")
+    for bad in (5, None, {"a": 1}, ["x"], b"x", True, 1.5):
+        same(R(bad), "")
     long = R("word " * 200)
     same((len(long), long[-1]), (300, "\u2026"))
     same(R("x" * 300), "x" * 300)
     same(R("x" * 301), "x" * 299 + "\u2026")
     same(len(R("y" * 100000)), 300)
-    for bad in (5, None, {"a": 1}, ["x"], b"x", True, 1.5):
-        same(R(bad), "")
+    same(R("x" * 299 + " 'Tan'"), "x" * 299 + "\u2026")
+    same(R("x" * 299 + "'Tan'"), "x" * 299 + "\u2026")
+    got = R("x" * 400 + " 'Tan'")
+    same((len(got), got.endswith("\u2026\u2026")), (300, False))
 
 @t
-def a_single_quoted_value_with_an_apostrophe_in_it_goes_whole():
-    R = AI._reason
-    # greedy: from a single quote at a word's edge to the LAST single quote of that kind. What survives: the words before the first
-    # quote mark and the words after the last one; nothing between them
-    got = R("field is wrong: 'the teachers' room' and more plain words")
-    same(got, "field is wrong: … and more plain words")
-    assert "teachers" not in got and "room" not in got, got
-    same(R("a.b.c: 'Ms Tan' then tools.3.path then 'Mr Lee' end"), "a.b.c: … end")      # the path between two values goes too: accepted
-    same(R("x \u2018the teachers\u2019 room\u2019 tail"), "x … tail")                       # curly pair with an apostrophe inside
-    same(R("x \u2018the teachers\u2019 room tail"), "x … room tail")                              # curly, the last closing mark ends it
-    same(R("x \u2018never closes of Tan"), "x …")
-    same(R("it don't matter and teachers' rooms are fine"), "it don't matter and teachers' rooms are fine")   # no stretch open: kept
-    same(R("don\u2019t panic"), "don\u2019t panic")
-    same(R("before \"Tan Wei\" and 'Lee' after"), "before … and … after")
-    # when the LAST single mark opens a word (after a space, a bracket or the start, before a non-space), its value never closes: to the end
-    same(R("see 'x' and 'the rest of it"), "see …")
-    same(R("path.to.field: 'one' then 'two words here"), "path.to.field: …")
-    same(R("x \u2018a\u2019 and \u2018the rest"), "x …")
-    same(R("x ('a' and ('b c"), "x (…")
-    same(R("x 'teachers' room' y"), "x … y")                  # the last mark follows a word: a closing mark, so the removal ends there and " y" survives
-    same(R("x 'a ' y"), "x …")                                # a mark after a space and before a space is in doubt: to the end                    # a lone pair is as before
+def no_word_placed_after_a_quote_mark_ever_reaches_the_reason():
+    rnd = random.Random(20261123)
+    marks = ["'", '"', "`", "\u2018", "\u2019", "\u201c", "\u201d", "\u00ab", "\u00bb", "\u2032", "\u00b4", "\u201a", "\u201e", "\u300c", "\uff02", "\uff07", "\uff40"]
+    plain = ["the", "teachers", "room", "tools.3.x:", "is", "wrong", "doesn't", "model's", "you're", "James'", "O'Brien", "(", "=", ":", "-", "\\", "\n", "\u200b"]
+    for _ in range(2000):
+        before = " ".join(rnd.choice(plain[:9]) for _ in range(rnd.randint(0, 5)))
+        after = "".join(rnd.choice(plain + marks + [" ", "  ", "s", "t", "re"]) for _ in range(rnd.randint(0, 12)))
+        text = before + " " + rnd.choice(marks) + after + " QZXsecret " + rnd.choice(marks) + " x"
+        got = AI._reason(text)
+        assert "QZXsecret" not in got and got == AI._reason(before + " " + marks[0]) , (text, got)
 
 @t
 def only_a_4xx_status_error_gets_a_reason_and_no_fault_makes_fault_raise():
@@ -4591,7 +4626,23 @@ def the_list_reader_logs_the_same_safe_line_and_still_raises_its_own_sentence():
         raises(AI.ReadFailed, lambda: AI.read_piece("a line", dict(levels=[], subjects={}, year=2027), call=refused), AI.READ_FAILED)
     finally:
         logging.getLogger("plan").removeHandler(h)
-    assert len(h.lines) == 1 and "status 400 invalid_request_error: papers.0.label: value … is wrong" in h.lines[0], h.lines
+    assert len(h.lines) == 1 and "status 400 invalid_request_error: papers.0.label: value …" in h.lines[0] and h.lines[0].endswith("value …"), h.lines
     assert "Tan" not in h.lines[0]
+
+@t
+def the_reason_is_added_only_at_the_two_provider_call_sites():
+    e = _refusal("message with a 'Tan' in it")
+    old = _fault_line(e, refusal=False)
+    assert " | " not in old and old.startswith("plan.ai fault _Refused at "), old
+    same(_fault_line(e).split(" | ")[1], "status 400 invalid_request_error: message with a \u2026")
+    h = logged()
+    tool = lambda n, a: (_ for _ in ()).throw(_refusal("tool said 'Tan'"))
+    got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), reply(say("ok"))), on_tool=tool)
+    def text_fails(t): raise _refusal("text said 'Tan'")
+    call = Script(reply(say("hello")))
+    AI.run_loop([dict(role="user", content="hi")], text_fails, lambda n, a: "x", threading.Event(), time.monotonic() + 30, call=call)
+    logging.getLogger("plan").removeHandler(h)
+    same(got["status"], "done")
+    assert len(h.lines) == 2 and all(" | " not in l and "_Refused" in l for l in h.lines), h.lines    # a tool handler's and on_text's fault: as before
 
 print(f"{COUNT} plan tests passed")

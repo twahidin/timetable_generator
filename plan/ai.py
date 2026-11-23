@@ -3,7 +3,7 @@ of one piece of a pasted list (read_piece) and a practice stand-in that needs no
 TYPED_REQUEST_MODEL=mock). No Flask here. The AI only asks for actions: the app (steps, through the talk's on_tool) makes
 every check and every change. Nothing of a talk is logged: a fault is logged as its type and frames only, never its text,
 a message or an argument. The real client is built only inside _client, and only when a real call is made."""
-import copy, json, logging, re, threading, time, traceback
+import copy, json, logging, re, threading, time, traceback, unicodedata
 
 import typed
 from exams import schedules as _schedules
@@ -34,37 +34,34 @@ def enabled() -> bool:
     return typed.enabled()
 
 
-_PAIRS = {'"': '"', "`": "`", "'": "'", "\u201c": "\u201d", "\u2018": "\u2019"}     # opening mark -> the mark that closes it
+_QUOTES = frozenset("'\"`\u00b4\u2032\u2033\u201a\u201e\u300c\u300d\u300e\u300f\uff02\uff07\uff40")
+_ENDINGS = ("t", "s", "re", "ve", "ll", "d", "m")       # what a contraction or a possessive puts after its apostrophe
 _REASON_MAX = 300
 
 
+def _is_quote(text, i) -> bool:
+    c = text[i]
+    if c in "'\u2019" and i > 0 and text[i - 1].isalpha():        # between two letters, with one of the endings, it is an apostrophe
+        for end in _ENDINGS:
+            k = i + 1 + len(end)
+            if text.startswith(end, i + 1) and (k >= len(text) or not text[k].isalnum()):
+                return False
+    return c in _QUOTES or unicodedata.category(c) in ("Pi", "Pf")
+
+
 def _reason(text) -> str:
-    """the provider's short reason made safe for a log: every quoted stretch (quotes included) becomes one ellipsis (double marks and
-    backticks pair by pair; a single mark at a word's edge takes everything to the last single mark of its kind, or to the end when that one does not clearly close), whitespace and
-    control characters one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
+    """the provider's short reason made safe for a log: kept only up to the first quote mark, from which everything is replaced by
+    one ellipsis (so nothing quoted, and nothing after a quote, can survive); format characters dropped, control characters and
+    whitespace runs one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
     try:
         if not isinstance(text, str):
             return ""
-        out, i, n = [], 0, len(text)
-        while i < n:
-            c = text[i]
-            word = lambda k: 0 <= k < n and text[k].isalnum()
-            if c in _PAIRS and not (c == "'" and word(i - 1)):      # an apostrophe after a letter opens nothing
-                close = _PAIRS[c]
-                if c in "'\u2018":              # single marks are greedy: to the LAST mark of the kind, so an apostrophe inside a value cannot end it
-                    j = max(text.rfind(c, i + 1), text.rfind(close, i + 1))
-                    # no later mark, or the last one is not clearly a closing mark (one right after a word or punctuation): the rest goes
-                    if j < 0 or not (text[j - 1] not in " ([{<" and not text[j - 1].isspace()):
-                        j = n
-                else:
-                    j = text.find(close, i + 1)
-                    j = n if j < 0 else j       # an unclosed mark takes everything after it
-                out.append("\u2026")
-                i = j + 1
-                continue
-            out.append(c)
-            i += 1
-        t = re.sub(r"[\x00-\x20\x7f-\x9f\s]+", " ", "".join(out)).strip()
+        t = "".join(" " if unicodedata.category(c) == "Cc" or c.isspace() else c for c in text if unicodedata.category(c) != "Cf")
+        for i in range(len(t)):
+            if _is_quote(t, i):
+                t = t[:i] + "\u2026"
+                break
+        t = re.sub(r" +", " ", t).strip()
         return t if len(t) <= _REASON_MAX else t[:_REASON_MAX - 1] + "\u2026"
     except Exception:
         return ""
@@ -89,12 +86,12 @@ def _refusal(e) -> str:
     return f" | status {code}" + (f" {kind}" if kind else "") + (f": {reason}" if reason else "")
 
 
-def _fault(e):
-    """the type of a fault and its frames, never its text; the one exception: when the provider refuses a request (a 4xx status
-    error) its own short reason follows, with anything in quotes taken out and cut at 300 characters"""
+def _fault(e, refusal=False):
+    """the type of a fault and its frames, never its text. The one exception: refusal=True (the call to the provider) and a 4xx status
+    error: the provider's own short reason follows, cut at its first quote mark and at 300 characters"""
     frames = "; ".join(f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.name}" for f in traceback.extract_tb(e.__traceback__))
     try:
-        extra = _refusal(e)
+        extra = _refusal(e) if refusal else ""
     except Exception:                          # an odd exception object: the line is the old one
         extra = ""
     log.error("plan.ai fault %s at %s%s", type(e).__name__, frames, extra)
@@ -331,7 +328,7 @@ def run_loop(messages, on_text, on_tool, stop, deadline, call=None, max_rounds=1
         try:
             reply = call(messages, stop, deadline)
         except Exception as e:
-            _fault(e)
+            _fault(e, refusal=True)
             del messages[n:]                   # a call only reads the history: whatever it left goes
             return end("failed")
         if reply is None:
@@ -463,7 +460,7 @@ def read_piece(text, facts, call=None, stop=None, deadline=None) -> list:
     except ReadFailed:
         raise ReadFailed(READ_FAILED) from None
     except Exception as e:
-        _fault(e)
+        _fault(e, refusal=True)
         raise ReadFailed(READ_FAILED) from None
     if not isinstance(rows, list):
         raise ReadFailed(READ_FAILED)
