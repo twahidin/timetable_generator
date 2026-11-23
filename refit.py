@@ -82,7 +82,8 @@ def _trades(m, spec, days, pool, plan, ks, g, n):
     out = []
     for k in sorted(k for k, e in plan.items() if g in e["teachers"] and n not in e["teachers"]):
         rows = helper._of_key(m["lessons"], k); have = set(rows[0]["teachers"]) if rows else set()
-        if len(out) == MAX_TRADES or have - plan[k]["teachers"] != {n} or plan[k]["teachers"] - have != {g} or any(set(x["teachers"]) != have for x in rows): continue
+        if len(out) == MAX_TRADES: break
+        if have - plan[k]["teachers"] != {n} or plan[k]["teachers"] - have != {g} or any(set(x["teachers"]) != have for x in rows): continue
         f = dict(kind="trade", a=ks, b=verify._kstr(k), x=g, y=n); L = list(m["lessons"])
         try: helper._own(L, f); fixes.apply_one(L, f, spec, days, pool=[dict(x) for x in pool])
         except ValueError: continue
@@ -218,32 +219,30 @@ def direct(m, spec, days, target, pool, held=()):
     here (the search moves lessons). held: the ids of lessons that stay where they are (moved already): none is deleted, and no add is
     offered in the place of one. Never changes m or its lessons; a key step 5 no longer has gives the warning's own text"""
     text = target["text"]
-    try:
-        if target["kind"] in ("clash", "rule"): return [], None
-        k, part = helper._dep_parts(target["key"]); plan = verify.planned_rows(spec); e = plan.get(k) if k else None; rows = helper._of_key(m["lessons"], k) if k else []
-        if part == "extra":   # a key step 5 does not have: its rows are the surplus
-            if k is None or e is not None or not rows: return [], text
-            return ([], BAND) if any(x.get("block") for x in rows) else (_deletes(m, spec, days, pool or (), k, None, rows, held), None)
-        if e is None: return [], text
-        ks = verify._kstr(k)
-        if part == "teachers": return _teachers(m, spec, days, pool or (), plan, ks, e, rows, text) if rows else ([], text)
-        if part in ("missing", "periods") and _band(e, rows): return [], BAND
-        if part in ("missing", "periods"):
-            have = verify.placed(dict(m, lessons=list(m["lessons"]) + list(pool or ()))).get(k, {}).get("periods", 0)
-            if have < e["periods"] and not e["teachers"]: return [], NO_STAFF   # a lesson nobody teaches is a mistake, which the judge does not look for
-            if have < e["periods"]:
-                sh = next((x for x in fixes.short(m, spec, pool or ()) if x["key"] == ks), None)
-                return (_adds(m, spec, days, pool or (), ks, k, e, sh["n"], held) if sh else []), None
-            if part == "periods" and have > e["periods"]: return _deletes(m, spec, days, pool or (), k, e, rows, held), None
-            return [], text
-        if part == "venue":
-            wrong = _wrong_rows(m, e, rows)
-            return ([c for x in wrong for c in _rooms(m, spec, days, pool or (), x)], None) if wrong else ([], text)
-        if part == "half":
-            out = [c for x in rows if _small(m, spec, k, e, x["room"]) for c in _rooms(m, spec, days, pool or (), x, lambda r: _seats(m, spec, k, e, r))]
-            return (out, None) if out else ([], text)
+    if target["kind"] in ("clash", "rule"): return [], None
+    k, part = helper._dep_parts(target["key"]); plan = verify.planned_rows(spec); e = plan.get(k) if k else None; rows = helper._of_key(m["lessons"], k) if k else []
+    if part == "extra":   # a key step 5 does not have: its rows are the surplus
+        if k is None or e is not None or not rows: return [], text
+        return ([], BAND) if any(x.get("block") for x in rows) else (_deletes(m, spec, days, pool or (), k, None, rows, held), None)
+    if e is None: return [], text
+    ks = verify._kstr(k)
+    if part == "teachers": return _teachers(m, spec, days, pool or (), plan, ks, e, rows, text) if rows else ([], text)
+    if part in ("missing", "periods") and _band(e, rows): return [], BAND
+    if part in ("missing", "periods"):
+        have = verify.placed(dict(m, lessons=list(m["lessons"]) + list(pool or ()))).get(k, {}).get("periods", 0)
+        if have < e["periods"] and not e["teachers"]: return [], NO_STAFF   # a lesson nobody teaches is a mistake, which the judge does not look for
+        if have < e["periods"]:
+            sh = next((x for x in fixes.short(m, spec, pool or ()) if x["key"] == ks), None)
+            return (_adds(m, spec, days, pool or (), ks, k, e, sh["n"], held) if sh else []), None
+        if part == "periods" and have > e["periods"]: return _deletes(m, spec, days, pool or (), k, e, rows, held), None
         return [], text
-    except Exception: return [], text
+    if part == "venue":
+        wrong = _wrong_rows(m, e, rows)
+        return ([c for x in wrong for c in _rooms(m, spec, days, pool or (), x)], None) if wrong else ([], text)
+    if part == "half":
+        out = [c for x in rows if _small(m, spec, k, e, x["room"]) for c in _rooms(m, spec, days, pool or (), x, lambda r: _seats(m, spec, k, e, r))]
+        return (out, None) if out else ([], text)
+    return [], text
 
 
 # ----------------------------------------------------------------------------------------------- the search for one target

@@ -88,6 +88,8 @@ class _Plan:
         while True:
             while self._pass(): pass
             if not self._round() and not self._round(True): break
+        for i in self._open():   # a last word (its look's, which marks far) about a timetable the list has changed since: not looked at again in time
+            if self.why.get(i, refit.LATE) != refit.LATE and self.far.get(i) != self.changes: del self.why[i]
         if self.progress and len(self.told) < len(self.ts): self.progress(len(self.ts), len(self.ts))   # the time ran out, or an add was not looked at
 
     def _open(self):
@@ -163,10 +165,11 @@ class _Plan:
         """make sure that the list is one to offer (see _at_fault) -> what step 8 lists before the list and after it (draft.listed). It is so when the
         judging was right. When it is not, the answers are gone through one by one; what is at fault still is taken out; at the last the list is empty"""
         self.fx, self.decisions = fx, decisions; before = draft.listed(self.m, fx, decisions)
-        for cure in (self._sift, self._cut, self._clear, None):
+        for cure in (self._sift, self._cut, self._clear):
             after = self._listed(); self._look_back(after); bad = self._at_fault(before, after)
             if not bad: return before, after
             cure(bad, before)
+        after = self._listed(); self._look_back(after); return before, after   # the list is empty now
 
     def _listed(self):
         """what step 8 would list with the list made (draft.listed)"""

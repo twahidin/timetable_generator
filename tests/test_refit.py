@@ -1837,6 +1837,11 @@ def test_what_was_not_looked_at_on_other_days_was_not_looked_at_in_time():
     with swapped(*at(clock), (refit, "solve", solve)): p = planned(given, TEACH); assert p["fixes"] == [] and needs(p) == {TEACH: refit.LATE} and p["late"] is True, p   # (a real one)
     with limits(MAX_NODES=1): p = planned(given, TEACH); assert needs(p) == {TEACH: f"{T1} is teaching {SUBJ2} for {CLS_B} then."} and p["late"] is False, p   # a search that comes to its limit of steps was looked at
 
+def test_a_sentence_about_a_timetable_the_list_has_changed_since_is_not_the_last_word():
+    far = lambda k, n: (TO(2, 2) if k == B_ else None, f"Far {k} {n}.", 0)   # A_'s look on other days speaks, then B_'s answer changes the timetable
+    p, looks, told, fars = play_far(lambda k, most, n: (None, f"About {k}.", None if most == 0 and n == 1 else 0), far); assert keys(p) == [B_] and [x[0] for x in fars] == [A_, B_] and needs(p) == {A_: refit.LATE, C_: refit.LATE} and p["late"] is True, (p, fars)   # the time is up in A_'s look without moves after the change
+    p, looks, told, fars = play_far(lambda k, most, n: (None, f"About {k}.", 0), far); assert keys(p) == [B_] and needs(p) == {A_: f"Far {A_} 1.", C_: f"Far {C_} 0."} and p["late"] is False, (p, fars)   # looked at again after the change: it speaks of the timetable as it is
+
 def test_some_are_never_looked_at_on_other_days():
     venue, half = "dep:C:1A:Art:venue", "dep:C:1A:Music:half"
     p, looks, told, fars = play_far(lambda k, most, n: (None, f"About {k}.", 0), lambda k, n: (None, f"Far {k}.", 0), venue, half, A_); assert [x[0] for x in fars] == [A_] and needs(p) == {venue: f"About {venue}.", half: f"About {half}.", A_: f"Far {A_}."} and p["late"] is False, (fars, p)   # no move helps a room
@@ -1859,6 +1864,9 @@ def test_some_are_never_looked_at_on_other_days():
         return was(m, spec, days, t, pool, moved, deadline, stats, most, far)
     try: log.disabled = True; refit.solve = solve; p = planned(ready(EXCHANGE, gives(T1)), TEACH); assert needs(p) == {TEACH: refit_plan.BROKEN}, p
     finally: refit.solve, log.disabled = was, False
+    def bad(*a): raise KeyError("x")
+    try: log.disabled = True; was_t, refit._teachers = refit._teachers, bad; p = planned(ready(EXCHANGE, gives(T1)), TEACH); assert needs(p) == {TEACH: refit_plan.BROKEN}, p   # one the change itself broke on: not the warning's own words
+    finally: refit._teachers, log.disabled = was_t, False
 
 def test_random_timetables_hold_with_other_days_and_trades():
     n, sayings = dict.fromkeys(("trades", "another day", "exchanges", "also", "needs", "far answers"), 0), set()

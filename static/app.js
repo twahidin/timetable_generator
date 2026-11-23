@@ -3281,7 +3281,7 @@ function rfListHTML() {
   const p = RF.plan, t = p.totals, n = t.changes, groups = p.groups || [], also = p.also || [], needs = p.needs || [], grey = RF.dead ? " rfgrey" : "";
   const all = groups.map(g => g.text).concat(also, needs.map(x => x.text)), sp = Draft.refitSplit(all), li = x => `<li>${esc(x)}</li>`;
   const fit = `<h3>What doesn’t fit the setup now</h3><ol class="rffit">${sp.head.map(li).join("")}</ol>` + (sp.rest.length ? `<details id="rfMore"${RF.more ? " open" : ""}><summary>and ${sp.rest.length} more</summary><ol class="rffit" start="${sp.head.length + 1}">${sp.rest.map(li).join("")}</ol></details>` : "");
-  const rules = ["Bands stay where they are", "Lessons stay on their day unless a change forces another", "Fewest lessons moved", "No Must rule broken", "Typed rules: moves allowed, flagged"].map(x => `<span class="rfchip">${x}</span>`).join("");
+  const rules = ["Bands stay where they are", "Lessons stay on their day unless nothing works there", "Fewest lessons moved", "No Must rule broken", "Typed rules: moves allowed, flagged"].map(x => `<span class="rfchip">${x}</span>`).join("");
   const step = s => `<div class="rfstep"><span class="rfn">${esc(s.n)}</span><div class="rfsay">${esc(s.text)}${s.why ? ` <span class="muted">(${esc(s.why)})</span>` : ""}${(s.tags || []).length ? ` ${rfTagsHTML(s.tags)}` : ""}</div></div>`;
   const body = groups.map(g => `<div class="rfgroup"><p class="rfgtext">${esc(g.text)}</p>${g.steps.map(step).join("")}</div>`).join("")
     + (also.length ? `<h3>Settled by these changes too</h3><ul class="rffit">${also.map(li).join("")}</ul>` : "");
@@ -3321,7 +3321,7 @@ function rfClose() {
   if (!RF.open || RF.applying) return;   // an Apply that is out: the window stays until it has answered
   RF.open = false; rfWant = false; RF.gen++; RF.pgen++; clearTimeout(RF.timer); const ov = $("#rfOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
   document.body.classList.remove("vslock");
-  const b = (RF.from === "cfg" && $("#rfCfg")) || $("#rfBtn"); if (b && !b.disabled) b.focus({ preventScroll: true });
+  const b = [RF.from === "cfg" && $("#rfCfg"), $("#rfBtn"), $("#vsBtn")].find(x => x && !x.disabled); if (b) b.focus({ preventScroll: true });   // after an Apply that settles everything the Re-fit button is off: Versions takes the focus
 }
 function rfLater(ms) { clearTimeout(RF.timer); RF.timer = setTimeout(() => rfLoad(false), ms); }
 async function rfLoad(first) {   // the job as the server has it. On opening: a list that is not stale is shown, anything else starts a job; while polling: the progress, the list or the failure
