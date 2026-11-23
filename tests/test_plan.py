@@ -1908,4 +1908,176 @@ def nothing_is_taken_back_once_the_exam_is_sent():
     assert p["can_undo"] and not p["undone"]
 
 
+# ---------------------------------------------------------------- the agreed list, without AI (plan/listread.py)
+import io, zipfile, warnings  # noqa: E402
+from plan import listread as LR  # noqa: E402
+
+BAD_FILE, LONG_LIST = "Give an Excel or Word file, or paste the list.", "Keep the list under 20,000 characters."
+def a_list_pub():
+    """the sample timetable with made-up subjects of several groups at Sec 3, a short name and a setup code"""
+    pub = F.sample_pub(); m = pub["model"]; E = "Entire Class"
+    m["lessons"] = [l for l in m["lessons"] if not (l["level"] == "Sec 3" and l["subject"] in ("English", "Mathematics"))]
+    for i, sb in enumerate(("English Language G3", "Mathematics G2", "Mathematics G3", "Design & Technology (Lower)")):
+        m["lessons"].append(F._lesson(20 + i, 1, 4 + i, 1, "Sec 3", ["3A"], sb, E, ["Ms Grace Yeo"], "3-01"))
+    m["subjects"] = {"Mathematics G3": dict(short="MA G3", dept="Maths")}
+    m["setup"]["subjects"] = [dict(subject="English Language G3", code="ELG3")]
+    return pub
+
+def a_row(line, subject, level="Sec 3", paper="Paper 1", minutes=60, date="2026-10-06", start="08:00", all=False, subjects=(), **kw):
+    return dict(line=line, level=level, subject=subject, paper=paper, minutes=minutes, date=date, start=start, all=all, subjects=list(subjects), **kw)
+
+def an_xlsx(rows):
+    import openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active
+    for r in rows: ws.append(r)
+    b = io.BytesIO(); wb.save(b); return b.getvalue()
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+def a_docx(paras=(), table=(), extra=b""):
+    p = lambda t: f'<w:p><w:r><w:t xml:space="preserve">{t}</w:t></w:r></w:p>'
+    cell = lambda t: f"<w:tc>{p(t)}</w:tc>"
+    tbl = "<w:tbl>" + "".join("<w:tr>" + "".join(cell(c) for c in r) + "</w:tr>" for r in table) + "</w:tbl>" if table else ""
+    xml = f'<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="{W}"><w:body>{"".join(p(x) for x in paras)}{tbl}</w:body></w:document>'
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "<Types/>"); z.writestr("word/document.xml", xml.encode() + extra)
+    return b.getvalue()
+
+@t
+def a_list_is_read_out_of_an_excel_or_a_word_file():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        x = an_xlsx([["Level", "Subject", "Date"], ["Sec 3", "E Maths", _dt.date(2026, 10, 6)], [None, None, None], ["Sec 3", "Art", 90]])
+        same(LR.text_of("Agreed List.XLSX", x), "Level\tSubject\tDate\nSec 3\tE Maths\t2026-10-06\nSec 3\tArt\t90")
+        d = a_docx(["Mid-Year papers", ""], [["Sec 3", "E Maths", "6 Oct"], ["Sec 4", "History", "7 Oct"]])
+        same(LR.text_of("list.docx", d), "Mid-Year papers\nSec 3\tE Maths\t6 Oct\nSec 4\tHistory\t7 Oct")
+    raises(Refused, lambda: LR.text_of("list.pdf", b"%PDF-1.4"), BAD_FILE)
+    raises(Refused, lambda: LR.text_of("list.xlsx", b"not a zip at all"), BAD_FILE)
+    raises(Refused, lambda: LR.text_of("list.docx", x), BAD_FILE)                         # an Excel file named as Word
+    raises(Refused, lambda: LR.text_of("list.docx", b"PK" + b"\0" * (5 * 1024 * 1024)), BAD_FILE)
+    raises(Refused, lambda: LR.text_of("list.docx", a_docx(extra=b"<!--" + b" " * (21 * 1024 * 1024) + b"-->")), BAD_FILE)   # a zip bomb
+    big = io.BytesIO()
+    with zipfile.ZipFile(big, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("xl/workbook.xml", "<x/>"); z.writestr("xl/big.bin", b"\0" * (51 * 1024 * 1024))
+    raises(Refused, lambda: LR.text_of("list.xlsx", big.getvalue()), BAD_FILE)
+    raises(Refused, lambda: LR.text_of("list.docx", a_docx(["x" * 20001])), LONG_LIST)
+    raises(Refused, lambda: LR.text_of("list.docx", a_docx(extra=b'<!DOCTYPE x [<!ENTITY a "aaaa">]>')), BAD_FILE)
+    for odd in (None, "text", 3):
+        raises(Refused, lambda: LR.text_of("list.xlsx", odd), BAD_FILE)
+    raises(Refused, lambda: LR.text_of(None, x), BAD_FILE)
+
+@t
+def the_apps_own_layout_is_read_without_ai():
+    pub = a_list_pub()
+    s = dict(levels=["Sec 3"], papers=[a_paper("Sec 3", "Mathematics G3", 90, "2026-10-06", "08:00", "groups", "Maths"),
+                                       a_paper("Sec 3", "English Language G3", 120, None, None, "level")])
+    data = P.paper_list_xlsx(s)
+    rows = LR.own_layout("papers.xlsx", data)
+    same(rows, [dict(line=2, level="Sec 3", subject="Mathematics G3", paper="Paper 1", minutes=90, date="2026-10-06", start="08:00",
+                     all=False, subjects=[], together="Maths"),
+                dict(line=3, level="Sec 3", subject="English Language G3", paper="Paper 1", minutes=120, date=None, start=None,
+                     all=True, subjects=[], together="")])
+    same(len(LR.match(rows, pub["model"], ["Sec 3"])["plain"]), 2)
+    same(LR.own_layout("papers.xlsx", an_xlsx([["Paper", "When"], ["Maths", "Monday"]])), None)
+    same(LR.own_layout("papers.docx", a_docx(["Level"])), None)
+    raises(Refused, lambda: LR.own_layout("papers.xlsx", an_xlsx([P.HEADER, ["Sec 3", "Art", "P1", "long"]])), "Row 2: the minutes must be a whole number.")
+    raises(Refused, lambda: LR.own_layout("papers.xlsx", b"PK broken"), BAD_FILE)
+
+@t
+def a_long_list_is_cut_into_pieces():
+    text = "\n".join(f"line {i}" for i in range(1, 86))
+    ps = LR.pieces(text)
+    same([len(p.split("\n")) for p in ps], [40, 40, 5]); same(ps[1].split("\n")[0], "line 41")
+    same(LR.pieces("a\nb\nc", lines=2), ["a\nb", "c"]); same(LR.pieces("  \n"), [])
+    for odd in ((None,), ("a", 0), ("a", "2"), (3,)):
+        raises(Refused, lambda: LR.pieces(*odd))
+
+@t
+def the_timetables_own_words_go_in_at_once():
+    m = a_list_pub()["model"]
+    rows = [a_row(2, "mathematics  g3"), a_row(3, "MA G3", paper="Paper 2", level="sec3"), a_row(4, "elg3", all=True, date=None, start=None),
+            a_row(5, "Design and Technology Lower", minutes=90.0)]
+    got = LR.match(rows, m, ["Sec 3", "Sec 4"])
+    same(got["other"], []); same(got["unmatched"], [])
+    same([(e["line"], e["level"], e["subject"], e["paper"], e["who"]) for e in got["plain"]],
+         [(2, "Sec 3", "Mathematics G3", "Paper 1", "groups"), (3, "Sec 3", "Mathematics G3", "Paper 2", "groups"),
+          (4, "Sec 3", "English Language G3", "Paper 1", "level"), (5, "Sec 3", "Design & Technology (Lower)", "Paper 1", "groups")])
+    same((got["plain"][2]["date"], got["plain"][2]["start"], got["plain"][3]["minutes"]), (None, None, 90))
+    same(got["plain"][0]["written"], "mathematics  g3")
+
+@t
+def other_words_are_read_as_the_subjects_the_reader_names():
+    m = a_list_pub()["model"]
+    rows = [a_row(2, "English", subjects=["english language g3"]), a_row(3, "Maths", subjects=["Mathematics G3", "Mathematics G2"], minutes=75),
+            a_row(4, "E Maths"), a_row(5, "Music", subjects=["Music"]), a_row(6, "E Maths", subjects=["Mathematics G3", "Geography"])]
+    got = LR.match(rows, m, ["Sec 3"])
+    same(got["plain"], [])
+    same([(e["line"], e["subject"], e["written"], e["minutes"], e["together"]) for e in got["other"]],
+         [(2, "English Language G3", "English", 60, ""), (3, "Mathematics G3", "Maths", 75, "Sec 3 Maths"), (3, "Mathematics G2", "Maths", 75, "Sec 3 Maths")])
+    same(got["unmatched"], [dict(line=4, level="Sec 3", subject="E Maths", paper="Paper 1", why="Sec 3 has no subject called E Maths."),
+                            dict(line=5, level="Sec 3", subject="Music", paper="Paper 1", why="Sec 3 has no subject called Music."),
+                            dict(line=6, level="Sec 3", subject="E Maths", paper="Paper 1", why="Sec 3 has no subject called E Maths.")])
+    same(LR.match([a_row(7, "History", level="Sec 4")], m, ["Sec 3"])["unmatched"][0]["why"], "Sec 4 is not a level of this exam.")
+
+@t
+def a_row_that_is_not_a_date_a_time_or_a_length_is_asked_about():
+    m = a_list_pub()["model"]
+    rows = [a_row(3, "Mathematics G3", minutes=0), a_row(22, "Mathematics G3", date=None), a_row(4, "Mathematics G3", date="32 Oct"),
+            a_row(5, "Mathematics G3", start="08:00 to 07:00"), a_row(6, "Mathematics G3", start="25:00"), a_row(7, "Mathematics G3", minutes=None),
+            a_row(8, "Mathematics G3", minutes="an hour"), a_row(9, "Mathematics G3", date="2026-02-30"), a_row(10, "Mathematics G3", minutes=True),
+            a_row(11, "Mathematics G3", start=None, paper="Paper 2")]
+    got = LR.match(rows, m, ["Sec 3"])
+    same([(u["line"], u["why"]) for u in got["unmatched"]],
+         [(3, "Row 3: 0 is not a length in minutes."), (22, "Row 22 has no date."), (4, "Row 4: 32 Oct is not a date."),
+          (5, "Row 5: 08:00 to 07:00 is not a time."), (6, "Row 6: 25:00 is not a time."), (7, "Row 7 has no length."),
+          (8, "Row 8: an hour is not a length in minutes."), (9, "Row 9: 2026-02-30 is not a date."), (10, "Row 10 could not be read.")])
+    same([(e["line"], e["date"], e["start"]) for e in got["plain"]], [(11, "2026-10-06", None)])
+
+@t
+def odd_rows_never_break_the_reading():
+    m = a_list_pub()["model"]
+    rows = ["Sec 3 Maths", None, dict(line=4), a_row(5, 42), a_row(6, "Mathematics G3", level=["Sec 3"]), dict(a_row(7, "Mathematics G3"), subjects="Maths"),
+            a_row(8, "x" * 121), a_row(9, "Maths", subjects=[3]), dict(a_row(10, "Mathematics G3"), line="ten"), a_row(11, "Mathematics G3", paper=7)]
+    got = LR.match(rows, m, ["Sec 3"])
+    same([u["why"] for u in got["unmatched"]], ["Row 1 could not be read.", "Row 2 could not be read.", "Row 4 could not be read.",
+                                                "Row 5 could not be read.", "Row 6 could not be read.", "Row 7 could not be read.",
+                                                "Row 8 could not be read.", "Row 9 could not be read.", "Row 9 could not be read.",
+                                                "Row 11 could not be read."])
+    same(got["plain"] + got["other"], [])
+    for odd in (None, "rows", {"a": 1}):
+        raises(Refused, lambda: LR.match(odd, m, ["Sec 3"]))
+    raises(Refused, lambda: LR.match([], m, "Sec 3"))
+    same(LR.match([a_row(2, "Mathematics G3")], None, ["Sec 3"])["unmatched"][0]["why"], "Sec 3 has no subject called Mathematics G3.")
+    same(LR.match([a_row(2, "Mathematics G3")], dict(lessons=[None, dict(level="Sec 3")]), ["Sec 3"])["unmatched"][0]["why"],
+         "Sec 3 has no subject called Mathematics G3.")
+
+@t
+def a_list_holds_at_most_200_papers():
+    m = a_list_pub()["model"]
+    rows = [a_row(i + 2, "Mathematics G3", paper=f"Paper {i}") for i in range(199)]
+    got = LR.match(rows + [a_row(201, "Maths", subjects=["Mathematics G2", "Mathematics G3"]), a_row(202, "Mathematics G2"), a_row(203, "Mathematics G2", paper="P2")], m, ["Sec 3"])
+    same(len(got["plain"]) + len(got["other"]), 200); same(LR.MAX_PAPERS, 200)
+    same([u["why"] for u in got["unmatched"]], ["Row 201 is over 200 papers.", "Row 203 is over 200 papers."])
+
+@t
+def the_rows_go_in_as_the_steps_put_them():
+    pub = a_list_pub()
+    got = LR.match([a_row(2, "Mathematics G3", all=True), a_row(3, "Maths", subjects=["Mathematics G2", "Mathematics G3"], paper="Paper 2", date=None, start=None),
+                    a_row(4, "English", subjects=["English Language G3"], together="Languages")], pub["model"], ["Sec 3", "Sec 4"])
+    papers = LR.to_papers(got["plain"] + got["other"])
+    same([sorted(p) for p in papers], [sorted(["level", "subject", "paper", "minutes", "date", "start", "who", "together"])] * 4)
+    same([(p["subject"], p["who"], p["together"]) for p in papers],
+         [("Mathematics G3", "level", ""), ("Mathematics G2", "groups", "Sec 3 Maths"), ("Mathematics G3", "groups", "Sec 3 Maths"),
+          ("English Language G3", "groups", "Languages")])
+    env, st, _ = started(pub=pub)
+    run(env, st, "put_list", dict(papers=papers), said="")
+    s = env.load(st.exam)
+    same(sorted((p["subject"], p["paper"], p["date"], p["start"], p["minutes"]) for p in s["papers"]),
+         [("English Language G3", "Paper 1", "2026-10-06", "08:00", 60), ("Mathematics G2", "Paper 2", None, None, 60),
+          ("Mathematics G3", "Paper 1", "2026-10-06", "08:00", 60), ("Mathematics G3", "Paper 2", None, None, 60)])
+    same(LR.to_papers([]), [])
+    for odd in (None, [None], [dict(level="Sec 3")], "x"):
+        raises(Refused, lambda: LR.to_papers(odd))
+
+
 print(f"{COUNT} plan tests passed")
