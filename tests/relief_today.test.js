@@ -95,7 +95,7 @@ t("Remind: what it sends, off while it is on its way, its answer beside the row,
 });
 t("Remind: why not, and a refusal", async () => {
   const p = await today(day([row(), maya()]));
-  for (const why of ["Sent at 07:38: wait a few minutes.", "Nobody to remind.", "Not on Telegram."]) { p.remind = ok({ sent: 0, skipped: [{ ckey: "k5", name: SAM, why }] }); await p.press("Remind"); assert.strictEqual(p.under(), why); assert.ok(p.row().querySelector(".msg.bad")); }
+  for (const why of ["Sent at 07:38: wait a few minutes.", "Last tried at 07:38: wait a few minutes.", "Nobody to remind.", "Not on Telegram."]) { p.remind = ok({ sent: 0, skipped: [{ ckey: "k5", name: SAM, why }] }); await p.press("Remind"); assert.strictEqual(p.under(), why); assert.ok(p.row().querySelector(".msg.bad")); }
   for (const [a, text] of [[no(409, "Telegram is not connected yet."), "Telegram is not connected yet."], [no(503, "Telegram could not be reached just now. Try again."), "Telegram could not be reached just now. Try again."], [new Error("x"), "Could not reach the server. Check the connection and try again."]]) {
     p.remind = a; await p.press("Remind"); assert.strictEqual(p.under(), text); assert.ok(p.row().querySelector(".msg.bad")); assert.ok(!p.btn("Remind").disabled);
   }

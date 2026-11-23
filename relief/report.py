@@ -69,7 +69,8 @@ WEEKLY, DAY = ("Fri", "15:00"), datetime.timedelta(days=1)               # when 
 AGAIN, OPEN_TODAY, OPEN_SUMMARY = "Remind them again", "Open relief today", "Open the full summary"
 NOBODY = "Nobody to remind."
 NOT_ON = "Not on Telegram."
-TOO_SOON = "Sent at {at}: wait a few minutes."  # the relief itself or a reminder of it, whichever was last
+TOO_SOON = "Sent at {at}: wait a few minutes."                   # the last of a relief's messages (itself, or a reminder of it) went
+TRIED = "Last tried at {at}: wait a few minutes."                # ... or may have gone, waits in the queue or is on its way
 _log = logging.getLogger("relief.telegram")
 
 
@@ -330,6 +331,11 @@ def _remindable(w, v, r, x, c):
     return not _cover.stopped(w.links, x) and not _fill._ended(x, c, w.now, w.bnds)
 
 
+def _too_soon(when, state):
+    """what is said of a relief whose last message was then, in that state"""
+    return (TOO_SOON if state == "sent" else TRIED).format(at=f"{when:%H:%M}")
+
+
 def _send_again(w, v):
     """one cover asked for -> (its relief teacher or None, why they are not reminded: None when they are)"""
     got = _cover_asked(w, v)
@@ -341,13 +347,13 @@ def _send_again(w, v):
     item = tell.relief_item(w.pub, w.reach, w.said.told, r, x, c, v["ckey"])
     if item is None: return who, NOBODY         # approved at no time (changed by hand)
     key, last = item["key"], w.said.last(item["key"])
-    if last is not None and w.now - last <= WAIT: return who, TOO_SOON.format(at=f"{last:%H:%M}")
+    if last is not None and w.now - last[0] <= WAIT: return who, _too_soon(*last)
     if tell._there(w.said.told, key):           # else it was never queued, or dropped: the message itself, as the sweep would
         n = 1 + max(w.said.copies(key), default=0)
         item = dict(item, key=f"{key}:r{n}", ref=dict(item["ref"], n=n))
     if not outbox.queue(item["key"], who, item["text"], kind="relief", buttons=item["buttons"], files=item["files"], ref=item["ref"]):
         t = outbox.told(item["key"])            # somebody else was first (a key is queued once); else they have no Telegram by now
-        return who, TOO_SOON.format(at=f"{tell._time(t['at']):%H:%M}") if t and t["state"] != "dropped" else NOT_ON
+        return who, _too_soon(tell._time(t["at"]), t["state"]) if t and t["state"] != "dropped" else NOT_ON
     for n, t in w.said.copies(key).items():
         if t["state"] == "queued": outbox.drop(f"{key}:r{n}")            # if it still is
     return who, None
@@ -377,8 +383,9 @@ def _who(w, v):
 def remind(date, covers, by, now=None):
     """each relief of covers (as asked says) that waits to be acknowledged sent again to its teacher, when its lesson is dated date
     (a date or an ISO string), neither over nor stopped -> dict(sent: how many, skipped=[dict(ckey, name, why)]), the others, why:
-    NOBODY (none there, answered, another's by now), NOT_ON, or TOO_SOON. by: (name, "telegram"), or None for whoever is signed in;
-    one history entry by them. WRONG for what is not a date or covers; now: the time (tests), else absences._now()"""
+    NOBODY (none there, answered, another's by now), NOT_ON, or TOO_SOON or TRIED (_too_soon). by: (name, "telegram"), or None for
+    whoever is signed in; one history entry by them. WRONG for what is not a date or covers; now: the time (tests), else
+    absences._now()"""
     covers = asked(covers)
     if not isinstance(date, datetime.date): date = _web._date_in(date)
     done, skipped = [], []

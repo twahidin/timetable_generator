@@ -511,8 +511,9 @@ class Said:
         return dict(state="queued" if t["state"] == "sending" else t["state"], at=t["at"])
 
     def last(self, key):
-        """when the last of its messages went, may have gone or was put in the queue (a date-time), or None"""
-        return max((when for when, n, t in self._messages(key) if t["state"] in LIVE), default=None)
+        """(when, state) of the last of its messages that went, may have gone or is in the queue (a date-time), or None"""
+        got = max((m for m in self._messages(key) if m[2]["state"] in LIVE), key=lambda m: m[:2], default=None)
+        return got and (got[0], got[2]["state"])
 
 
 def said():

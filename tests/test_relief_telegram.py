@@ -4464,7 +4464,7 @@ D13 = "2026-10-13"
 TODAY_BUTTON = [dict(text="Open relief today", url=BASE + "/relief#today")]
 SAM_LINE, MAYA_LINE = "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 · starts 10:30 · ", "\n• Ms Maya Lee · 1C Science P3–P5 · starts 09:00 · "
 STARTED, SAM_STARTED, MAYA_STARTED = "\nStarted without acknowledgement:", "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 (10:30)", "\n• Ms Maya Lee · 1C Science P3–P5 (09:00)"
-NOBODY, NOT_ON, TOO_SOON = "Nobody to remind.", "Not on Telegram.", "Sent at {}: wait a few minutes."
+NOBODY, NOT_ON, TOO_SOON, TRIED = "Nobody to remind.", "Not on Telegram.", "Sent at {}: wait a few minutes.", "Last tried at {}: wait a few minutes."
 BY = (TEAM, "telegram")
 def head(hm, n): return f"⏰ {hm} · Not yet acknowledged ({n})"
 def all_clear(hm, n): return f"✅ {hm} · All {n} reliefs for today are acknowledged."
@@ -4484,6 +4484,7 @@ def remind(covers, date=D13): return RE.remind(date, covers, BY)
 def listed(i, *ckeys): return [dict(id=i, ckey=k, absent=EVE, approved_at=approved_at(i, k)) for k in ckeys]
 def every(n): store.write_json(RS.PATH, dict(calendar=TERM, times=dict(report_every=n)))
 def skips(got): return [(v["ckey"], v["name"], v["why"]) for v in got["skipped"]]
+def tell_today(i, ckey=K5): t_ = TE.said().of(relief_key_of(i, ckey)); return t_["state"], t_["at"]
 
 @t
 def the_report_texts_are_the_plans():
@@ -4496,7 +4497,8 @@ def the_report_texts_are_the_plans():
     assert RE.clear_text("08:00", 4, 2) == none_waits("08:00", 2) and "`No reliefs are waiting now: {k} started without acknowledgement.`" in plan
     assert RE.clear_text("08:00", 1, 0) == "✅ 08:00 · The 1 relief for today is acknowledged." and RE.clear_text("08:00", 1, 1) == none_waits("08:00", 1)
     for label in (RE.AGAIN, RE.OPEN_TODAY): assert f"`{label}`" in plan
-    assert (RE.AGAIN, RE.OPEN_TODAY, RE.NOBODY, RE.NOT_ON, RE.TOO_SOON.format(at="07:20"), bot.REMINDED.format(n=2)) == ("Remind them again", "Open relief today", NOBODY, NOT_ON, TOO_SOON.format("07:20"), "Reminded 2.")
+    assert (RE.AGAIN, RE.OPEN_TODAY, RE.NOBODY, RE.NOT_ON, RE.TOO_SOON.format(at="07:20"), RE.TRIED.format(at="07:20"), bot.REMINDED.format(n=2)) == ("Remind them again", "Open relief today", NOBODY, NOT_ON, TOO_SOON.format("07:20"), TRIED.format("07:20"), "Reminded 2.")
+    for text in (NOBODY, NOT_ON, TOO_SOON.format("{hh:mm}"), TRIED.format("{hh:mm}")): assert f"`{text}`" in plan, text
     v = dict(who=SAM, lesson="1A Art", periods="P1", start="", how="not on Telegram")                          # a lesson with no times
     assert RE.report_text("07:00", [v], [v]) == head("07:00", 1) + "\n• Mr Sam Tan · 1A Art P1 · not on Telegram" + STARTED + "\n• Mr Sam Tan · 1A Art P1"
     assert RE.report_text("07:00", [v], []) == head("07:00", 1) + "\n• Mr Sam Tan · 1A Art P1 · not on Telegram" and RE.report_text("07:00", [], [v]).splitlines()[:2] == [head("07:00", 0), STARTED[1:]]
@@ -4862,7 +4864,7 @@ def remind_resends_once_every_five_minutes():
         at("06:55:01", 13); OB._wake.clear(); assert remind(asks(i, K5)) == dict(sent=1, skipped=[]) and OB._wake.is_set(); r = item(key + ":r1")
         assert (r["name"], r["kind"], r["text"], r["state"], buttons_of(r), r["files"]) == (SAM, "relief", RELIEF_K5, "queued", relief_buttons(i), "[]"), r
         assert json.loads(r["ref"]) == dict(json.loads(base["ref"]), n=1)
-        assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:55"))], "one that waits counts as much"
+        assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("06:55"))], "one that waits counts as much"
         at("06:57", 13); assert send() == 1 and said(SAM) == [RELIEF_K5] * 2; at("07:01", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:57"))], "from when it went"
         at("07:02:01", 13); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r2") and json.loads(item(key + ":r2")["ref"])["n"] == 2
         # it waits (Telegram cannot be reached): after five minutes another takes its place, so that they never all come at once
@@ -4870,10 +4872,10 @@ def remind_resends_once_every_five_minutes():
         assert send() == 1 and said(SAM) == [RELIEF_K5] * 3 and [state(f"{key}:r{n}") for n in (1, 2, 3, 4)] == ["sent", "dropped", "dropped", "sent"] and TE.sweep() == 0
         assert remind(asks(i, K2))["sent"] == 1 and item(f"{relief_key_of(i, K2)}:r1"), "each relief has its own five minutes"
     with school(SAM, TEAM):                                                                # the press of one listing it twice; a covers list with nothing in it
-        i = today_reliefs((K5, SAM)); at("07:00", 13); got = remind(asks(i, K5, K5)); assert got["sent"] == 1 and skips(got) == [(K5, SAM, TOO_SOON.format("07:00"))] and remind([]) == dict(sent=0, skipped=[])
+        i = today_reliefs((K5, SAM)); at("07:00", 13); got = remind(asks(i, K5, K5)); assert got["sent"] == 1 and skips(got) == [(K5, SAM, TRIED.format("07:00"))] and remind([]) == dict(sent=0, skipped=[])
     with school(SAM, TEAM):                                                                # a message that failed told nobody: at once
         i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); put(key, state="failed"); at("06:51", 13); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r1"); put(key + ":r1", state="failed"); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r2")
-        put(key + ":r2", state="unsure", sent_at="2026-10-13T06:51:00+08:00"); at("06:53", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:51"))], "it may have gone"
+        put(key + ":r2", state="unsure", sent_at="2026-10-13T06:51:00+08:00"); at("06:53", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("06:51"))], "it may have gone"
     with school(TEAM):                                                                     # not told at all yet (linked this minute): the message itself, which the sweep does not send again
         i = today_reliefs((K5, SAM)); links.link(SAM, CHATS[SAM], None); key = relief_key_of(i, K5); assert remind(asks(i, K5))["sent"] == 1 and [r["key"] for r in outs("relief")] == [key] and "n" not in json.loads(item(key)["ref"])
         assert TE.sweep() == 0 and swept() == 0 and said(SAM) == [RELIEF_K5]; put(key, state="dropped"); at("07:00", 13); assert remind(asks(i, K5))["sent"] == 1 and state(key) == "queued" and len(outs("relief")) == 1
@@ -4892,14 +4894,33 @@ def a_reminder_asked_for_soon_after_the_relief_says_when_that_went():
         assert [r["key"] for r in outs("relief")] == [key] and h.new() == []
 
 @t
+def too_soon_says_whether_the_last_message_went():
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("06:53", 13); ask = lambda: skips(remind(asks(i, K5)))
+        # the relief itself alone: gone, or it may have, or waits, or is on its way
+        for st, text in (("sent", TOO_SOON), ("unsure", TRIED), ("queued", TRIED), ("sending", TRIED)): put(key, state=st); assert ask() == [(K5, SAM, text.format("06:50"))], st
+        put(key, state="unsure"); assert tell_today(i) == ("unsure", "2026-10-13T06:50:00+08:00"), "as Today says: it may not have been sent"
+        # a reminder after it is the last
+        put(key, state="sent"); at("06:56", 13); assert remind(asks(i, K5))["sent"] == 1; at("06:58", 13)
+        for st, text in (("queued", TRIED), ("sending", TRIED), ("unsure", TRIED), ("sent", TOO_SOON)): put(key + ":r1", state=st, sent_at="2026-10-13T06:57:00+08:00" if st in ("sent", "unsure") else None); assert ask() == [(K5, SAM, text.format("06:57" if st in ("sent", "unsure") else "06:56"))], st
+        # one that told nobody (failed, dropped) is not the last, so it does not say when; in the same minute as another, the later one counts
+        for st in ("failed", "dropped"): put(key + ":r1", state=st); put(key, sent_at="2026-10-13T06:55:00+08:00"); assert ask() == [(K5, SAM, TOO_SOON.format("06:55"))], st
+        put(key, sent_at="2026-10-13T06:57:00+08:00"); put(key + ":r1", state="unsure", sent_at="2026-10-13T06:57:00+08:00"); assert ask() == [(K5, SAM, TRIED.format("06:57"))]
+    with school(SAM, TEAM):                                                                # somebody else was first (a key is queued once): what became of that one
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); before = OB.states_for("relief:"); remind(asks(i, K5))
+        for st, text in (("queued", TRIED), ("sending", TRIED), ("unsure", TRIED), ("sent", TOO_SOON), ("failed", TRIED)):
+            put(key + ":r1", state=st, sent_at="2026-10-13T07:00:00+08:00")
+            with stand_in(OB, "states_for", lambda *prefixes: dict(before)): assert skips(remind(asks(i, K5))) == [(K5, SAM, text.format("07:00"))], st
+
+@t
 def two_reminders_at_once_are_one():
     with school(SAM, TEAM):
         i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); got = []
         at_once(*[lambda: got.append(remind(asks(i, K5)))] * 4)
-        assert sorted(g["sent"] for g in got) == [0, 0, 0, 1] and [r["key"] for r in outs("relief")] == [key, key + ":r1"] and all(skips(g) == [(K5, SAM, TOO_SOON.format("07:00"))] for g in got if not g["sent"])
+        assert sorted(g["sent"] for g in got) == [0, 0, 0, 1] and [r["key"] for r in outs("relief")] == [key, key + ":r1"] and all(skips(g) == [(K5, SAM, TRIED.format("07:00"))] for g in got if not g["sent"])
     with school(SAM, TEAM):                                                                # another copy of the app put it in the queue meanwhile
         i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); before = OB.states_for("relief:"); remind(asks(i, K5))
-        with stand_in(OB, "states_for", lambda *prefixes: dict(before)): assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("07:00"))] and len(outs("relief")) == 2
+        with stand_in(OB, "states_for", lambda *prefixes: dict(before)): assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("07:00"))] and len(outs("relief")) == 2
         links.unlink(SAM); at("07:30", 13)
         with stand_in(links, "reachable", lambda pub=None: {SAM: CHATS[SAM]}): 
             assert skips(remind(asks(i, K5))) == [(K5, SAM, NOT_ON)], "unlinked meanwhile"
@@ -5045,7 +5066,7 @@ def remind_them_again_on_telegram():
         i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("07:00"); send(); h, n = Since(), len(edits()); m = under(tok(TEAM, "remind"))
         assert press(TEAM, "remind") == ("Reminded 2.", False) and h.new() == [(TEAM, TEAM, "telegram", "reminded", "Reminded 2 relief teachers on Tue 13 Oct", None)]
         assert [r["key"] for r in outs("relief")][-2:] == [relief_key_of(i, K2) + ":r1", relief_key_of(i, K5) + ":r1"] and edits() == [] and calls("editMessageReplyMarkup") == [], "its message stays as it is"
-        assert press(LEE, "remind") == (TOO_SOON.format("07:00"), True) == press(TEAM, "remind") and h.new() == [] and edits() == [] and calls("editMessageReplyMarkup") == []
+        assert press(LEE, "remind") == (TRIED.format("07:00"), True) == press(TEAM, "remind") and h.new() == [] and edits() == [] and calls("editMessageReplyMarkup") == []
         send(); assert said(SAM) == [RELIEF_K5] * 2 and m
         at("07:10", 13); CV.acknowledge(i, K2, MAYA); assert press(TEAM, "remind") == ("Reminded 1.", False); send(); assert len(said(SAM)) == 3 and len(said(MAYA)) == 2
         at("07:20", 13); CV.acknowledge(i, K5, SAM); assert press(LEE, "remind") == (NOBODY, True) and edits() == [] and h.new()[-1][0] == TEAM
@@ -5159,11 +5180,11 @@ def the_answer_is_the_first_reason_that_says_something():
             return got
     def acked(i, ckey, who_): CV.acknowledge(i, ckey, who_)
     def reminded(i, ckey): at("07:10", 13); assert remind(asks(i, ckey))["sent"] == 1; at("07:11", 13)
-    assert answer(lambda i: (acked(i, K2, MAYA), reminded(i, K5))) == (TOO_SOON.format("07:10"), True)
-    assert answer(lambda i: (acked(i, K5, SAM), reminded(i, K2))) == (TOO_SOON.format("07:10"), True)
+    assert answer(lambda i: (acked(i, K2, MAYA), reminded(i, K5))) == (TRIED.format("07:10"), True)
+    assert answer(lambda i: (acked(i, K5, SAM), reminded(i, K2))) == (TRIED.format("07:10"), True)
     assert answer(lambda i: (acked(i, K2, MAYA), links.unlink(SAM), at("07:10", 13))) == (NOT_ON, True)
     assert answer(lambda i: (acked(i, K2, MAYA), acked(i, K5, SAM), at("07:10", 13))) == (NOBODY, True)
-    assert answer(lambda i: (links.unlink(MAYA), reminded(i, K5))) == (NOT_ON, True) and answer(lambda i: (links.unlink(SAM), reminded(i, K2))) == (TOO_SOON.format("07:10"), True), "the first of them"
+    assert answer(lambda i: (links.unlink(MAYA), reminded(i, K5))) == (NOT_ON, True) and answer(lambda i: (links.unlink(SAM), reminded(i, K2))) == (TRIED.format("07:10"), True), "the first of them"
     assert answer(lambda i: (acked(i, K2, MAYA), at("07:10", 13))) == ("Reminded 1.", False)
     assert bot.ACTIONS["remind"][2] is bot.ANY and not isinstance(bot.ANY, (tuple, str)) and [k for k, v in bot.ACTIONS.items() if v[2] is bot.ANY] == ["remind", "ask"]
     with school(SAM, TEAM):                                                                # whatever the sentence looks like
@@ -5300,7 +5321,7 @@ def a_reminder_that_fails_on_the_page_is_answered_plainly():
         real, n, ent = OB.queue, len(outs("relief")), Since()
         with stand_in(OB, "queue", lambda key, name, *a, **k: locked() if name == MAYA else real(key, name, *a, **k)): assert call(TEAM, "post", URL, body, code=503) == dict(error=SAY)
         assert len(outs("relief")) == n + 1 and [x[4] for x in ent.new()] == ["Reminded 1 relief teacher on Tue 13 Oct"]
-        assert call(TEAM, "post", URL, body) == dict(sent=1, skipped=[dict(ckey=K5, name=SAM, why=TOO_SOON.format("07:00"))]) and len(outs("relief")) == n + 2
+        assert call(TEAM, "post", URL, body) == dict(sent=1, skipped=[dict(ckey=K5, name=SAM, why=TRIED.format("07:00"))]) and len(outs("relief")) == n + 2
     with school(SAM, TEAM):                                                                # on Telegram: the app's general words, and the button stays
         today_reliefs((K5, SAM)); ticked("07:00"); send()
         with stand_in(OB, "queue", locked): at("07:10", 13); assert press(TEAM, "remind") == (WENT_WRONG, True) and edits() == []

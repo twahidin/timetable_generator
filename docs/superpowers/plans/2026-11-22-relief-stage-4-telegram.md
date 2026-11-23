@@ -110,7 +110,7 @@ Messages (exact text; `·` is U+00B7, `–` U+2013; `{periods}` as "P9–P11", `
 | `WHY_CHANGE` | `Say why in one line. Until the relief team replies, this relief is still yours.` |
 | `WHY_CANCEL` | `Cancel this absence? Say why in one line, or press Keep it.` (with a Keep it button: 5d) |
 | `SURE_CANCEL` | `Cancel {days}? Your reason: {why}` (with Yes, cancel it and Keep it; nothing is cancelled before Yes: 5e) |
-| answers | `Sent to the relief team. Until they reply, this relief is still yours.` / `Cancelled. The relief team will see it.` / `Nothing was changed.` / `Answer the question I asked last.` / `Reminded {n}.` / `Something went wrong. Try again in the app.` |
+| answers | `Sent to the relief team. Until they reply, this relief is still yours.` / `Cancelled. The relief team will see it.` / `Nothing was changed.` / `Answer the question I asked last.` / `Reminded {n}.` / `Nobody to remind.` / `Not on Telegram.` / `Sent at {hh:mm}: wait a few minutes.` (the last message of that relief went) / `Last tried at {hh:mm}: wait a few minutes.` (it may have, or waits, or is on its way: 10c) / `Something went wrong. Try again in the app.` |
 
 Button labels: `✅ Acknowledge`, `↩ Request to change`, `✅ Acknowledge and set work`, `❌ Not needed: cancel`, `Approve {short name}`, `Keep it`, `Yes, cancel it`, `Remind them again`, `Open in the app`, `Open relief today`, `Open the full summary`.
 
@@ -369,7 +369,7 @@ Task 1.
   tick a little late, or after a restart, still sends it once); the time written in the text is now. `report.remind(date,
   covers, by, now=None) -> dict(sent, skipped)` (it queues with `outbox.queue`): each approved, not acknowledged relief of `covers` whose last told is
   older than 5 minutes gets `…:r{n}` (next number, same buttons); others skipped with the sentence "Sent at {hh:mm}:
-  wait a few minutes." (10a). A reminder that went counts as the relief told (6a). The Telegram button "Remind them again" calls the same function with the covers in that report.
+  wait a few minutes." (10a) or, when that message may not have gone, "Last tried at {hh:mm}: …" (10c). A reminder that went counts as the relief told (6a). The Telegram button "Remind them again" calls the same function with the covers in that report.
   Route: `POST /api/relief/today/remind {date, covers: [{id, ckey}]}` (relief.team).
 - [x] **Step 1: Write the failing tests** with the clock moved by hand: `the_report_goes_at_its_marks_and_once_each`,
   `not_before_an_hour_before_the_first_period`, `a_started_relief_is_listed_once_then_dropped`, `all_clear_goes_once_and_again_after_new_waiting`,
