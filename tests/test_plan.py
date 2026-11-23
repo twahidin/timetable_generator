@@ -4645,4 +4645,24 @@ def the_reason_is_added_only_at_the_two_provider_call_sites():
     same(got["status"], "done")
     assert len(h.lines) == 2 and all(" | " not in l and "_Refused" in l for l in h.lines), h.lines    # a tool handler's and on_text's fault: as before
 
+@t
+def an_invisible_character_before_a_quote_mark_does_not_hide_it():
+    R = AI._reason
+    same(R("a­'s Tan'"), "a…")              # a format character before the mark: not a letter, so the mark is a quote
+    same(R("x​'s Tan'"), "x…")
+    same(R("x'​s Tan'"), "x…")              # a format character after the mark: not an ending, so the mark is a quote
+    same(R("the mo​del is wrong"), "the model is wrong")      # far from any mark: dropped, the word kept
+    same(R("this mo​del doesn't fit"), "this model doesn't fit")
+
+@t
+def every_quote_mark_of_the_list_cuts_the_reason():
+    R = AI._reason
+    marks = ("'\"`´′″‚„「」『』＂＇｀‘’“”«»‹›"
+             "ʼʹ‵‴❛❜❝❞〝〞〟｢｣《》〈〉❮❯")
+    for m in marks:
+        same(R("before" + m + "secret"), "before…")
+    for m in "ʼʹ‵‴❛❜❝❞〝〞〟｢｣《》〈〉❮❯":
+        same(R("doesn" + m + "t fit"), "doesn…")       # never a contraction's apostrophe
+        same(R("it" + m + "s Tan"), "it…")
+
 print(f"{COUNT} plan tests passed")

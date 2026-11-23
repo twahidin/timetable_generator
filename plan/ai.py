@@ -34,7 +34,8 @@ def enabled() -> bool:
     return typed.enabled()
 
 
-_QUOTES = frozenset("'\"`\u00b4\u2032\u2033\u201a\u201e\u300c\u300d\u300e\u300f\uff02\uff07\uff40")
+_QUOTES = frozenset("'\"`\u00b4\u2032\u2033\u201a\u201e\u300c\u300d\u300e\u300f\uff02\uff07\uff40"
+                     "\u02bc\u02b9\u2035\u2034\u275b\u275c\u275d\u275e\u301d\u301e\u301f\uff62\uff63\u300a\u300b\u3008\u3009\u276e\u276f")
 _ENDINGS = ("t", "s", "re", "ve", "ll", "d", "m")       # what a contraction or a possessive puts after its apostrophe
 _REASON_MAX = 300
 
@@ -51,16 +52,17 @@ def _is_quote(text, i) -> bool:
 
 def _reason(text) -> str:
     """the provider's short reason made safe for a log: kept only up to the first quote mark, from which everything is replaced by
-    one ellipsis (so nothing quoted, and nothing after a quote, can survive); format characters dropped, control characters and
-    whitespace runs one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
+    one ellipsis (so nothing quoted, and nothing after a quote, can survive); only then format characters dropped, control
+    characters and whitespace runs one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
     try:
         if not isinstance(text, str):
             return ""
-        t = "".join(" " if unicodedata.category(c) == "Cc" or c.isspace() else c for c in text if unicodedata.category(c) != "Cf")
-        for i in range(len(t)):
+        t = text
+        for i in range(len(t)):                 # on the text as it came, so an invisible character next to a mark cannot hide it
             if _is_quote(t, i):
                 t = t[:i] + "\u2026"
                 break
+        t = "".join(" " if unicodedata.category(c) == "Cc" or c.isspace() else c for c in t if unicodedata.category(c) != "Cf")
         t = re.sub(r" +", " ", t).strip()
         return t if len(t) <= _REASON_MAX else t[:_REASON_MAX - 1] + "\u2026"
     except Exception:
