@@ -8182,12 +8182,14 @@ def the_report_all_clear_remind_and_week_count_a_relief_once_it_has_reached_its_
         with school(SAM, MAYA, TEAM, times=dict(send_from="07:45", report_every=5)):
             i = absent(by=HUGO); CV.change(i, K2, MAYA, TEAM, SCHOOL, rs()); legacy(i, K2); relief_as(case, i)   # Maya's: there all along
             if case == "held": assert CV.goes_at(covered(i, K5)[2], covered(i, K5)[1], rs(), SCHOOL).isoformat() == "2026-10-13T07:45:00+08:00"
-            assert ticked("07:00") == keyed("0700") and texts_to()[-1] == head("07:00", 1 + there) + MAYA_LINE + "not told yet" + (SAM_LINE + "not told yet" if there else ""), (case, texts_to())
+            unsent = "\nApproved, not sent out (1):" + SAM_STARTED if case == "unsent" else ""                # approved and not sent out: listed as such (a held one goes by itself)
+            assert ticked("07:00") == keyed("0700") and texts_to()[-1] == head("07:00", 1 + there) + MAYA_LINE + "not told yet" + (SAM_LINE + "not told yet" if there else "") + unsent, (case, texts_to())
             send(); assert skips(remind(listed(i, K5))) == [(K5, SAM, RE.QUIET.format(at="07:45") if there else NOBODY)] and remind(asks(i, K5))["sent"] == 0, case   # reached: remindable, from its teacher's earliest send-out time
             if not there: assert skips(remind(asks(i, K5))) == [(K5, SAM, NOBODY)], case
             CV.acknowledge(i, K2, MAYA)
             if there: CV.acknowledge(i, K5, SAM)
-            assert ticked("07:05") == cleared(1) and texts_to()[-1] == (all_clear("07:05", 2) if there else "✅ 07:05 · The 1 relief for today is acknowledged."), (case, texts_to())
+            if unsent: assert ticked("07:05") == keyed("0705") and texts_to()[-1] == head("07:05", 0) + unsent and outs("clear") == [], "no all clear while one is not sent out"
+            else: assert ticked("07:05") == cleared(1) and texts_to()[-1] == (all_clear("07:05", 2) if there else "✅ 07:05 · The 1 relief for today is acknowledged."), (case, texts_to())
             v = SU.week(SCHOOL, rs(), absences.all_records(), "2026-10-12", clock.now)
             assert (v["periods"], v["ahead"], v["on_day"]) == ((5, 5, 0) if there else (3, 3, 0)), (case, v)
             if case == "held":                                                             # at its time it is there, and it was arranged on the day
@@ -9210,6 +9212,45 @@ def work_reminders_follow_the_planned_reminder_and_count_what_needs_cover():
     assert TE.work_text("d", [dict(subject="Art", p=0, n=1)] * 5).split("\n")[1] == "5 lessons have no work yet: Art P1, Art P1, Art P1, Art P1, Art P1."
     assert "work" in TE.ANY_HOUR and "work" not in TE.GATES and "work" not in TE.TEACHER_KINDS and TE.CHECKS["work"] is TE._work_true and "work:" in TE.TOLD and TE.TOLD[-1] == "late:"
     assert tgweb.UNSENT["work"] == "Please set work"
+
+# ---- Send-out, final fix wave ----
+UNSENT_HEAD = "\nApproved, not sent out ({}):"
+SAM_1C, MAYA_1AB = "\n• Mr Sam Tan · 1C Science P3–P5", "\n• Ms Maya Lee · 1A, 1B Science (G2) P6–P7"
+
+@t
+def the_report_names_a_relief_approved_and_not_sent_out_and_gives_no_all_clear_while_one_is_left():
+    with school(SAM, MAYA, TEAM):                                                          # the review's story: two approved at 21:00, one sent out
+        at("15:00"); i = absent(); FL.run(ids=[i]); swept()
+        at("21:00"); CV.change(i, K2, SAM, TEAM, SCHOOL, rs()); out(i, K2); CV.change(i, K5, MAYA, TEAM, SCHOOL, rs()); swept()
+        at("06:45", 13); swept(); assert said(MAYA) == [] and len(said(SAM)) == 1
+        assert ticked("07:00") == keyed("0700")
+        want = head("07:00", 1) + SAM_1C + " · starts 09:00 · sent 06:45" + UNSENT_HEAD.format(1) + MAYA_1AB + " (10:30)"
+        assert texts_to()[-1] == want, texts_to()[-1]
+        assert buttons_of(outs("report")[-1]) == [[dict(text="Remind them again", what="remind", extra=dict(date=D13, covers=listed(i, K2)))], TODAY_BUTTON], "Remind: the told one alone"
+        send(); at("07:20", 13); CV.acknowledge(i, K2, SAM); swept()
+        assert ticked("07:30") == keyed("0730") and texts_to()[-1] == head("07:30", 0) + UNSENT_HEAD.format(1) + MAYA_1AB + " (10:30)", texts_to()[-1]
+        assert buttons_of(outs("report")[-1]) == [TODAY_BUTTON] and outs("clear") == [], "no all clear while one is not sent out"
+        send(); at("07:35", 13); out(i, K5); swept(); assert len(said(MAYA)) == 1
+        at("07:40", 13); CV.acknowledge(i, K5, MAYA); swept()
+        assert ticked("07:45") == cleared(1) and texts_to()[-1] == all_clear("07:45", 2)
+    with school(SAM, TEAM):                                                                # a morning with only a relief not sent out still gets its report
+        at("06:50", 13); i = absent(); CV.change(i, K5, SAM, TEAM, SCHOOL, rs()); swept(); assert said(SAM) == []
+        assert ticked("07:00") == keyed("0700") and texts_to()[-1] == head("07:00", 0) + UNSENT_HEAD.format(1) + SAM_LINE.split(" · starts")[0] + " (10:30)", texts_to()[-1]
+        assert buttons_of(outs("report")[-1]) == [TODAY_BUTTON]
+
+@t
+def a_held_relief_is_not_listed_as_not_sent_out():
+    with school(SAM, TEAM, times=dict(send_from="07:30")):
+        at("07:10", 13); i = absent(); CV.change(i, K5, SAM, TEAM, SCHOOL, rs()); out(i, K5); swept(); assert said(SAM) == []
+        assert ticked("07:15") == [] and outs("report") == [], "sent out and held: it goes by itself"
+        at("07:30", 13); swept(); assert len(said(SAM)) == 1 and ticked("07:30") == keyed("0730") and texts_to()[-1] == head("07:30", 1) + SAM_LINE + "sent 07:30"
+
+@t
+def a_relief_not_sent_out_whose_lesson_has_started_no_longer_holds_back_the_all_clear():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM)); CV.acknowledge(i, K5, SAM); CV.change(i, K2, MAYA, TEAM, SCHOOL, rs())
+        assert ticked("08:45") == keyed("0845") and texts_to()[-1] == head("08:45", 0) + UNSENT_HEAD.format(1) + "\n• Ms Maya Lee · 1C Science P3–P5 (09:00)"
+        assert ticked("09:00") == cleared(1) and texts_to()[-1] == "✅ 09:00 · The 1 relief for today is acknowledged.", "its lesson has started: not listed, not counted"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

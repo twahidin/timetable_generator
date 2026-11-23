@@ -14,9 +14,11 @@ A relief counts while its cover is dated today, approved and has reached its tea
 come), its absence not cancelled, its lesson needed, and no approved exam or event stops it (cover.stopped). It waits while its
 teacher has neither acknowledged it nor asked to change it and its first period has not started; once that has, it is listed as started without acknowledgement, once, and waits no more: state started:{relief
 key} keeps the mark of the report that listed it, and it is listed again when no copy of that report went or may still go (all
-dropped or failed, or none was queued before the app stopped). report:{date}:{HHMM of the mark}:{name} goes to each of the team
-who can be reached, when a relief waits or has just started; its button reminds those it lists as waiting. When none waits and a
-report went since the last all clear, clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many
+dropped or failed, or none was queued before the app stopped). A cover of today approved and NOT sent out (cover.sent_out), its
+lesson needed, not stopped and not started, is listed as approved, not sent out (one sent out and held goes by itself, and is not).
+report:{date}:{HHMM of the mark}:{name} goes to each of the team who can be reached, when a relief waits, has just started or is
+approved and not sent out; its button reminds those it lists as waiting (nobody was told of one not sent out). When none waits,
+none is approved and not sent out, and a report went since the last all clear, clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many
 started without. It waits while a request to change of a lesson still to start is with the team, since neither would be true, and
 while an absence, or a lesson or cover of today in one, cannot be read (what can be is reported): it may hold a relief that waits.
 While the exams, or today in them, cannot be read (tell.known) no lesson counts as stopped, nothing is said to have started and
@@ -78,10 +80,12 @@ _log = logging.getLogger("relief.telegram")
 
 
 # ---- the texts (the plan's messages)
-def report_text(hm, waiting, started):
-    """each of waiting and started: dict(who, lesson, periods, start ("" without times), how: "sent 07:20" and the like)"""
+def report_text(hm, waiting, started, unsent=()):
+    """each of waiting, started and unsent (approved and not sent out): dict(who, lesson, periods, start ("" without times),
+    how: "sent 07:20" and the like; not for unsent)"""
     lines = [f"⏰ {hm} · Not yet acknowledged ({len(waiting)})"]
     lines += [" · ".join([f"• {v['who']}", f"{v['lesson']} {v['periods']}"] + ([f"starts {v['start']}"] if v["start"] else []) + [v["how"]]) for v in waiting]
+    if unsent: lines += [f"Approved, not sent out ({len(unsent)}):"] + [f"• {v['who']} · {v['lesson']} {v['periods']}{tell._from(v['start'])}" for v in unsent]
     if started: lines += ["Started without acknowledgement:"] + [f"• {v['who']} · {v['lesson']} {v['periods']}{tell._from(v['start'])}" for v in started]
     return "\n".join(lines)
 
@@ -154,16 +158,20 @@ def _records():
 
 
 def _relief(w, r, x, i, c):
-    """cover c (the i-th) of lesson x as a relief that counts (approved, and it has reached its teacher), or None"""
+    """cover c (the i-th) of lesson x as a relief that counts (approved, and it has reached its teacher); or, state "unsent", one
+    approved and not sent out (cover.sent_out) whose lesson has not started; else None (one sent out and held goes by itself)"""
     s = _cover.state(r, x, c)
     if s not in tell.APPROVED: return None
     datetime.datetime.fromisoformat(c["approved"]["at"])     # an approval whose time cannot be read is passed over (w.passed): it may be one that waits
-    if not _cover.reached(r, x, c, w.now, w.settings, w.pub): return None
     ckey, who, starts = _cover.cover_key(x, i), c["relief"], _starts(c, w.bnds)
+    over = w.now.hour * 60 + w.now.minute >= starts
+    if not _cover.reached(r, x, c, w.now, w.settings, w.pub):
+        if s != "approved" or _cover.sent_out(c) is not None or over: return None
+        s = "unsent"
     if not isinstance(who, str): raise ValueError("no name")
     key = tell.key_of(w.said.told, r, c, ckey)
-    return dict(who=who, lesson=words.class_group(x), periods=words.periods_text(c), start=words.times(w.pub, x, c)[0], how=_how(w, who, key), state=s, key=key,
-                starts=starts, over=w.now.hour * 60 + w.now.minute >= starts, cover=dict(id=r["id"], ckey=ckey, absent=r["teacher"], approved_at=c["approved"].get("at")))
+    return dict(who=who, lesson=words.class_group(x), periods=words.periods_text(c), start=words.times(w.pub, x, c)[0], how="" if s == "unsent" else _how(w, who, key),
+                state=s, key=key, starts=starts, over=over, cover=dict(id=r["id"], ckey=ckey, absent=r["teacher"], approved_at=c["approved"].get("at")))
 
 
 def _passed_over(w, e):
@@ -236,11 +244,12 @@ def _report(s):
     records, unread = _records()
     w.passed = len(unread)
     rows = sorted((v for r in records for v in _reliefs(w, r)), key=lambda v: (v["starts"], v["who"], v["key"]))
+    unsent, rows = [v for v in rows if v["state"] == "unsent"], [v for v in rows if v["state"] != "unsent"]
     waiting = [v for v in rows if v["state"] == "approved" and not v["over"]]
     started = [v for v in rows if v["state"] == "approved" and v["over"] and not _listed(w, v)] if w.links is not None else []
     text, ref = None, dict(date=date, mark=mark, made=now.isoformat(timespec="seconds"))
-    if waiting or started:
-        text = report_text(f"{now:%H:%M}", waiting, started)
+    if waiting or started or unsent:                          # while one is approved and not sent out there is no all clear
+        text = report_text(f"{now:%H:%M}", waiting, started, unsent)
         buttons = [[dict(text=AGAIN, what="remind", extra=dict(date=date, covers=[v["cover"] for v in waiting]))]] if waiting else []
         buttons.append([dict(text=OPEN_TODAY, url=(bot.get("base") or "") + "/relief#today")])
         kind, key = "report", f"report:{date}:{hhmm(mark).replace(':', '')}"
