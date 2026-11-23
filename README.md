@@ -427,7 +427,8 @@ your role left as it was. If every admin forgets their password, set
 
 The history page keeps who changed what, and when, for two years. A change to the setup can be put back from there,
 and an admin can put back a change made on the admin page (a role, departments, a committee, Admin, a note, switched off or on;
-not a removal, and not an entry from before roles and committees were separated). The
+not a removal, not a change to a person who was removed since, and not an old entry that moved someone into or out of
+the Timetable committee group). The
 committee sees everything; a head of department sees changes to their departments and their own; everyone else who can
 change something sees their own. After signing in, the home page shows "Since you last signed in", a short summary of
 what changed since the person's previous sign-in. The committee can download the history as an Excel file.

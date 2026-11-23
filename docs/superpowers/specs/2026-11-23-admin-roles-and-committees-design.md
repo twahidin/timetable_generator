@@ -259,8 +259,13 @@ A version from before this change reads a record saved in the new shape as "no g
 after a rollback, people whose records were saved since would lose the committee's access until the new version is
 back. An admin saved in the new shape would not count as an admin either, so the old version would offer "Make the
 first admin" to anyone holding the committee's rights (the shared committee code) and refuse changes to a person who
-has Admin ticked. The shared committee code and the first-admin page still let the lead in. No data is lost. So: do
+has Admin ticked. The shared committee code and the first-admin page still let the lead in. No account is lost. So: do
 not roll back past this change without telling the lead first.
+
+Added after the build's review (23 November 2026): one thing is lost in a rollback. The old version does not know the
+`removed` list and drops it at its first save. A person removed before the rollback would then be treated as never
+removed: while no timetable is published, a code session of theirs from before the removal could be accepted again.
+With a timetable published it stays refused.
 
 ## What is left to the builder
 
