@@ -4513,7 +4513,7 @@ def reason_takes_out_quoted_stretches_and_cuts_and_never_raises():
     same(R('"all of it"'), "…")
     same(R('"x" and "y"'), "… and …")
     same(R("\"'\"nested'\" tail"), "…nested'…")
-    same(R("'a' 'b"), "…b")                                  # greedy: the last single mark ends the stretch
+    same(R("'a' 'b"), "…")                                    # the last mark opens a value that never closes: to the end (was "…b")                                  # greedy: the last single mark ends the stretch
     same(R("a\nb\t\tc\r\n  d\x00e"), "a b c d e")
     same(R(""), "")
     same(R('"""'), "……")
@@ -4539,7 +4539,14 @@ def a_single_quoted_value_with_an_apostrophe_in_it_goes_whole():
     same(R("x \u2018never closes of Tan"), "x …")
     same(R("it don't matter and teachers' rooms are fine"), "it don't matter and teachers' rooms are fine")   # no stretch open: kept
     same(R("don\u2019t panic"), "don\u2019t panic")
-    same(R("before \"Tan Wei\" and 'Lee' after"), "before … and … after")                    # a lone pair is as before
+    same(R("before \"Tan Wei\" and 'Lee' after"), "before … and … after")
+    # when the LAST single mark opens a word (after a space, a bracket or the start, before a non-space), its value never closes: to the end
+    same(R("see 'x' and 'the rest of it"), "see …")
+    same(R("path.to.field: 'one' then 'two words here"), "path.to.field: …")
+    same(R("x \u2018a\u2019 and \u2018the rest"), "x …")
+    same(R("x ('a' and ('b c"), "x (…")
+    same(R("x 'teachers' room' y"), "x … y")                  # the last mark follows a word: a closing mark, so the removal ends there and " y" survives
+    same(R("x 'a ' y"), "x …")                                # a mark after a space and before a space is in doubt: to the end                    # a lone pair is as before
 
 @t
 def only_a_4xx_status_error_gets_a_reason_and_no_fault_makes_fault_raise():
