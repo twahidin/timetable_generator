@@ -13,7 +13,7 @@ const OFF = { token_set: false, practice: false, connected: false, bot: null, ba
 const TOKEN = Object.assign({}, OFF, { token_set: true });
 const link = (name, handle = null, at = "2026-10-12T09:15:00+08:00") => ({ name, handle, at });
 const CONNECTED = Object.assign({}, TOKEN, { connected: true, bot: "made_up_bot", base: BASE, at: "2026-10-12T08:00:00+08:00", linked: [link(MAYA), link(SAM, "sam_made_up")], not_linked: [EVE, RUTH] });
-const SETTINGS = { settings: { rules: ["Use planned relief first."], limits: { fat_per_day: 3, other_per_day: null, never: [] }, times: { fill_at: "15:30", remind_at: "15:00", report_every: 15, weekly_day: "Fri", weekly_at: "15:00" },
+const SETTINGS = { settings: { rules: ["Use planned relief first."], limits: { fat_per_day: 3, other_per_day: null, never: [] }, times: { remind_at: "15:00", report_every: 15, weekly_day: "Fri", weekly_at: "15:00", morning_at: "06:30", send_from: "06:45", cut_off: "14:00", work_eve: "18:00", work_day: "07:00" },
   calendar: { terms: [], holidays: [] }, fat_role: "", missing: [], saved_at: "", saved_by: "" }, lists: { management: [], team: [], added: [] }, can_admin: false, people: [], roles: [], weeks: 2, can_save: true, can_codes: true };
 
 /* the settings page; api: "GET admin", "POST connect", … -> an answer, a promise of one, or a function of the call */
@@ -196,6 +196,17 @@ t("what could not be sent is said, by kind, name and time alone", async () => {
   const unsure = await opened({ "GET admin": ok(Object.assign({}, CONNECTED, { unsent: Object.assign({}, UNSENT, { failed: 0, unsure: 1, more: 5, items: UNSENT.items.slice(1) }) })) });
   assert.ok(unsure.card().includes("1 message may not have been sent since Mon 12 Oct.") && unsure.card().includes("and 5 more"));
   for (const none of [null, undefined, {}, 7]) { const q = await opened({ "GET admin": ok(Object.assign({}, CONNECTED, { unsent: none })) }); assert.ok(!/could not be sent|may not have been sent/.test(q.card()), String(none)); }
+});
+
+/* ---- Send-out, Task 1 ---- */
+t("the times card: the three times in place of Fill open lessons at, and the work reminders", async () => {
+  const p = await opened({ "GET admin": ok(TOKEN) }), text = p.text("#main");
+  for (const x of ["Morning message to the relief team at", "One message on Telegram with everything waiting for today. Not on weekends or holidays.",
+                   "Earliest send-out to relief teachers", "Nothing reaches a relief teacher before this time of a school day, whenever Send out was pressed. School hours for relief teachers run from here to the cut-off.",
+                   "Cut-off for the day's relief", "After it, nobody on the team is pinged about today, and the team works on the next school day. Until the next morning message, the team is not disturbed.",
+                   "Remind the absent teacher to set work at", "the evening before, and", "on the day", "Only while a lesson of that day has no work. Any absence, asked or planned."]) assert.ok(text.includes(x), x);
+  assert.ok(!text.includes("Fill open lessons at"));
+  for (const k of ["morning_at", "send_from", "cut_off", "work_eve", "work_day"]) assert.ok(p.$(`input[data-t="${k}"]`), k);
 });
 
 run(all);

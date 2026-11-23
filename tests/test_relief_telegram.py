@@ -7824,5 +7824,93 @@ def no_ping_before_the_report_starts():
         got = TE.due(bare, rs(), absences.all_records(), clock.now, links.reachable(), {}, "2026-10-12T08:00:00+08:00", team=(TEAM, LEE))
         assert len([x for x in got if x["kind"] == "new"]) == 2, "no lesson times: as before"
 
+# ---- Send-out, Task 1: the times and school hours ----
+from relief import hours as HR  # noqa: E402
+D = datetime.date
+def t_(day, hm): return datetime.datetime.fromisoformat(f"2026-10-{day:02d}T{hm}:00+08:00")
+
+@t
+def the_times_are_the_settings_with_their_defaults():
+    with school():
+        h = HR.of(rs()); assert [f"{v:%H:%M}" for v in h] == ["06:30", "06:45", "14:00", "18:00", "07:00"]
+        assert "fill_at" not in rs()["times"] and HR.of(dict(times=dict(cut_off="25:00", morning_at=None))).cut_off == datetime.time(14)
+        assert HR.on_duty(rs(), D(2026, 10, 13), [TEAM, LEE]) == sorted([TEAM, LEE]), "stage 1: the whole team"
+        assert HR.duty_day(rs(), SCHOOL, D(2026, 10, 13)) and not HR.duty_day(rs(), SCHOOL, D(2026, 10, 17)), "a Saturday"
+
+@t
+def the_team_window_and_school_hours_by_the_clock():
+    with school(calendar=dict(TERM, holidays=[dict(start="2026-10-15", end="2026-10-15", name="Made-up holiday")])):
+        s = rs(); team = lambda d, hm: HR.team_open(t_(d, hm), s, SCHOOL); open_ = lambda d, hm, lesson: HR.teacher_open(t_(d, hm), s, SCHOOL, D(2026, 10, lesson))
+        assert [team(12, hm) for hm in ("06:29", "06:30", "09:10", "13:59", "14:00", "21:00")] == [False, True, True, True, False, False]
+        assert not team(17, "09:10") and not team(15, "09:10"), "a weekend, a holiday"
+        assert [open_(12, hm, 13) for hm in ("06:44", "06:45", "14:00", "14:01", "21:00")] == [False, True, True, False, False]
+        assert open_(13, "14:05", 13) and not open_(13, "06:30", 13), "after the cut-off, only its own day; never before 06:45"
+        assert not open_(17, "09:10", 19) and not open_(15, "09:10", 16), "a weekend, a holiday"
+        assert HR.next_morning(t_(12, "21:00"), s, SCHOOL) == t_(13, "06:30") and HR.next_morning(t_(14, "21:00"), s, SCHOOL) == t_(16, "06:30")
+
+@t
+def a_held_relief_goes_at_the_next_start_of_school_hours():
+    with school():
+        s = rs(); r = lambda d, hm, lesson: HR.reaches_at(t_(d, hm), s, SCHOOL, D(2026, 10, lesson))
+        assert r(12, "09:10", 14) == t_(12, "09:10") and r(12, "21:00", 13) == t_(13, "06:45") and r(16, "21:00", 21) == t_(19, "06:45")
+        assert r(13, "06:30", 13) == t_(13, "06:45") and r(13, "14:05", 13) == t_(13, "14:05"), "after the cut-off, a lesson of that day goes at once"
+
+@t
+def a_held_relief_never_waits_past_its_own_morning():
+    with school(calendar=dict(TERM, holidays=[dict(start="2026-10-13", end="2026-10-16", name="Made-up holiday")])):
+        assert HR.reaches_at(t_(12, "21:00"), rs(), SCHOOL, D(2026, 10, 14)) == t_(14, "06:45"), "its day is a holiday now: still its own morning"
+    with school(calendar=dict(terms=[], holidays=[])):
+        assert HR.reaches_at(t_(12, "21:00"), rs(), SCHOOL, D(2026, 10, 13)) == t_(13, "06:45") and HR.teacher_open(t_(13, "06:45"), rs(), SCHOOL, D(2026, 10, 13))
+
+@t
+def twenty_four_hours_before_moves_to_the_last_cut_off():
+    with school():
+        b = lambda d, hm: HR.before_moment(t_(d, hm), rs(), SCHOOL)
+        assert b(19, "09:20") == t_(16, "14:00"), "a Monday lesson: Friday at 14:00"
+        assert b(14, "15:00") == t_(13, "14:00") and b(15, "07:40") == t_(14, "07:40")
+
+@t
+def school_hours_to_the_second_at_each_edge():
+    assert HR.of({}) == HR.of(None) == HR.of(dict(times=dict(morning_at="6:30", send_from=645))) == HR.of(RS.defaults(SCHOOL)), "the defaults are the settings' defaults"
+    with school():
+        s = rs()
+        sec = lambda d, hms: datetime.datetime.fromisoformat(f"2026-10-{d:02d}T{hms}+08:00")
+        assert [HR.team_open(sec(12, x), s, SCHOOL) for x in ("06:29:59", "06:30:00", "13:59:59", "14:00:00")] == [False, True, True, False]
+        assert [HR.teacher_open(sec(12, x), s, SCHOOL, D(2026, 10, 14)) for x in ("06:44:59", "06:45:00", "14:00:00", "14:00:59", "14:01:00")] == [False, True, True, True, False]
+        assert [HR.teacher_open(sec(13, x), s, SCHOOL, D(2026, 10, 13)) for x in ("06:44:59", "06:45:00", "23:59:59")] == [False, True, True], "its own day: from 06:45 on"
+        assert HR.teacher_open(datetime.datetime(2026, 10, 12, 1, 0, tzinfo=datetime.timezone.utc), s, SCHOOL, D(2026, 10, 14)), "01:00 UTC is 09:00 in school"
+        assert [HR.reaches_at(sec(12, x), s, SCHOOL, D(2026, 10, 14)) for x in ("06:44:59", "14:00:59", "14:01:00")] == [t_(12, "06:45"), sec(12, "14:00:59"), t_(13, "06:45")]
+        assert HR.next_morning(sec(12, "06:30:00"), s, SCHOOL) == t_(12, "06:30") and HR.next_morning(sec(12, "06:30:01"), s, SCHOOL) == t_(13, "06:30")
+        assert HR.next_morning(t_(16, "21:00"), s, SCHOOL) == t_(19, "06:30"), "a Friday into a Monday"
+        assert HR.team_window(t_(12, "09:10"), s, SCHOOL) == (t_(12, "09:10"), t_(12, "14:00")) and HR.team_window(t_(12, "14:00"), s, SCHOOL) == (t_(13, "06:30"), t_(13, "14:00"))
+        assert HR.team_window(t_(16, "21:00"), s, SCHOOL) == (t_(19, "06:30"), t_(19, "14:00"))
+        assert [HR.before_moment(sec(d, x), s, SCHOOL) for d, x in ((14, "06:44:59"), (14, "06:45:00"), (14, "14:00:00"), (14, "14:00:01"))] == [t_(12, "14:00"), t_(13, "06:45"), t_(13, "14:00"), t_(13, "14:00")]
+
+@t
+def school_hours_when_the_calendar_knows_no_day():
+    two_terms = dict(terms=[dict(TERM["terms"][0], end="2026-10-16")], holidays=[dict(start="2026-10-14", end="2026-10-14", name="Made-up holiday")])
+    with school(calendar=two_terms):
+        s = rs()
+        assert HR.reaches_at(t_(13, "21:00"), s, SCHOOL, D(2026, 10, 15)) == t_(15, "06:45") and HR.reaches_at(t_(13, "21:00"), s, SCHOOL, D(2026, 10, 19)) == t_(15, "06:45"), "a holiday between"
+        assert HR.reaches_at(t_(16, "21:00"), s, SCHOOL, D(2026, 10, 19)) == t_(19, "06:45") and HR.teacher_open(t_(19, "06:45"), s, SCHOOL, D(2026, 10, 19)), "the term has ended: its own morning"
+        assert not HR.teacher_open(t_(19, "09:10"), s, SCHOOL, D(2026, 10, 20)) and not HR.team_open(t_(19, "09:10"), s, SCHOOL), "not a school day"
+        assert HR.next_morning(t_(16, "21:00"), s, SCHOOL) is None and HR.team_window(t_(16, "21:00"), s, SCHOOL) is None, "no school day within 60 days"
+        assert HR.before_moment(t_(15, "09:20"), s, SCHOOL) == t_(13, "14:00"), "a holiday between: the last cut-off"
+    with school(calendar=dict(terms=[], holidays=[])):
+        s = rs()
+        assert not HR.school(s, SCHOOL, D(2026, 10, 13)) and HR.before_moment(t_(13, "09:20"), s, SCHOOL) is None and HR.next_morning(t_(12, "09:00"), s, SCHOOL) is None
+        assert HR.reaches_at(t_(12, "21:00"), s, SCHOOL, D(2026, 10, 9)) == t_(12, "21:00"), "never earlier than when"
+        assert HR.reaches_at(t_(12, "05:00"), s, SCHOOL, D(2026, 10, 12)) == t_(12, "06:45")
+
+@t
+def a_cover_starts_and_ends_by_its_periods():
+    x, c = dict(date="2026-10-13"), dict(p=5, n=2)
+    assert HR.starts(SCHOOL, x, c) == t_(13, "10:30") and HR.ends(SCHOOL, x, c) == t_(13, "11:30")
+    assert HR.ends(SCHOOL, x, dict(p=11, n=3)) == t_(13, "14:00"), "past the last period: the last period's end"
+    bare = dict(SCHOOL, model=dict(SCHOOL["model"], school={}, times=[], NP=0))
+    assert HR.starts(bare, x, c) == t_(13, "00:00") and HR.ends(bare, x, c) == t_(14, "00:00"), "no times: the day"
+    for first in ("hours", "fill", "cover"):                                                  # either can be imported first
+        p = subprocess.run([sys.executable, "-c", f"import relief.{first}"], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True); assert p.returncode == 0, p.stderr[-400:]
+
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

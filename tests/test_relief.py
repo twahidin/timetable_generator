@@ -148,7 +148,7 @@ def defaults_pick_the_adjunct_role_and_the_schools_rules():
     d = S.defaults(PUB)
     assert d["fat_role"] == "FAJT" and d["rules"] == S.DEFAULT_RULES and d["rules"] is not S.DEFAULT_RULES
     assert d["limits"] == dict(fat_per_day=3, other_per_day=None, never=[])
-    assert d["times"] == dict(fill_at="15:00", remind_at="15:00", report_every=15, weekly_day="Fri", weekly_at="15:00")
+    assert d["times"] == dict(remind_at="15:00", report_every=15, weekly_day="Fri", weekly_at="15:00", morning_at="06:30", send_from="06:45", cut_off="14:00", work_eve="18:00", work_day="07:00")
     assert S.defaults(P.fake_pub([dict(name="A B")]))["fat_role"] == ""
     assert S.load(PUB)["saved_at"] is None
 
@@ -175,7 +175,7 @@ def save_refuses_with_one_plain_sentence():
     bad(long_rule, rules=["x" * 301])
     lim = "A daily limit is a whole number from 1 to 20, or empty."
     bad(lim, limits=dict(fat_per_day=0)); bad(lim, limits=dict(other_per_day=21)); bad(lim, limits=dict(fat_per_day="3x")); bad(lim, limits=dict(fat_per_day=True))
-    bad("25:00 is not a time like 15:00.", times=dict(fill_at="25:00"))
+    bad("25:00 is not a time like 15:00.", times=dict(cut_off="25:00"))
     bad("3pm is not a time like 15:00.", times=dict(weekly_at="3pm"))
     bad("Report every 5 to 60 minutes.", times=dict(report_every=4)); bad("Report every 5 to 60 minutes.", times=dict(report_every=61))
     bad("The weekly summary goes out on a weekday.", times=dict(weekly_day="Sat"))
@@ -628,14 +628,30 @@ def slips_are_ten_to_a_page_and_a_new_page_per_department():
 @t
 def settings_edge_cases():
     fresh()
-    for k, label in (("fill_at", "Fill open lessons at"), ("remind_at", "Remind the absent teacher at"), ("weekly_at", "Weekly summary at")):
+    for k, label in (("remind_at", "Remind the absent teacher at"), ("weekly_at", "Weekly summary at"), ("morning_at", "Morning message to the relief team at"), ("send_from", "Earliest send-out to relief teachers"),
+                     ("cut_off", "Cut-off for the day's relief"), ("work_eve", "Remind the absent teacher to set work at"), ("work_day", "Remind the absent teacher to set work at")):
         raises(ValueError, lambda: S.save(base(times={k: ""}), PUB, "x"), f"Give a time for {label}.")
-    raises(ValueError, lambda: S.save(base(times=dict(fill_at="25:00")), PUB, "x"), "25:00 is not a time like 15:00.")
+    raises(ValueError, lambda: S.save(base(times=dict(cut_off="25:00")), PUB, "x"), "25:00 is not a time like 15:00.")
     for bad_json in ("[]", '"text"'):
         open(S.PATH, "w").write(bad_json)
-        d = S.load(PUB); assert d["limits"]["never"] == [] and d["times"]["fill_at"] == "15:00", bad_json
+        d = S.load(PUB); assert d["limits"]["never"] == [] and d["times"]["cut_off"] == "14:00", bad_json
     fresh()
     rows = list(csv.reader(io.StringIO(RC.codes_csv([dict(name="\tMs Tab", depts=["\rSci"])])[1:])))
     assert rows[1][0] == "'\tMs Tab" and rows[1][1] == "'\rSci", rows[1][:2]
+
+# ---- Send-out, Task 1: the times and school hours ----
+@t
+def the_three_times_are_in_order_and_fill_at_stays_in_the_file():
+    raises(ValueError, lambda: S.save(base(times=dict(morning_at="06:50", send_from="06:45")), PUB, "x"), S.ORDER)
+    raises(ValueError, lambda: S.save(base(times=dict(send_from="14:00", cut_off="14:00")), PUB, "x"), S.ORDER)
+    S.save(base(times=dict(morning_at="06:45", send_from="06:45", cut_off="13:00")), PUB, "x")
+    store.write_json(S.PATH, dict(store.read_json(S.PATH, {}), times=dict(fill_at="15:30")))   # a file saved by the last version
+    assert "fill_at" not in S.load(PUB)["times"] and S.load(PUB)["times"]["morning_at"] == "06:30", "unread; the defaults"
+    S.save(base(), PUB, "x"); assert store.read_json(S.PATH, {})["times"]["fill_at"] == "15:30", "kept in the file"
+
+@t
+def a_fill_time_sent_by_a_page_is_not_saved():
+    fresh(); S.save(base(times=dict(fill_at="09:00")), PUB, "x")
+    assert "fill_at" not in store.read_json(S.PATH, {})["times"] and "fill_at" not in S.load(PUB)["times"]
 
 print(f"{COUNT} relief tests passed")
