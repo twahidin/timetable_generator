@@ -17,7 +17,7 @@ from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
+from .spec import filled_lessons, double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -221,6 +221,7 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
         own = read_template(setup_path) if setup_path else (db[5] if db else None)
         file_school = str((((own or {}).get("school") or {}).get("name")) or "").strip()
         spec = copy.deepcopy(spec); cid = ((own or {}).get("school") or {}).get("config_id")
+        spec["lessons"] = filled_lessons(spec.get("lessons"))   # the editor's setup may hold rows not filled in yet: left out, as the workbook leaves them out
         if cid: spec.setdefault("school", {})["config_id"] = cid
     elif setup_path: spec = read_template(setup_path)
     elif db and db[5]: spec = db[5]
