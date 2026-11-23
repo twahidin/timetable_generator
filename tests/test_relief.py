@@ -461,7 +461,7 @@ def relief_me_answers_a_strong_person():
     from werkzeug.security import generate_password_hash
     fresh()
     pw = generate_password_hash(secrets.token_hex(8))   # a password session ends when its record holds no password
-    AP.update(lambda d: d["people"].update({"Mr Hod One": dict(group="hod", depts=["Science"], username="hod.one", pw=pw), "Ms Com One": dict(group="committee", username="com.one", pw=pw)}))
+    AP.update(lambda d: d["people"].update({"Mr Hod One": dict(group="hod", depts=["Science"], username="hod.one", pw=pw), "Ms Com One": dict(username="com.one", pw=pw, extras=dict(timetable=True, relief=False, exams=None, admin=False))}))   # on the Timetable committee
     try:
         for name, group in (("Mr Hod One", "hod"), ("Ms Com One", "committee")):
             c = A.app.test_client()

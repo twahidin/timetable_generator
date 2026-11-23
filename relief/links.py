@@ -22,7 +22,8 @@ A person whose link the sender removed because the bot was blocked (outbox) gets
 any way: _put, which every way of linking goes through, deletes it. Unlinking by hand, /stop or the team leaves none. With it the
 sender notes the blocked-bot alert for the relief team (note_alert): state `alert:{name}:{date}` = dict(at, what), the date it was
 found, one a person a day (the first stays); what: the plain words of what was refused (relief/tell.py's refused), never its text,
-a key, a chat, a token or a reason. relief/tell.py reads them (alerts) and makes the alert."""
+a key, a chat, a token or a reason. relief/tell.py reads them (alerts) and makes the alert. A person removed on the admin page
+(forget) loses their link, their link codes, their note and their alerts at once."""
 import hashlib, json, secrets, time
 
 import access
@@ -175,13 +176,17 @@ def alerts(since_date):
 
 
 def forget(name):
-    """a person removed on the admin page: their link (and any talk open in its chat) and every link code of theirs, used
-    or not, go in one transaction -> the chat that was theirs, or None"""
+    """a person removed on the admin page: their link (and any talk open in its chat), every link code of theirs, used or
+    not, the note that the bot was blocked (blocked:{name}) and every blocked-bot alert about them (alert:{name}:{date}) go in
+    one transaction, so a person given the same name later never sees an old block and no alert is made of a removed person
+    -> the chat that was theirs, or None"""
+    own = f"{ALERT}{name}:"
     with tgdb.db() as c:
         r = c.execute("SELECT chat FROM links WHERE name=?", (name,)).fetchone()
         c.execute("DELETE FROM links WHERE name=?", (name,))
         if r is not None: c.execute("DELETE FROM talks WHERE chat=?", (r["chat"],))
         c.execute("DELETE FROM codes WHERE name=?", (name,))
+        c.execute("DELETE FROM state WHERE k=? OR (substr(k, 1, ?)=? AND instr(substr(k, ?), ':')=0)", (BLOCKED + name, len(own), own, len(own) + 1))   # a date holds no colon
         return r["chat"] if r else None
 
 

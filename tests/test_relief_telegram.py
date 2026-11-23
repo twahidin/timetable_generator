@@ -287,7 +287,7 @@ PUB = RP.fake_pub([dict(name=TIA, dept="Science"), dict(name=HUGO, dept="Science
 PW = "not a real hash"
 AP.update(lambda d: d["people"].update({
     HUGO: dict(group="hod", depts=["Science"], username="hugo.ong", pw=PW),
-    CORA: dict(group="committee", added=True, username="cora.lim", pw=PW, extras=dict(relief=False, exams=None, admin=True)),
+    CORA: dict(group="executive", added=True, username="cora.lim", pw=PW, extras=dict(timetable=True, relief=False, exams=None, admin=True)),   # on the Timetable committee, an admin
     EXE: dict(group="executive", added=True),
     TEAM: dict(extras=dict(relief=True, exams=None, admin=False)),
     OFFIE: dict(off=True)}))
@@ -9288,6 +9288,75 @@ def relief_needed_again_leaves_out_the_relief_teacher_who_is_away_and_the_absent
         i = absent(by=HUGO); give(i, K5, SAM); swept(); on_cover(SAM, i, K5, "acknowledge")
         at("07:00", day=13); absent(teacher=SAM, dates=("2026-10-13",)); FL.run(); swept()
         assert CV.was_away(covered(i, K5)[2])["who"] == SAM and sorted(n for k, n in told_of("needed")) == [LEE, TEAM], told_of("needed")
+
+# ---- Send-out, Task 15: after the merge of main (a removed person, rights from the Timetable committee tick) ----
+@contextlib.contextmanager
+def added(name, **changes):
+    """name, added by name (not on the timetable), with these changes for the block; afterwards as they were, removed or not"""
+    old = AP.load()["people"].get(name)
+    AP.update(lambda d: d["people"].__setitem__(name, dict(AP.record(d, name), **changes)))
+    def back(d):
+        d["removed"].pop(name, None)
+        if old is None: d["people"].pop(name, None)
+        else: d["people"][name] = old
+    try: yield
+    finally: AP.update(back)
+def removed(name):
+    """name removed on the admin page, by an admin (Cora, by password), as the page does it"""
+    r = who(CORA, via="password").post("/api/admin/remove", json=dict(name=name))
+    assert r.status_code == 200 and name not in AP.load()["people"], (r.status_code, r.get_data(as_text=True)[:300])
+ON_TEAM, EXE_CHAT = dict(extras=dict(relief=True, exams=None, admin=False)), 899
+def notes(): return sorted(r["k"] for r in rows("state") if r["k"].startswith(("alert:", "blocked:")))
+
+@t
+def a_removed_person_s_telegram_notes_go_with_their_link():
+    with added(EXE, **ON_TEAM), school(TEAM, LEE, ROSA):
+        at("09:00", day=12); links.note_blocked(EXE); links.note_alert(EXE, "Relief planned")        # Exe blocked the bot on Monday and on Tuesday
+        at("09:00", day=13); links.note_alert(EXE, "Morning message"); links.new_code(EXE)
+        lookalike = EXE + ":2"                                                                    # a name that starts with Exe's and a colon: not hers
+        links.note_blocked(lookalike); links.note_alert(lookalike, "Relief planned"); links.unlink(ROSA); links.note_blocked(ROSA); links.note_alert(ROSA, "Relief planned")
+        assert len(notes()) == 7 and [r["name"] for r in rows("codes")] == [EXE]
+        removed(EXE)
+        assert notes() == sorted([f"blocked:{ROSA}", f"alert:{ROSA}:2026-10-13", f"blocked:{lookalike}", f"alert:{lookalike}:2026-10-13"]), notes()
+        assert links.blocked(EXE) is None and rows("codes") == [] and (EXE, "2026-10-13") not in links.alerts("2026-10-12")
+        swept(); assert sorted(n for k, n in told_of("unlinked")) == [LEE, LEE, TEAM, TEAM] and not any(EXE + " has" in x for x in said(TEAM)), "no alert about a removed person"
+        AP.update(lambda d: d["people"].__setitem__(EXE, dict(AP.record(d, EXE), added=True, **ON_TEAM)))     # a new person given the same name later
+        j = client(dict(who=EXE, via="code", n=AP.record(AP.load(), EXE)["n"])).get("/api/relief/telegram").get_json()
+        assert j["linked"] is False and j["blocked"] is None, "their card says nothing of the old block"
+
+@t
+def a_queued_alert_about_a_removed_person_does_not_go():
+    with added(EXE, **ON_TEAM), school(TEAM, LEE):
+        at("10:00"); links.note_alert(EXE, "Relief planned"); TE.sweep(); assert sorted(n for k, n in told_of("unlinked")) == [LEE, TEAM]
+        removed(EXE); send()
+        assert {r["state"] for r in outs("unlinked")} == {"dropped"} and said(TEAM) == [] and said(LEE) == [], "queued before the removal: dropped"
+        swept(); assert said(TEAM) == [] and {r["state"] for r in outs("unlinked")} == {"dropped"}, "and never made again"
+
+@t
+def a_removed_person_s_queued_messages_are_dropped_and_they_are_on_no_list():
+    with added(EXE, **ON_TEAM), school(TEAM, LEE):
+        links.link(EXE, EXE_CHAT, None)
+        assert links.reachable()[EXE] == EXE_CHAT and EXE in RO._team(SCHOOL)[1] and EXE in HR.on_duty(rs(), "2026-10-13", RO._team(SCHOOL)[1]), "on the team before"
+        at("10:00"); links.note_alert(ROSA, "Relief planned"); TE.sweep(); assert sorted(n for k, n in told_of("unlinked")) == [EXE, LEE, TEAM]
+        removed(EXE); send()
+        assert [r["state"] for r in outs("unlinked", EXE)] == ["dropped"] and not sent(EXE_CHAT) and said(TEAM) == [TE.unlinked_text(ROSA, "Relief planned")]
+        assert EXE not in links.reachable() and links.chat_of(EXE) is None and links.name_of(EXE_CHAT) is None and links.rights_named(EXE) == frozenset()
+        assert EXE not in RO._team(SCHOOL)[1] and HR.on_duty(rs(), "2026-10-13", RO._team(SCHOOL)[1]) == [LEE, TEAM] and not TE._on_team(EXE)
+        with no_pub(): assert links.person(EXE_CHAT) is None and links.rights_named(EXE) == frozenset(), "while nothing is published: not there either"
+
+@t
+def relief_rights_on_telegram_come_from_the_timetable_committee_tick():
+    with telegram():
+        links.link(CORA, 502, None); links.link(EXE, 504, None)
+        assert {"relief", "relief.save"} <= links.rights_of(502) and "relief.team" not in links.rights_of(502) and links.chat_of(CORA) == 502 and CORA in links.reachable()
+        with record(CORA, extras=dict(timetable=False, relief=False, exams=None, admin=False)):            # taken off the Timetable committee
+            assert links.rights_of(502) == AR.rights(links.person(502), "telegram") and not links.rights_of(502) & {"relief", "relief.save", "relief.settings"}
+            assert links.chat_of(CORA) is None and links.name_of(502) is None and CORA not in links.reachable() and not TE._on_team(CORA)
+        with record(CORA, group="committee", extras=dict(relief=False, exams=None, admin=True)):           # a record in the old shape: still on the committee
+            assert {"relief", "relief.save"} <= links.rights_of(502) and links.chat_of(CORA) == 502
+        with record(EXE, extras=dict(timetable=True, relief=False, exams=None, admin=False)):              # an executive ticked onto it
+            assert {"relief", "relief.save", "relief.settings"} <= links.rights_of(504) and "relief.team" not in links.rights_of(504) and links.chat_of(EXE) == 504
+        assert "relief" not in links.rights_of(504) and links.chat_of(EXE) is None
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

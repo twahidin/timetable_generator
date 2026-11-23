@@ -765,3 +765,24 @@ holidays." then gains "or days with no relief duty".
 - Not checked: no real Telegram bot was called anywhere, and no model; no suite reaches the network. The Telegram side (the morning
   message, Send out on Telegram, the repeats, the alert) was not walked on a practice phone: tests alone cover it. The pages were not
   yet seen in a browser (above). Speed on the live service was not measured.
+- Main 5de8cb5 (the admin roles and committees work, with Plan with AI's logged refusal reason and a code used twice) was merged
+  into this branch as one merge commit. One file conflicted, `relief/links.py`, where this stage's blocked-bot alert (`note_alert`,
+  `alerts`) and main's `forget` (what goes when a person is removed on the admin page) were written in the same place: both were kept
+  whole. Then this stage was made to follow main. A removed person's note that the bot was blocked and every blocked-bot alert about
+  them now go with their link, in the same transaction as their link and link codes, so a person given the same name later sees no
+  old block, and an alert about them that was already queued is dropped instead of sent. A removed person, and a person taken off
+  the Timetable committee, is on no list: not reachable, not on the relief team, not on duty for the morning message, and a message
+  queued for them is dropped as for anyone who has no Telegram any more. The rights that came from the old "Timetable committee"
+  group now come from the Timetable committee tick; the test fixtures that made a committee member now tick it (a record in the old
+  shape is still read as on the committee, and a test says so). The app's hooks (the morning message after the report, the History
+  line by The app for a blocked bot) are each registered once, and the History page shows this stage's entries to the same people as
+  before. No sentence of these notes, `docs/DEPLOY.md` or `README.md` was made untrue by the change (they name the timetable
+  committee, never its old group, for relief settings). Then every suite once, one at a time, each at its first run: `smoke` 103,
+  `test_accounts` 23, `test_admin` 53, `test_ask` 49, `test_board` 59, `test_choices` 16, `test_combined` 38, `test_compare` 21,
+  `test_exams` 206, `test_exams_relief` 102, `test_fixes` 65, `test_helper` 20, `test_history` 47, `test_history_draft` 9,
+  `test_parents` 35, `test_plan` 212, `test_putback` 37, `test_refit` 170, `test_relief` 45, `test_relief_requests` 59,
+  `test_relief_team` 82, `test_relief_telegram` 439, `test_routes` 20, `test_rules` 11, `test_signin` 33, `test_sync` 32,
+  `test_teachers` 9, `test_typed` 33, `test_venues` 4, `test_verify` 56, `test_versions` 44; adminview 16, ask 12, board 67, choices
+  13, classview 18, draft 31, exams (the last round 20), grid 14, groups 37, history 5, map 26, parents 46, people 31, plan 20,
+  relief_inbox 3, relief_settings 25, relief_summary 11, relief_telegram 39, relief_today 59, split 189, subjectview 15, sync 17,
+  teacherview 8, timetable_page 7, venueview 24.

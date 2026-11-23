@@ -1106,7 +1106,9 @@ def _needed_true(ref, name):
 
 
 def _unlinked_true(ref, name):
-    """the person is on the team still, and the team may be pinged now; nothing published (a publish swaps folders) raises: it waits"""
+    """the alert is noted still (links.forget drops a removed person's), the person is on the team still, and the team may be
+    pinged now; nothing published (a publish swaps folders) raises: it waits"""
+    if (ref.get("name"), ref.get("date")) not in _links.alerts(ref.get("date")): return False
     if not _on_team(name): return False
     pub = store.published()
     if not pub: raise ValueError("nothing is published")
