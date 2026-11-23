@@ -2080,4 +2080,433 @@ def the_rows_go_in_as_the_steps_put_them():
         raises(Refused, lambda: LR.to_papers(odd))
 
 
+# ---------------------------------------------------------------- the AI calls and the practice stand-in (plan/ai.py)
+import logging, threading  # noqa: E402
+_had_sdk = "anthropic" in sys.modules
+from plan import ai as AI  # noqa: E402
+logging.getLogger("plan").addHandler(logging.NullHandler())   # the faults the tests cause are caught by Logged, not printed
+same("anthropic" in sys.modules, _had_sdk)            # the SDK is imported only inside the real call
+
+class Logged(logging.Handler):
+    def __init__(self):
+        super().__init__(); self.lines = []
+    def emit(self, r): self.lines.append(r.getMessage())
+
+def logged():
+    h = Logged(); logging.getLogger("plan").addHandler(h)
+    return h
+
+def reply(*blocks, stop_reason=None, usage=None):
+    stop_reason = stop_reason or ("tool_use" if any(b["type"] == "tool_use" for b in blocks) else "end_turn")
+    return dict(stop_reason=stop_reason, content=list(blocks), usage=usage if usage is not None else {})
+def use(id, name, input=None): return dict(type="tool_use", id=id, name=name, input={} if input is None else input)
+def say(text): return dict(type="text", text=text)
+
+class Script:
+    """a stand-in call: the scripted replies in order, and a record of what each call was sent"""
+    def __init__(self, *replies, before=None):
+        self.replies, self.sent, self.before = list(replies), [], before
+    def __call__(self, messages, stop, deadline):
+        self.sent.append(AI.request_args(copy.deepcopy(messages)))
+        if self.before: self.before(messages, stop)
+        r = self.replies.pop(0)
+        if isinstance(r, Exception): raise r
+        return r
+
+def a_loop(call, on_tool=None, messages=None, stop=None, deadline=None, **kw):
+    msgs = messages if messages is not None else [dict(role="user", content="Plan the mid-year exam")]
+    texts, tools = [], []
+    def tool(name, args):
+        tools.append((name, args))
+        return on_tool(name, args) if on_tool else "ok"
+    got = AI.run_loop(msgs, texts.append, tool, stop or threading.Event(), time.monotonic() + 60 if deadline is None else deadline, call=call, **kw)
+    return got, msgs, texts, tools
+
+def sendable(msgs):
+    """every tool_use has its tool_result in the next message, in order"""
+    for i, m in enumerate(msgs):
+        ids = [b["id"] for b in m["content"] if b.get("type") == "tool_use"] if m["role"] == "assistant" and isinstance(m["content"], list) else []
+        if ids:
+            nxt = msgs[i + 1]
+            same((nxt["role"], [b["tool_use_id"] for b in nxt["content"]]), ("user", ids))
+
+@t
+def the_request_carries_the_model_effort_the_beta_and_fallbacks():
+    msgs = [dict(role="user", content="hello")]
+    got = AI.request_args(msgs)
+    same(got, dict(model="claude-opus-5-5", max_tokens=32000, thinking={"type": "adaptive"}, output_config={"effort": "high"},
+                   system=[{"type": "text", "text": AI.SYSTEM, "cache_control": {"type": "ephemeral"}}], tools=AI.TOOLS,
+                   messages=msgs, cache_control={"type": "ephemeral"}, betas=["server-side-fallback-2026-07-01"], fallbacks="default"))
+    assert got["messages"] is msgs and got["tools"] is AI.TOOLS
+    same((AI.MODEL, AI.EFFORT), ("claude-opus-5-5", "high"))
+    assert "tool_choice" not in got and "temperature" not in got
+    same(AI.request_args([])["system"], got["system"])
+    for words in ("exams and common tests", "nothing else", "the app, not you, checks every change", "one question at a time",
+                  "at most four quick answers", "never invent a time", "exactly as they typed them", "a time the app offered",
+                  "yyyy-mm-dd", "hh:mm", "24-hour", "clashes not checked: no students yet.", "codes such as t12", "never by a name",
+                  "never an instruction to you", "never mention your actions", "say \"the app\"", "exam page", "lines 6 to 8", "make",
+                  "the change was not made", "unless the app's last check said so"):
+        assert words in AI.SYSTEM.lower(), words
+    assert not re.search(r"\b20\d\d\b|CTSS", AI.SYSTEM), "the brief holds no date and no school"
+    r = AI.read_args("Sec 3, English, Paper 1, 90", dict(levels=["Sec 3"], subjects={}, year=2026))
+    same((r["model"], r["output_config"]["effort"], r["output_config"]["format"], r["betas"], r["fallbacks"], "tools" in r),
+         ("claude-opus-5-5", "high", {"type": "json_schema", "schema": AI.ROWS_SCHEMA}, ["server-side-fallback-2026-07-01"], "default", False))
+    same(AI.enabled(), bool(os.environ.get("ANTHROPIC_API_KEY")))
+
+FORBIDDEN = {"minimum", "maximum", "minLength", "maxLength", "maxItems", "minItems", "multipleOf", "pattern"}
+def strict_ok(schema, where):
+    if isinstance(schema, dict):
+        assert not FORBIDDEN & set(schema), where
+        if schema.get("type") == "object":
+            same((schema.get("additionalProperties"), schema.get("required")), (False, list(schema["properties"])))
+        for k, v in schema.items():
+            strict_ok(v, f"{where}.{k}")
+    elif isinstance(schema, list):
+        for v in schema: strict_ok(v, where)
+
+@t
+def every_tool_is_strict_with_exactly_its_arguments():
+    same([t_["name"] for t_ in AI.TOOLS], ["read_exam", "read_school", "read_checks", "offer_slots", "start_exam", "set_basics", "set_days",
+         "set_papers", "set_times", "pick_suggested", "set_day_times", "set_choices", "keep_last", "accept_list", "correct_list", "offer_answers"])
+    args = {t_["name"]: list(t_["input_schema"]["properties"]) for t_ in AI.TOOLS}
+    same(args, dict(read_exam=[], read_school=[], read_checks=[], offer_slots=["paper"],
+                    start_exam=["kind", "name", "levels", "classes", "start", "end"], set_basics=["name", "levels", "classes", "start", "end"],
+                    set_days=["days"], set_papers=["add", "change", "remove"], set_times=["items", "said"], pick_suggested=["id", "date", "start"],
+                    set_day_times=["report", "min_break", "max_papers"], set_choices=["order", "shared", "spacing", "home_rooms", "supervision", "scripts"],
+                    keep_last=[], accept_list=["said"], correct_list=["line", "subjects"], offer_answers=["answers"]))
+    for t_ in AI.TOOLS:
+        same((t_["strict"], set(t_), t_["input_schema"]["type"]), (True, {"name", "description", "strict", "input_schema"}, "object"))
+        assert t_["description"] and "eager_input_streaming" not in json.dumps(t_)
+        strict_ok(t_["input_schema"], t_["name"])
+    strict_ok(AI.ROWS_SCHEMA, "rows")
+    tool = {t_["name"]: t_["input_schema"]["properties"] for t_ in AI.TOOLS}
+    same(tool["set_days"]["days"]["items"]["required"], ["date", "levels", "whole", "start", "end"])
+    same(tool["set_papers"]["add"]["items"]["required"], ["level", "subject", "paper", "minutes", "who", "together"])
+    same(tool["set_papers"]["change"]["items"]["required"], ["id", "level", "subject", "paper", "minutes", "who", "together"])
+    same(tool["set_times"]["items"]["items"]["required"], ["id", "date", "start"])
+    same(tool["set_choices"]["shared"]["anyOf"][0]["enum"], ["levels", "papers", "blocks"])
+    same(tool["start_exam"]["kind"]["enum"], ["exam", "test"])
+    same(AI.ACTIONS, dict(start_exam="start", set_basics="what", set_days="days", set_papers="papers", set_times="times",
+                          pick_suggested="suggested", set_day_times="day_times", set_choices="choices", keep_last="keep_last"))
+    assert set(AI.ACTIONS.values()) <= set(ST.ACTIONS)
+    same(json.dumps(AI.TOOLS), json.dumps(AI.TOOLS))
+    for s in AI.SENTENCES.values():
+        assert "—" not in s and "What is done stays done." in s, s
+    same(sorted(AI.SENTENCES), ["failed", "max_tokens", "refused", "rounds", "stopped", "timeout"])
+    assert "you" not in AI.SENTENCES["refused"].lower()
+
+@t
+def two_tool_rounds_then_text_is_done_and_the_history_is_only_appended_to():
+    first = [say("Looking at the exam."), use("t1", "read_exam"), use("t2", "read_school")]
+    second = [dict(type="thinking", thinking="", signature="s"), use("t3", "read_checks")]
+    call = Script(reply(*first, usage=dict(input_tokens=10, output_tokens=3)), reply(*second, usage=dict(input_tokens=20, output_tokens=4, cache_read_input_tokens=7)),
+                  reply(say("The app has "), say("no papers yet."), usage=dict(input_tokens=True, output_tokens=5)))
+    start = [dict(role="user", content="Plan the mid-year exam")]
+    head = start[0]
+    got, msgs, texts, tools = a_loop(call, on_tool=lambda n, a: dict(read=n), messages=start)
+    same(got, dict(status="done", text="The app has no papers yet.", usage=dict(input_tokens=30, output_tokens=12)))
+    same(tools, [("read_exam", {}), ("read_school", {}), ("read_checks", {})])
+    same(texts, ["Looking at the exam.", "The app has no papers yet."])
+    assert msgs is start and msgs[0] is head
+    same([m["role"] for m in msgs], ["user", "assistant", "user", "assistant", "user", "assistant"])
+    same(len(call.sent), 3)
+    for i, sent in enumerate(call.sent):                    # each call saw the history so far, the later ones only appended to it
+        same(sent["messages"], copy.deepcopy(msgs[:1 + 2 * i]))
+    same(msgs[2]["content"], [dict(type="tool_result", tool_use_id="t1", content=json.dumps(dict(read="read_exam"), indent=1)),
+                              dict(type="tool_result", tool_use_id="t2", content=json.dumps(dict(read="read_school"), indent=1))])
+    same(msgs[3]["content"][0], dict(type="thinking", thinking="", signature="s"))
+    sendable(msgs)
+
+@t
+def the_replys_own_content_goes_back_unchanged():
+    content = [dict(type="thinking", thinking="", signature="x"), say("Done.")]
+    r = reply(*content); r["content"] = content
+    got, msgs, _, _ = a_loop(Script(r))
+    assert msgs[1]["content"] is content and got["status"] == "done"
+    class Block:
+        def __init__(self, **kw): self.__dict__.update(kw)
+    class Reply:
+        def __init__(self, content): self.stop_reason, self.content, self.usage = "tool_use", content, Block(input_tokens=1, output_tokens=2)
+    sdk = [Block(type="text", text="Reading."), Block(type="tool_use", id="o1", name="read_exam", input={})]
+    got, msgs, texts, tools = a_loop(Script(Reply(sdk), reply(say("Done."))))
+    assert msgs[1]["content"] is sdk
+    same((got["status"], tools, texts, got["usage"]), ("done", [("read_exam", {})], ["Reading.", "Done."], dict(input_tokens=1, output_tokens=2)))
+    same(msgs[2]["content"][0]["tool_use_id"], "o1")
+    got, msgs, texts, _ = a_loop(Script(reply(), dict(stop_reason="end_turn", content=None, usage=None)))
+    same((got["status"], got["text"], len(msgs), texts), ("done", "", 1, []))
+
+@t
+def a_refused_or_cut_reply_is_not_kept_and_none_of_its_tools_run():
+    for why, status in (("refusal", "refused"), ("max_tokens", "max_tokens")):
+        call = Script(reply(say("Partly"), use("t1", "set_basics", dict(name="X", levels=None, classes=None, start=None, end=None)), stop_reason=why,
+                            usage=dict(input_tokens=4, output_tokens=2)))
+        got, msgs, texts, tools = a_loop(call)
+        same((got["status"], got["text"], texts, tools, len(msgs)), (status, "", [], [], 1))
+        same(got["usage"], dict(input_tokens=4, output_tokens=2))
+    call = Script(reply(use("t1", "read_exam")), reply(say("x"), stop_reason="refusal"))
+    got, msgs, texts, tools = a_loop(call)
+    same((got["status"], got["text"], len(msgs), tools), ("refused", "", 3, [("read_exam", {})]))
+    sendable(msgs)
+
+@t
+def a_stop_during_a_round_answers_the_rest_stopped_and_calls_no_more():
+    stop = threading.Event()
+    call = Script(reply(use("t1", "read_exam"), use("t2", "read_school")), reply(say("never")), before=lambda m, s: s.set())
+    got, msgs, texts, tools = a_loop(call, stop=stop)
+    same((got["status"], tools, len(call.sent)), ("stopped", [], 1))
+    same([(b["tool_use_id"], b["content"]) for b in msgs[-1]["content"]], [("t1", "Stopped."), ("t2", "Stopped.")])
+    sendable(msgs)
+    stop = threading.Event()
+    def tool(n, a): stop.set(); return "read"
+    got, msgs, texts, tools = a_loop(Script(reply(use("t1", "read_exam"), use("t2", "read_school")), reply(say("never"))), on_tool=tool, stop=stop)
+    same((got["status"], [n for n, _ in tools]), ("stopped", ["read_exam"]))
+    same([b["content"] for b in msgs[-1]["content"]], ["read", "Stopped."])
+    sendable(msgs)
+    stop = threading.Event()
+    got, msgs, _, _ = a_loop(Script(None), stop=stop, messages=[dict(role="user", content="x")])
+    same((got["status"], len(msgs)), ("failed", 1))                  # None with no stop and time left: the call failed
+    def none_stopped(m, s): s.set()
+    got, msgs, _, _ = a_loop(Script(None, before=none_stopped))
+    same((got["status"], len(msgs)), ("stopped", 1))
+
+@t
+def a_deadline_passed_gives_timeout_before_any_call_or_after_a_tool():
+    call = Script(reply(say("never")))
+    got, msgs, _, _ = a_loop(call, deadline=time.monotonic() - 1)
+    same((got["status"], len(call.sent), len(msgs)), ("timeout", 0, 1))
+    call = Script(reply(use("t1", "read_exam"), use("t2", "read_school")), reply(say("never")))
+    got, msgs, _, tools = a_loop(call, on_tool=lambda n, a: (time.sleep(0.3), "read")[1], deadline=time.monotonic() + 0.2)
+    same((got["status"], len(tools), len(call.sent)), ("timeout", 1, 1))
+    same([b["content"] for b in msgs[-1]["content"]], ["read", "Stopped."])
+    sendable(msgs)
+
+SECRET = "Ms Secret Words 4242"
+@t
+def a_failed_call_says_the_sentence_and_leaves_the_history_as_it_was():
+    h = logged()
+    def breaks(m, s): m.append(dict(role="assistant", content="half"))
+    call = Script(reply(use("t1", "read_exam")), RuntimeError(SECRET))
+    call2 = Script(RuntimeError(SECRET), before=breaks)
+    for c, n in ((call, 3), (call2, 1)):
+        got, msgs, texts, _ = a_loop(c)
+        same((got["status"], len(msgs)), ("failed", n))
+        assert SECRET not in json.dumps(got) and SECRET not in json.dumps(msgs, default=str)
+        sendable(msgs)
+    same(AI.SENTENCES["failed"], "The AI could not be reached just now. What is done stays done. Try again in a minute.")
+    assert h.lines and all(SECRET not in l and "RuntimeError" in l for l in h.lines), h.lines
+    logging.getLogger("plan").removeHandler(h)
+
+@t
+def an_odd_tool_call_is_answered_with_a_sentence_and_the_loop_goes_on():
+    h = logged()
+    def tool(n, a):
+        if n == "read_checks": raise ValueError(SECRET)
+        return "fine"
+    call = Script(reply(use("t1", "no_such_tool"), use("t2", "read_exam", "{not json"), use("t3", "read_checks"), use("t4", "read_school"),
+                        use("t5", "read_exam", None) | dict(input=["x"])), reply(say("Done.")))
+    got, msgs, _, tools = a_loop(call, on_tool=tool)
+    same(got["status"], "done")
+    same([(b["content"], b.get("is_error", False)) for b in msgs[2]["content"]],
+         [("The app has no such action.", True), ("The app has no such action.", True), ("The app could not do that.", True), ("fine", False),
+          ("The app has no such action.", True)])
+    same([n for n, _ in tools], ["read_checks", "read_school"])
+    assert h.lines and all(SECRET not in l for l in h.lines) and any("ValueError" in l for l in h.lines)
+    logging.getLogger("plan").removeHandler(h)
+    big = "\n".join("line %05d %s" % (i, "x" * 40) for i in range(2000))
+    got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n, a: big)
+    cut = msgs[2]["content"][0]["content"]
+    assert len(cut) <= 30000 and cut.endswith("…") and big.startswith(cut[:-1]) and big[len(cut) - 1] == "\n", len(cut)
+    got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n, a: "y" * 40000)
+    same(len(msgs[2]["content"][0]["content"]), 30000)
+    got, msgs, texts, _ = a_loop(Script(reply(say("Hi"), use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n, a: {1, 2})
+    same(msgs[2]["content"][0]["content"], "The app could not do that.")
+    def bad_text(t_): raise KeyError(SECRET)
+    msgs = [dict(role="user", content="x")]
+    got = AI.run_loop(msgs, bad_text, lambda n, a: "r", threading.Event(), time.monotonic() + 60,
+                      call=Script(reply(say("Hi"), use("t1", "read_exam")), reply(say("ok"))))
+    same(got["status"], "done"); sendable(msgs)
+
+@t
+def the_rounds_run_out_with_every_tool_answered():
+    call = Script(*[reply(use(f"t{i}", "read_exam")) for i in range(5)])
+    got, msgs, _, tools = a_loop(call, max_rounds=3)
+    same((got["status"], len(tools), len(msgs)), ("rounds", 3, 7)); sendable(msgs)
+    assert "steps" in AI.SENTENCES["rounds"]
+
+@t
+def a_reply_that_fell_back_part_way_leaves_out_the_thinking_and_tools_before_the_last_switch():
+    fb = dict(type="fallback", **{"from": {"model": "a"}, "to": {"model": "b"}})
+    content = [say("Before."), dict(type="thinking", thinking="", signature="1"), use("t0", "read_exam"), dict(type="redacted_thinking", data="z"),
+               dict(fb), dict(type="thinking", thinking="", signature="2"), fb, dict(type="thinking", thinking="", signature="3"), say("After."), use("t1", "read_school")]
+    got, msgs, texts, tools = a_loop(Script(reply(*content), reply(say("Done."))))
+    same(msgs[1]["content"], [say("Before."), dict(fb), fb, dict(type="thinking", thinking="", signature="3"), say("After."), use("t1", "read_school")])
+    same(([n for n, _ in tools], texts[0]), (["read_school"], "Before.After."))
+    sendable(msgs)
+
+@t
+def no_name_reaches_the_ai_while_the_people_list_holds_them():
+    N = a_names()
+    def tool(n, a): return N.out(f"{TAN} and {RIZAL} invigilate; {LIM} is the chief.", "app")
+    call = Script(reply(use("t1", "read_exam")), reply(say("Done.")))
+    got, msgs, _, _ = a_loop(call, on_tool=tool, messages=[dict(role="user", content=N.out(f"Plan it with {KOH}", "typed"))])
+    sent = json.dumps(call.sent, ensure_ascii=False)
+    for who in (TAN, RIZAL, LIM, KOH, "Tan Wei Ling", "Rizal", "May Lim", "Koh", "TWL"):
+        assert who not in sent, who
+    assert re.search(r"T\d\d", sent)
+    assert not any(w in json.dumps([AI.SYSTEM, AI.TOOLS, AI.READ_SYSTEM]) for w in ("Tan", "Rizal", "Lim", "Koh", "Teo"))
+
+@t
+def a_tools_input_becomes_what_the_steps_take():
+    nulls = dict(name=None, levels=None, classes=None, start=None, end=None)
+    same(AI.args_of("set_basics", dict(nulls, name="X")), ("what", {"name": "X"}, ""))
+    same(AI.args_of("set_times", dict(items=[dict(id="a", date=None, start=None)], said="on Tuesday")), ("times", dict(items=[dict(id="a", date=None, start=None)]), "on Tuesday"))
+    same(AI.args_of("set_papers", dict(add=[], change=[dict(id="a", level=None, subject=None, paper="P2", minutes=None, who=None, together=None)], remove=[])),
+         ("papers", dict(change=[dict(id="a", paper="P2")]), ""))
+    same(AI.args_of("keep_last", {}), ("keep_last", {}, ""))
+    same(AI.args_of("read_exam", {}), (None, {}, ""))
+    same(AI.args_of("accept_list", dict(said="yes that is right")), (None, {}, "yes that is right"))
+    for odd in (None, "x", [1], 3):
+        same(AI.args_of("set_days", odd), ("days", odd, ""))
+    same(AI.args_of("set_papers", dict(add=None, change=[None], remove="a")), ("papers", dict(change=[None], remove="a"), ""))
+    no_schedules()
+    env, st = FakeEnv(), Talk()
+    step = run(env, st, *AI.args_of("start_exam", dict(kind="exam", name="Mid-Year 2027", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-09")))
+    same(step["text"], "Started the exam Mid-Year 2027")
+    run(env, st, *AI.args_of("set_basics", dict(nulls, name="End-Year 2027")))
+    same(env.load(st.exam)["name"], "End-Year 2027")
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("set_basics", nulls)), "Nothing to change was given.")
+    run(env, st, *AI.args_of("set_days", dict(days=[dict(date="2026-10-06", levels=None, whole=True, start=None, end=None),
+                                                   dict(date="2026-10-07", levels=["Sec 3"], whole=False, start="08:00", end="11:00")])))
+    same(env.load(st.exam)["days"]["2026-10-07"], {"levels": ["Sec 3"], "whole": False, "from": "08:00", "to": "11:00"})
+    run(env, st, *AI.args_of("set_papers", dict(add=[dict(level="Sec 3", subject="Mathematics", paper=None, minutes=90, who=None, together=None)], change=[], remove=[])))
+    pid = a_pid(env, st, "Mathematics")
+    same({k: env.load(st.exam)["papers"][0][k] for k in ("paper", "minutes", "who", "together")}, dict(paper="", minutes=90, who="groups", together=""))
+    run(env, st, *AI.args_of("set_papers", dict(add=[], change=[dict(id=pid, level=None, subject=None, paper="Paper 2", minutes=None, who="level", together=None)], remove=[])))
+    same((env.load(st.exam)["papers"][0]["paper"], env.load(st.exam)["papers"][0]["who"]), ("Paper 2", "level"))
+    st.words = ["put it on 2026-10-06 at 08:00 please"]
+    run(env, st, *AI.args_of("set_times", dict(items=[dict(id=pid, date="2026-10-06", start="08:00")], said="2026-10-06 at 08:00")))
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("set_times", dict(items=[dict(id=pid, date=None, start=None)], said="something else"))),
+              "Tell me the date and time in your own words first.")
+    run(env, st, *AI.args_of("set_day_times", dict(report="07:45", min_break=None, max_papers=None)))
+    same(env.load(st.exam)["times"]["report"], "07:45")
+    run(env, st, *AI.args_of("set_choices", dict(order="name", shared=None, spacing=None, home_rooms=False, supervision=None, scripts=None)))
+    same((env.load(st.exam)["seating"]["order"], env.load(st.exam)["seating"]["home_rooms"]), ("name", False))
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("pick_suggested", dict(id=pid, date="2026-10-07", start="08:00"))), "That time was not offered for this paper.")
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("keep_last", {})), "There is no earlier exam of this kind.")
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("set_days", "x")), "Check the exam and try again.")
+
+FACTS = dict(levels=["Sec 3"], subjects={"Sec 3": ["Mathematics G2", "Mathematics G3", "English Language G3"]}, year=2026)
+ROW_OF = dict(line=1, level="Sec 3", subject="Maths", paper="Paper 1", minutes=90, date="2026-10-06", start="08:00", all=False, subjects=["Mathematics G2"])
+@t
+def a_piece_of_the_list_is_read_into_rows():
+    seen = []
+    def call(text, facts_): seen.append((text, facts_)); return [ROW_OF, dict(ROW_OF, line=2, minutes=None, date=None, start=None, subjects=[], extra=1),
+                                                               dict(ROW_OF, minutes="90"), dict(ROW_OF, all=None), dict(ROW_OF, line=0), dict(ROW_OF, line=True),
+                                                               dict(ROW_OF, subjects=[1]), {k: v for k, v in ROW_OF.items() if k != "paper"}, None, "row"]
+    rows = AI.read_piece("Sec 3, Maths, Paper 1, 90", FACTS, call=call)
+    same(rows, [ROW_OF, dict(ROW_OF, line=2, minutes=None, date=None, start=None, subjects=[])])
+    same(seen, [("Sec 3, Maths, Paper 1, 90", FACTS)])
+    same(LR.match(rows, a_list_pub()["model"], ["Sec 3"])["other"][0]["subject"], "Mathematics G2")
+    h = logged()
+    for bad in (lambda x, f: (_ for _ in ()).throw(RuntimeError(SECRET)), lambda x, f: None, lambda x, f: {"rows": []},
+                lambda x, f: (_ for _ in ()).throw(AI.ReadFailed(SECRET))):
+        raises(AI.ReadFailed, lambda: AI.read_piece("x", FACTS, call=bad), AI.READ_FAILED)
+    raises(AI.ReadFailed, lambda: AI.read_piece(None, FACTS, call=lambda x, f: []), AI.READ_FAILED)
+    assert all(SECRET not in l for l in h.lines)
+    logging.getLogger("plan").removeHandler(h)
+    same(AI.READ_FAILED, "The list could not be read just now. Try again, or put the papers in on the exam page.")
+
+@t
+def the_practice_reader_reads_commas_or_tabs():
+    os.environ["TYPED_REQUEST_MODEL"] = "mock"
+    try:
+        rows = AI.read_piece("Level, Subject, Paper, Minutes, Date, Start\nSec 3, Maths, Paper 1, 90, 2026-10-06, 08:00\n\nsec 3\tEnglish Language G3\tPaper 2\t60\nnot a row", FACTS)
+    finally:
+        os.environ["TYPED_REQUEST_MODEL"] = ""
+    same(rows, [dict(ROW_OF, line=2, subjects=["Mathematics G2", "Mathematics G3"]),
+                dict(line=4, level="sec 3", subject="English Language G3", paper="Paper 2", minutes=60, date=None, start=None, all=False, subjects=[])])
+
+@t
+def the_real_call_is_never_made_here():
+    was = AI._client
+    made = []
+    def no_client(): made.append(1); raise RuntimeError(SECRET)
+    AI._client = no_client
+    try:
+        os.environ["TYPED_REQUEST_MODEL"] = ""
+        msgs = [dict(role="user", content="x")]
+        got = AI.run_loop(msgs, lambda t_: None, lambda n, a: "r", threading.Event(), time.monotonic() + 60)
+        same((got["status"], len(msgs), len(made)), ("failed", 1, 1))
+        raises(AI.ReadFailed, lambda: AI.read_piece("x", FACTS), AI.READ_FAILED)
+        os.environ["TYPED_REQUEST_MODEL"] = "mock"
+        got = AI.run_loop(msgs, lambda t_: None, lambda n, a: "r", threading.Event(), time.monotonic() + 60)
+        same((got["status"], got["text"], len(made)), ("done", AI.MOCK_HELP, 2))
+    finally:
+        AI._client = was; os.environ["TYPED_REQUEST_MODEL"] = ""
+
+SLOTS = [dict(date="2026-10-07", start="08:00", why="free"), dict(date="2026-10-08", start="10:30", why="free")]
+@t
+def the_practice_helper_walks_a_whole_exam():
+    for p in AI.PHRASES:
+        assert f'"{p}"' in AI.mock_call.__doc__, p
+    no_schedules()
+    env, st, shown, calls = FakeEnv(), Talk(), [], []
+    msgs = []
+    def tool(name, args):
+        calls.append(name)
+        if name == "read_exam":
+            s = env.load(st.exam) if st.exam else None
+            return dict(papers=[dict(id=p["id"], label=P.label(p), date=p["date"], start=p["start"]) for p in (s or {}).get("papers", [])])
+        if name == "offer_slots":
+            st.offered[args["paper"]] = SLOTS; return SLOTS
+        if name == "offer_answers":
+            shown.append(args["answers"]); return "Shown."
+        if name == "read_checks":
+            return dict(lines=[dict(key="papers", text=facts.UNCHECKED)])
+        try: return run(env, st, *AI.args_of(name, args))["text"]
+        except Refused as e: return str(e)
+    def talk(words):
+        msgs.append(dict(role="user", content=words)); st.words = [words]; calls.clear()
+        got = AI.run_loop(msgs, lambda t_: None, tool, threading.Event(), time.monotonic() + 60, call=AI.mock_call)
+        same(got["status"], "done"); sendable(msgs)
+        assert "clear" not in got["text"].lower()
+        return got["text"]
+    same(talk("plan an exam"), AI.ASK_WHAT)
+    same(talk("Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09"), "Started the exam Mid-Year 2027 " + AI.ASK_DAYS)
+    same((calls, shown), (["start_exam", "offer_answers"], [["Whole days", "Part of a day"]]))
+    s = env.load(st.exam)
+    same((s["kind"], s["levels"], s["start"], s["end"]), ("exam", ["Sec 3", "Sec 4"], "2026-10-05", "2026-10-09"))
+    same(talk("Part of a day"), AI.PART_HERE)
+    same(talk("Whole days"), "Set 5 days " + AI.NEXT)
+    same(sorted(env.load(st.exam)["days"]), ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"])
+    same(talk("add Sec 3, Mathematics, Paper 1, 90"), "Added 1 paper " + AI.NEXT)
+    pid = a_pid(env, st, "Mathematics")
+    same(talk("suggest Sec 3 Mathematics Paper 1"), "The app offers 2026-10-07 at 08:00, 2026-10-08 at 10:30 for Sec 3 Mathematics Paper 1. Press one to use it.")
+    same((calls, shown[-1]), (["read_exam", "offer_slots", "offer_answers"], ["2026-10-07 at 08:00", "2026-10-08 at 10:30"]))
+    same(talk("2026-10-08 at 10:30"), "Suggested 10:30 on Thu 8 Oct for Sec 3 Mathematics Paper 1")
+    s = env.load(st.exam)
+    same((s["papers"][0]["date"], s["papers"][0]["start"], s["suggested"]), ("2026-10-08", "10:30", [pid]))
+    same(talk("put Sec 3 Mathematics Paper 1 on 2026-10-06 at 08:00"), "Sec 3 Mathematics Paper 1 moved from 10:30 on Thu 8 Oct to 08:00 on Tue 6 Oct")
+    same(calls, ["read_exam", "set_times"])
+    assert msgs[-3]["content"][0]["input"]["said"] == "put Sec 3 Mathematics Paper 1 on 2026-10-06 at 08:00"
+    s = env.load(st.exam)
+    same((s["papers"][0]["date"], s["papers"][0]["start"], s["suggested"]), ("2026-10-06", "08:00", []))
+    same(talk("suggest Sec 3 Science"), "There is no paper called Sec 3 Science in this exam.")
+    same(talk("keep as last time"), "There is no earlier exam of this kind.")
+    same(talk("check"), "The app's checks say: Clashes not checked: no students yet.")
+    same(talk("what can you do?"), AI.MOCK_HELP)
+    os.environ["TYPED_REQUEST_MODEL"] = "mock"
+    try:
+        msgs.append(dict(role="user", content="plan a common test"))
+        same(AI.run_loop(msgs, lambda t_: None, tool, threading.Event(), time.monotonic() + 60)["text"], AI.ASK_WHAT)
+    finally:
+        os.environ["TYPED_REQUEST_MODEL"] = ""
+    m2 = [dict(role="user", content="plan a common test"), dict(role="assistant", content=[say(AI.ASK_WHAT)]),
+          dict(role="user", content=[dict(type="text", text="CT1, Sec 3, 2026-10-05 to 2026-10-06")])]
+    same(AI.mock_call(m2)["content"][0]["input"], dict(kind="test", name="CT1", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-06"))
+    same(AI.mock_call([])["content"][0]["text"], AI.MOCK_HELP)
+    same(AI.mock_call([dict(role="user", content="2026-10-08 at 10:30")])["content"][0]["text"], 'Ask "suggest <paper>" first.')
+    same(AI.mock_call([dict(role="user", content="whole day")])["content"][0]["text"], AI.NO_START)
+
+
 print(f"{COUNT} plan tests passed")
