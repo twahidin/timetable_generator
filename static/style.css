@@ -598,6 +598,7 @@ body.vslock{overflow:hidden}
 .rfneeds{margin:14px 0;padding:8px 14px;background:#fffaeb;border-left:4px solid #f79009;border-radius:6px}.rfneeds h3{margin-top:4px}.rfneeds p{margin:4px 0}
 .rftotals{margin:14px 0 4px;font-weight:600}
 .rfgrey{opacity:.55}
+.rfpre table.fxgrid tr:first-child th:first-child{width:28px}   /* the period column as narrow as in the panel (the table is wider here, and the corner cell sets the column) */
 .rfpre{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
 .rffoot{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.rffoot .row{flex-wrap:wrap}
 .rfpop progress{width:100%;max-width:420px;display:block}

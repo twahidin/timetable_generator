@@ -3133,7 +3133,7 @@ function vsHTML() {
   return `<div class="vspop" role="dialog" aria-modal="true" aria-labelledby="vsTitle" tabindex="-1"><div class="vshead"><h2 id="vsTitle">Versions</h2><button data-vs="close">Close</button></div>
     <p class="muted">Step 8 keeps one draft. A version is a named copy of it that you can open again later. Opening a version never loses the draft you had: it is kept as a version first.</p>${save}${table}</div>`;
 }
-/* what the step 8 pop-outs (Versions and Re-fit) share. o: ov (the overlay's id), attr (the data- name of its buttons), isOpen(), close(), act(button), free (the id of a text box in it:
+/* what the step 8 pop-outs (Versions and Re-fit) share. o: ov (the overlay's id), attr (the data- name of its buttons), isOpen(), close(), act(button), first (keys the focus goes to before Close when its control is gone), free (the id of a text box in it:
    undo, redo, cut and paste are the browser's there). focus(): after a draw, the focus on the same control if it is there and can take it, else the text box, else Close (a disabled one is waited for).
    Keys: Escape closes, Tab stays inside, undo, redo, cut and paste never reach the page behind; a click on the dim backdrop closes, a click on one of its buttons acts */
 function popKit(o) {
@@ -3160,7 +3160,7 @@ function popKit(o) {
       const ov = $("#" + o.ov); if (!ov || !o.isOpen()) return;
       const all = [...ov.querySelectorAll(`[data-${o.attr}]` + (o.free ? ", #" + o.free : ""))], by = k => all.find(x => key(x) === k && !x.disabled);
       let el = fkey && by(fkey), fb = false;
-      if (!el) { el = (o.free && $("#" + o.free)) || by("close|"); fb = true; }
+      if (!el) { el = (o.free && $("#" + o.free)) || [...(o.first ? o.first() : []), "close|"].map(by).find(Boolean); fb = true; }
       if (!el || document.activeElement === el) return;
       quiet = fb; try { el.focus({ preventScroll: true }); } finally { quiet = false; }
     },
@@ -3259,14 +3259,15 @@ async function vsAction(b) {
    slow (the server could not be reached while polling); pre ({id, answer}: the preview of that list) and preOn (shown); more (the long list of what does not fit is open); from (the control to give focus back to);
    gen (a late answer of an older load is dropped), pgen (the same for the preview), timer (the next poll; nothing is asked while the window is closed) */
 const RF = { open: false, st: "start", id: null, done: 0, total: null, plan: null, err: "", dead: false, busy: false, applying: false, slow: false, pre: null, preOn: false, more: false, from: "", gen: 0, pgen: 0, timer: 0 };
+let rfPosting = false, rfWant = false;   // a POST is out (of this opening or an earlier one: a second one waits for it); a start was asked for while it was
 const RF_WAIT = "A re-fit is already running.";
 const rfJson = r => r.json().catch(() => ({}));
-function rfPaintBtn() {   // the button beside Versions: greyed when there is no draft, or nothing to re-fit (the server says: S.draft.refit)
-  const b = $("#rfBtn"); if (!b) return;
-  const d = S.draft, off = !d || !d.refit;
-  b.disabled = off; b.title = !d ? "Upload a timetable first." : off ? "Nothing to re-fit: the timetable fits the setup." : "";
+function rfBtnState() {   // greyed when there is no draft (or it is still loading: no title then), or nothing to re-fit (the server says: S.draft.refit)
+  const d = S.draft, loading = !d && !!(G.st && G.st.draft);
+  return { off: !d || !d.refit, title: loading || (d && d.refit) ? "" : !d ? "Upload a timetable first." : "Nothing to re-fit: the timetable fits the setup." };
 }
-const rfBtnHTML = () => { const d = S.draft, off = !d || !d.refit; return `<button id="rfBtn" data-rfopen="btn"${off ? ` disabled title="${!d ? "Upload a timetable first." : "Nothing to re-fit: the timetable fits the setup."}"` : ""}>Re-fit to the setup</button>`; };
+function rfPaintBtn() { const b = $("#rfBtn"); if (!b) return; const x = rfBtnState(); b.disabled = x.off; b.title = x.title; }
+const rfBtnHTML = () => { const x = rfBtnState(); return `<button id="rfBtn" data-rfopen="btn"${x.off ? " disabled" : ""}${x.title ? ` title="${esc(x.title)}"` : ""}>Re-fit to the setup</button>`; };
 function rfTagsHTML(tags) { return Draft.refitTags(tags).map(c => `<span class="rfchip ${c.kind}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.text)}${c.title ? `<span class="rfsr"> (${esc(c.title)})</span>` : ""}</span>`).join(""); }
 function rfPreHTML() {   // under the list: the class weeks the list would make, the changed lessons outlined (as Before you apply draws them)
   if (!RF.preOn) return "";
@@ -3284,25 +3285,25 @@ function rfListHTML() {
   const step = s => `<div class="rfstep"><span class="rfn">${esc(s.n)}</span><div class="rfsay">${esc(s.text)}${s.why ? ` <span class="muted">(${esc(s.why)})</span>` : ""}${(s.tags || []).length ? ` ${rfTagsHTML(s.tags)}` : ""}</div></div>`;
   const body = groups.map(g => `<div class="rfgroup"><p class="rfgtext">${esc(g.text)}</p>${g.steps.map(step).join("")}</div>`).join("")
     + (also.length ? `<h3>Settled by these changes too</h3><ul class="rffit">${also.map(li).join("")}</ul>` : "");
-  const need = needs.length ? `<div class="rfneeds"><h3>Needs you</h3>${needs.map(x => `<p>${esc(x.text)}${x.why ? ` <span class="muted">${esc(x.why)}</span>` : ""}</p>`).join("")}</div>` : "";
+  const need = needs.length ? `<div class="rfneeds"><h3>Needs you</h3>${needs.map(x => `<p>${esc(x.text)}${x.why && x.why !== x.text ? ` <span class="muted">${esc(x.why)}</span>` : ""}</p>`).join("")}</div>` : "";
   const none = n ? "" : `<p>The app has no change to offer for these.</p>`;
   const totals = n ? `<p class="rftotals">${esc(Draft.refitTotals(t))}</p>${Draft.refitRise(t) ? `<p class="muted small">A number can go up without a new problem: one mistake may show as two lines when part of it is settled.</p>` : ""}${p.late ? `<p class="muted small">Some were not looked at in time: apply this list, then run Re-fit again.</p>` : ""}` : "";
   const off = RF.busy ? " disabled" : "";
-  const foot = RF.dead ? `<p class="issue">${esc(RF.err)}</p><div class="row"><button class="primary" data-rf="again">Run Re-fit again</button><button data-rf="cancel">Cancel</button></div>`
+  const foot = RF.dead ? `<p class="issue">${esc(RF.err)}</p><div class="row"><button class="primary" data-rf="again">Run Re-fit again</button><button data-rf="cancel"${RF.applying ? " disabled" : ""}>Cancel</button></div>`
     : !n ? `<div class="row"><button data-rf="close">Close</button></div>`
-    : `<p class="muted small">${esc(Draft.refitKeeps(n))}</p>${RF.err ? `<p class="issue">${esc(RF.err)}</p>` : ""}<div class="row"><button data-rf="preview"${off}>${RF.preOn ? "Hide the preview" : "Preview on the board"}</button><button class="primary" data-rf="apply"${off}>${RF.applying ? "Applying…" : esc(Draft.refitApplyWord(n))}</button><button data-rf="cancel">Cancel</button></div>`;
+    : `<p class="muted small">${esc(Draft.refitKeeps(n))}</p>${RF.err ? `<p class="issue">${esc(RF.err)}</p>` : ""}<div class="row"><button data-rf="preview"${off}>${RF.preOn ? "Hide the preview" : "Preview on the board"}</button><button class="primary" data-rf="apply"${off}>${RF.applying ? "Applying…" : esc(Draft.refitApplyWord(n))}</button><button data-rf="cancel"${RF.applying ? " disabled" : ""}>Cancel</button></div>`;
   return `<div class="${grey.trim()}">${fit}<div class="rfrules">${rules}</div>${body}${none}${need}${totals}</div>${n ? rfPreHTML() : ""}<div class="rffoot">${foot}</div>`;
 }
 function rfHTML() {
   let body;
-  if (RF.st === "done" && RF.plan) body = rfListHTML();
+  if (RF.st === "done") body = rfListHTML();   // RF.plan is always there with st "done" (set together, cleared together)
   else if (RF.st === "idle") body = `<p class="issue">The app restarted before the re-fit was done.</p><div class="row"><button class="primary" data-rf="again"${RF.busy ? " disabled" : ""}>Run Re-fit again</button></div>`;
   else if (RF.st === "failed") body = `<p class="issue">${esc(RF.err || "The re-fit could not be worked out. Run Re-fit again.")}</p><div class="row"><button class="primary" data-rf="again"${RF.busy ? " disabled" : ""}>Run Re-fit again</button></div>`;
   else if (RF.st === "none") body = `<p class="issue">${esc(RF.err)}</p>`;
   else body = `<p role="status">${esc(Draft.refitRunning(RF.st === "start" ? 0 : RF.done, RF.st === "start" ? null : RF.total))}</p>${RF.st === "run" && RF.total ? `<progress max="${esc(RF.total)}" value="${esc(RF.done)}"></progress>` : ""}${RF.slow ? `<p class="muted small">Could not reach the server; trying again.</p>` : ""}`;
-  return `<div class="vspop rfpop" role="dialog" aria-modal="true" aria-labelledby="rfTitle" tabindex="-1"><div class="vshead"><h2 id="rfTitle">Re-fit to the setup</h2><button data-rf="close">Close</button></div>${body}</div>`;
+  return `<div class="vspop rfpop" role="dialog" aria-modal="true" aria-labelledby="rfTitle" tabindex="-1"><div class="vshead"><h2 id="rfTitle">Re-fit to the setup</h2><button data-rf="close"${RF.applying ? " disabled" : ""}>Close</button></div>${body}</div>`;
 }
-const rfKit = popKit({ ov: "rfOv", attr: "rf", isOpen: () => RF.open, close: () => rfClose(), act: b => rfAction(b) });
+const rfKit = popKit({ ov: "rfOv", attr: "rf", first: () => RF.dead || RF.st === "idle" || RF.st === "failed" ? ["again|"] : [], isOpen: () => RF.open, close: () => rfClose(), act: b => rfAction(b) });
 function rfDraw(reveal) {
   const ov = $("#rfOv"); if (!ov || !RF.open) return;
   const sc = ov.scrollTop; ov.innerHTML = rfHTML(); ov.scrollTop = sc;
@@ -3318,7 +3319,7 @@ function rfOpen(from) {
 }
 function rfClose() {
   if (!RF.open || RF.applying) return;   // an Apply that is out: the window stays until it has answered
-  RF.open = false; RF.gen++; RF.pgen++; clearTimeout(RF.timer); const ov = $("#rfOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
+  RF.open = false; rfWant = false; RF.gen++; RF.pgen++; clearTimeout(RF.timer); const ov = $("#rfOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
   document.body.classList.remove("vslock");
   const b = (RF.from === "cfg" && $("#rfCfg")) || $("#rfBtn"); if (b && !b.disabled) b.focus({ preventScroll: true });
 }
@@ -3341,15 +3342,18 @@ async function rfLoad(first) {   // the job as the server has it. On opening: a 
   else RF.st = "idle";
   rfDraw();
 }
-async function rfStart() {   // ask the server to begin (one job at a time: "already running" is polled instead)
+async function rfStart() {   // ask the server to begin (one job at a time: "already running" is polled instead; a POST of an earlier opening still out is waited for, not matched by a second)
   if (RF.busy) return;
-  const g = ++RF.gen; RF.busy = true; RF.st = "start"; RF.err = ""; RF.dead = false; RF.plan = null; RF.pre = null; RF.preOn = false; RF.slow = false; rfDraw();
-  let r, j;
-  try { r = await fetch("/api/draft/refit", { method: "POST" }); j = await rfJson(r); }
-  catch (e) { RF.busy = false; if (g === RF.gen && RF.open) { RF.st = "failed"; RF.err = "Could not reach the server: " + e.message; rfDraw(); } return; }
+  const fresh = () => { RF.st = "start"; RF.err = ""; RF.dead = false; RF.plan = null; RF.pre = null; RF.preOn = false; RF.slow = false; };
+  if (rfPosting) { fresh(); rfWant = true; rfDraw(); return; }
+  const g = ++RF.gen; rfPosting = RF.busy = true; fresh(); rfDraw();
+  let r = null, j = {}, err = null;
+  try { r = await fetch("/api/draft/refit", { method: "POST" }); j = await rfJson(r); } catch (e) { err = e; }
+  rfPosting = false;
+  if (g !== RF.gen || !RF.open) { if (rfWant && RF.open) { rfWant = false; rfLoad(true); } return; }   // an older opening's POST: it clears nothing of this one's, and a start asked for meanwhile looks at what the server has now
   RF.busy = false;
+  if (err) { RF.st = "failed"; RF.err = "Could not reach the server: " + err.message; rfDraw(); return; }
   if (r.status === 401) { location.href = "/login"; return; }
-  if (g !== RF.gen || !RF.open) return;
   if (r.ok || (r.status === 409 && j.error === RF_WAIT)) { RF.st = "run"; rfDraw(); rfLater(300); return; }
   RF.st = "none"; RF.err = j.error || "The re-fit could not be started."; rfDraw();
 }
@@ -3358,23 +3362,24 @@ async function rfPreview() {   // the preview of the list once (kept for that li
   if (RF.preOn) { RF.preOn = false; rfDraw(); return; }
   RF.preOn = true; RF.err = "";
   if (RF.pre && RF.pre.id === RF.id) { rfDraw(true); return; }
-  const g = ++RF.pgen, id = RF.id; RF.pre = null; RF.busy = true; rfDraw(true);
-  let r, j;
-  try { r = await fetch("/api/draft/refit/preview?id=" + encodeURIComponent(id)); j = await rfJson(r); }
-  catch (e) { RF.busy = false; if (g === RF.pgen && RF.open) { RF.preOn = false; RF.err = "Could not reach the server: " + e.message; rfDraw(); } return; }
+  const g = ++RF.pgen, id = RF.id; RF.pre = null; RF.busy = true; rfDraw();
+  let r = null, j = {}, err = null;
+  try { r = await fetch("/api/draft/refit/preview?id=" + encodeURIComponent(id)); j = await rfJson(r); } catch (e) { err = e; }
+  if (g !== RF.pgen || !RF.open || id !== RF.id) return;   // an old request's end clears nothing of a newer opening's
   RF.busy = false;
+  if (err) { RF.preOn = false; RF.err = "Could not reach the server: " + err.message; rfDraw(); return; }
   if (r.status === 401) { location.href = "/login"; return; }
-  if (g !== RF.pgen || !RF.open || id !== RF.id) return;
   if (!r.ok) { RF.preOn = false; RF.dead = true; RF.err = j.error || "The preview could not be made. Run Re-fit again."; rfDraw(); return; }
-  RF.pre = { id, answer: j }; rfDraw(true);
+  RF.pre = { id, answer: j }; rfDraw(true);   // brought into view now that it is drawn
 }
 async function rfApply() {
   if (RF.busy || RF.applying || !RF.plan || RF.dead || RF.st !== "done") return;
-  const n = RF.plan.totals.changes, id = RF.id; RF.busy = RF.applying = true; RF.err = ""; rfDraw();
-  let r, j;
-  try { r = await fetch("/api/draft/refit/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); j = await rfJson(r); }
-  catch (e) { RF.busy = RF.applying = false; RF.err = "Could not reach the server: " + e.message + ". Look at step 8 before you try again."; rfDraw(); return; }
-  RF.busy = RF.applying = false;
+  if (FX.busy) { toast(BDWHY.busy); return; }   // a change is being saved on the board: this one would land around it
+  const id = RF.id; RF.busy = RF.applying = true; RF.err = ""; rfDraw(); fxBusy(true);
+  let r = null, j = {}, err = null;
+  try { r = await fetch("/api/draft/refit/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); j = await rfJson(r); } catch (e) { err = e; }
+  fxBusy(false); RF.busy = RF.applying = false;
+  if (err) { RF.err = "Could not reach the server: " + err.message + ". Look at step 8 before you try again."; rfDraw(); return; }
   if (r.status === 401) { location.href = "/login"; return; }
   const made = r.ok || ("kept" in j && "changes" in j);   // an error with kept and changes: the re-fit was made, and the check after it failed
   if (!made) { RF.dead = true; RF.err = j.error || "The re-fit could not be made. Run Re-fit again."; RF.preOn = false; rfDraw(); return; }
