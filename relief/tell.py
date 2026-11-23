@@ -832,7 +832,8 @@ ANY_HOUR = ("planned",                          # to the absent teacher: they ne
             "morning",                          # the morning message: made only from the morning time, claimed once a day, dropped at the cut-off
             "late",                             # the late request keeps the team's window by its own rule (_late, _late_true): it is never made again once
                                                 # dropped, so it must not be dropped as GATES' kinds are while nothing is published (a publish swaps folders)
-            "covered",                          # Who covers you: made at an acknowledgement, which falls in the day (call 13)
+            "covered",                          # Who covers you: goes when the relief teacher acknowledges, at whatever hour (in the app in the
+                                                # evening too), to the teacher who is away, whom the quiet rule does not cover (call 13)
             "needed",                           # Relief needed again: as late, the team's window by its own rule (_needed, _needed_true), never made again
             "new")                              # the ping the late request replaced: never made, and dropped by its check if still queued
 

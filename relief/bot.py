@@ -25,7 +25,9 @@ refusals, and the same history entry and what follows it (web.step_saved), by th
 is pressed (_button): its token is in the table and has not run out (OLD_BUTTON), the chat is of the very person it was sent to
 and they have the right it needs now (NOT_YOURS_BUTTON; ACTIONS); a chat of nobody there gets NOT_LINKED, counted as above. A
 cover that is not in its absence any more is looked for by its absent teacher (_cover_of). Done, the message it was on loses its
-buttons and gains a line of what was done and when; after Approve it gains one button, Send out (as the page, Approve tells nobody).
+buttons and gains a line of what was done and when; after Approve it gains one button, Send out (as the page, Approve tells nobody),
+and after Acknowledge it keeps Open in the app (its files are there); a failure keeping those buttons (_rows) takes nothing from
+what was done, its history entry or its answer: the message is left with none.
 Acknowledge and Request to change are the relief teacher's only once the relief has reached them (web._reached). Refused in the
 app's own words, whether at the press or when its why was typed, it loses them too and gains that sentence, for pressing again
 cannot help; unless it can (_acted: STAYS, and what the kind has in ACTIONS: a lesson an exam or event stops may be on again before anybody is told that it was not). It stays as it is for a
@@ -381,6 +383,20 @@ def _exams(pub):
     return _web._links_or_none(pub, _web._cal(pub))
 
 
+def _rows(name, make):
+    """the buttons make() gives, kept for name's message as outbox.keep_buttons does (Telegram's inline keyboard), or None when
+    that fails, logged by kind: a press whose save is done is answered, and its history written, whatever happens to its buttons"""
+    try: return outbox.keep_buttons(name, make())
+    except Exception as e:
+        _log.warning("the buttons of a message could not be kept (%s)", type(e).__name__)
+        return None
+
+
+def _covering_row():
+    """Open in the app, to Reliefs I'm covering, at the app's address (outbox leaves it out unless that is https)"""
+    return [[dict(text=tell.OPEN, url=((links.connected() or {}).get("base") or "") + "/relief#covering")]]
+
+
 def _ack(p):
     b, pub = p.button, _published()
     reached = _web._reached(pub)
@@ -390,7 +406,7 @@ def _ack(p):
     first = False
     if _cover.state(r, x, c) != "acknowledged": r, first = _cover.acknowledge_once(r["id"], b["ckey"], b["name"], links=_exams(pub), reached=reached)
     line = f"✅ Acknowledged {_hm(_cover.find(r, b['ckey'])[1]['ack']['at'])}."
-    return _Out(line, line=line, after=_after("ack", r, b, pub) if first else None)
+    return _Out(line, line=line, after=_after("ack", r, b, pub) if first else None, rows=_rows(b["name"], _covering_row))     # the answers go, Open in the app stays
 
 
 def _approve(p):
@@ -401,9 +417,9 @@ def _approve(p):
     r = _cover.approve(r["id"], b["ckey"], b["who"], b["name"], pub, settings, links=_web._links_or_none(pub, settings["calendar"]))
     x, c = _cover.find(r, b["ckey"])
     line = f"✅ Approved: {b['who']}, {_hm(c['approved']['at'])}."
-    short = next((q.get("short") for q in _accounts.staff(pub) if q["name"] == b["who"]), None) or b["who"]
-    rows = outbox.keep_buttons(b["name"], [[dict(text=f"📤 Send out to {short}", what="sendout", id=r["id"], ckey=b["ckey"], who=b["who"],
-                                                 extra=dict(absent=r["teacher"], date=x["date"], approved_at=c["approved"]["at"]))]])
+    short = lambda: next((q.get("short") for q in _accounts.staff(pub) if q["name"] == b["who"]), None) or b["who"]
+    rows = _rows(b["name"], lambda: [[dict(text=f"📤 Send out to {short()}", what="sendout", id=r["id"], ckey=b["ckey"], who=b["who"],
+                                           extra=dict(absent=r["teacher"], date=x["date"], approved_at=c["approved"]["at"]))]])     # None: the team sends out on Today
     return _Out(line, line=line, after=_after("approve", r, b, pub), rows=rows)
 
 

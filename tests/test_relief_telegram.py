@@ -3690,7 +3690,8 @@ def pressing_acknowledge_acknowledges_and_says_so():
         c = covered(i, K5)[2]
         assert state_of(i) == "acknowledged" and c["ack"] == dict(at="2026-10-12T09:46:30+08:00") and [x["what"] for x in c["history"]][-1] == "acknowledged", c
         assert h.new() == [by_telegram(SAM, "relief acknowledged", f"{SAM} acknowledged {ON_K5}", i)]
-        p, = calls("editMessageText"); assert p == dict(chat_id=CHATS[SAM], message_id=item(key)["message_id"], text=RELIEF_K5 + "\n\n✅ Acknowledged 09:46.", disable_web_page_preview=True), p
+        p, = calls("editMessageText"); assert p == dict(chat_id=CHATS[SAM], message_id=item(key)["message_id"], text=RELIEF_K5 + "\n\n✅ Acknowledged 09:46.", disable_web_page_preview=True,
+                                    reply_markup=dict(inline_keyboard=[[dict(text="Open in the app", url=BASE + "/relief#covering")]])), p
         assert said(SAM) == [RELIEF_K5] and rows("talks") == [], "nothing else is sent"
         q_, = calls("answerCallbackQuery"); assert q_["callback_query_id"].startswith("q") and "parse_mode" not in q_ and "parse_mode" not in p
     with school(SAM):                                                                      # theirs after all, after asking to change: the new pick is not needed now
@@ -4508,10 +4509,11 @@ def a_failed_edit_or_question_never_undoes_the_press():
             press(SAM, "change"); h.new()
             with stand_in(tg, "call", failing_("sendMessage", "editMessageText")): say(SAM, "A meeting")
             assert state_of(i, K2) == "change" and len(h.new()) == 1 and rows("talks") == [], kind
-    with school(SAM):                                                                      # a message too old for Telegram to give its text: its buttons go
+    with school(SAM):                                                                      # a message too old for Telegram to give its text: its answers go, Open in the app stays
         i, key = told_relief(); m = under(tok(SAM, "ack")); tg.PRACTICE_LOG.clear()
         for old in (dict(message_id=m["message_id"], chat=m["chat"], date=0), dict(m, text=None), dict(m, text=7)):
-            tg.PRACTICE_LOG.clear(); hook(callback("b:" + tok(SAM, "ack"), old)); assert answers() == [("✅ Acknowledged 09:00.", False)] and edits() == [] and calls("editMessageReplyMarkup") == [dict(chat_id=CHATS[SAM], message_id=m["message_id"])]
+            tg.PRACTICE_LOG.clear(); hook(callback("b:" + tok(SAM, "ack"), old)); assert answers() == [("✅ Acknowledged 09:00.", False)] and edits() == []
+            assert calls("editMessageReplyMarkup") == [dict(chat_id=CHATS[SAM], message_id=m["message_id"], reply_markup=dict(inline_keyboard=[[dict(text="Open in the app", url=BASE + "/relief#covering")]]))]
         for odd in (None, "7", True, 1.5): tg.PRACTICE_LOG.clear(); hook(callback("b:" + tok(SAM, "ack"), dict(m, message_id=odd))); assert [x for x, p in tg.PRACTICE_LOG] == ["answerCallbackQuery"], odd
     with school(SAM):                                                                      # a long one is still one Telegram takes
         i, key = told_relief(); m = dict(under(tok(SAM, "ack")), text="x" * 4096); hook(callback("b:" + tok(SAM, "ack"), m)); x = edits()[-1][2]; assert len(x) == 4096 and x.endswith("xxx\n\n✅ Acknowledged 09:00.")
@@ -8783,6 +8785,7 @@ def a_failed_or_dropped_message_of_the_relief_does_not_hold_a_repeat_back():
             at("08:00", day=13); q(f"{key}:r1", SAM, kind="relief"); at("08:30", day=13); TE.sweep(); assert repeats() == [], "a message of it queued 30 minutes ago"
             put(f"{key}:r1", state=gone); at("08:31", day=13); swept(); assert repeat_keys() == [("before", SAM, "sent")], gone
 
+OPEN_ROW = dict(inline_keyboard=[[dict(text="Open in the app", url=BASE + "/relief#covering")]])      # a relief's message once acknowledged on Telegram
 @t
 def acknowledge_on_a_repeat_acknowledges_the_relief_once():
     with school(SAM, TEAM):
@@ -8792,7 +8795,7 @@ def acknowledge_on_a_repeat_acknowledges_the_relief_once():
         h = Since(); at("08:40", day=13); got = press_token(repeat_)
         assert got == ("✅ Acknowledged 08:40.", False) and state_of(i, KW) == "acknowledged"
         (e,) = h.new(); assert e[:4] == (SAM, SAM, "telegram", "relief acknowledged") and e[5] == i and e[4].startswith(f"Relief for {EVE} on Wed 14 Oct: {SAM} acknowledged"), e
-        p, = calls("editMessageText"); assert p["message_id"] == outs("repeat")[0]["message_id"] and p["text"].endswith("\n\n✅ Acknowledged 08:40.") and "reply_markup" not in p
+        p, = calls("editMessageText"); assert p["message_id"] == outs("repeat")[0]["message_id"] and p["text"].endswith("\n\n✅ Acknowledged 08:40.") and p["reply_markup"] == OPEN_ROW, "its answers go, Open in the app stays"
         at("08:50", day=13); assert press_token(first) == got and press_token(repeat_) == got and h.new() == [], "as the first message's button would: once"
 
 @t
@@ -8959,6 +8962,39 @@ def who_covers_you_is_not_said_when_it_is_not_so():
 @t
 def relief_says_the_officer_is_told_by_saying_nothing():
     assert AK.SENT == "✅ Sent to the relief team: {n}, {work}.{officer}" and sent_text("1 lesson", "no work set yet") == "✅ Sent to the relief team: 1 lesson, no work set yet."
+
+def boom_(*a, **k): raise sqlite3.OperationalError("made up")
+
+@t
+def acknowledge_on_telegram_keeps_open_in_the_app():
+    def acked(key):
+        p = calls("editMessageText")[-1]
+        return p["message_id"] == item(key)["message_id"] and p["text"].endswith("\n\n✅ Acknowledged " + clock.now[11:16] + ".") and p.get("reply_markup")
+    with school(SAM):                                                                      # the relief message
+        i, key = told_relief(); assert press(SAM, "ack")[0].startswith("✅") and acked(key) == OPEN_ROW
+    with school(SAM, TEAM):                                                                # Remind's copy
+        i = today_reliefs((K5, SAM)); at("07:00", 13); remind(asks(i, K5)); send(); key = relief_key_of(i, K5) + ":r1"
+        assert tok(SAM, "ack") in item(key)["buttons"] and press(SAM, "ack")[0].startswith("✅") and acked(key) == OPEN_ROW
+    with school(SAM):                                                                      # a repeat
+        at("10:00"); i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); swept(); at("06:45", day=13); swept(); r, = outs("repeat")
+        assert tok(SAM, "ack") in r["buttons"] and press(SAM, "ack")[0].startswith("✅") and acked(r["key"]) == OPEN_ROW
+    with school(SAM, base="http://relief.example.org"):                                    # not https: no buttons at all
+        i, key = told_relief(); assert press(SAM, "ack")[0].startswith("✅") and acked(key) is None and state_of(i) == "acknowledged"
+
+@t
+def a_failed_button_write_loses_no_history():
+    with school(SAM):                                                                      # Acknowledge
+        i, key = told_relief(); at("09:46"); h = Since()
+        with stand_in(OB, "keep_buttons", boom_): assert press(SAM, "ack") == ("✅ Acknowledged 09:46.", False)
+        assert state_of(i) == "acknowledged" and h.new() == [by_telegram(SAM, "relief acknowledged", f"{SAM} acknowledged {ON_K5}", i)]
+        p = calls("editMessageText")[-1]; assert p["text"].endswith("\n\n✅ Acknowledged 09:46.") and "reply_markup" not in p, "edited with no buttons"
+        assert [x["what"] for x in covered(i, K5)[2]["history"]].count("acknowledged") == 1
+    with school(SAM, MAYA, TEAM):                                                          # Approve
+        i = told_ask(); h = Since()
+        with stand_in(OB, "keep_buttons", boom_): assert press(TEAM, "approve") == (f"✅ Approved: {MAYA}, 09:10.", False)
+        r, x, c = covered(i, K5); assert CV.state(r, x, c) == "approved" and c["relief"] == MAYA and CV.sent_out(c) is None
+        got = h.new(); assert [(w, a_, v, what) for w, a_, v, what, *_ in got] == [(TEAM, TEAM, "telegram", "approved")], got
+        p = calls("editMessageText")[-1]; assert p["text"].endswith(f"✅ Approved: {MAYA}, 09:10.") and "reply_markup" not in p and [r_ for r_ in rows("buttons") if r_["what"] == "sendout"] == [], "no Send out: the team sends out on Today"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
