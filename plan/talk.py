@@ -8,6 +8,7 @@ Locks: the server's lock (_server) guards the list of talks and the answer slots
 steps and notes. Neither is ever held while the AI is called or while a step runs (schedules.editing() is taken inside a
 step only). When both are taken, the talk's lock comes first."""
 import collections
+import copy
 import logging
 import secrets
 import threading
@@ -44,7 +45,13 @@ HIDDEN = "There are points the app does not show you. The person is told where t
 NO_SLOTS = "The app has no time to offer for that paper."
 SHOWN = "Shown."
 NO_LIST = "No list is waiting."
-LIST_NEXT = "Reading a list comes next."
+LIST_NEXT = "Reading a list comes next."               # no longer said: kept for the web layer's tests
+READING = "A list is being read. Wait, or press Stop."
+WAIT_LIST = "Say Yes, all or Not now to the list above first."
+NEED_EXAM = "Start the exam first: say what it is, its name and its dates."
+EMPTY_LIST = "Paste the list, or give an Excel or Word file."
+LONG_LIST = "Keep the list under 20,000 characters."
+NOT_WAITING = "That list is not waiting any more."
 GONE = _steps.GONE
 
 THINKING = "Thinking"
@@ -83,7 +90,8 @@ def _exam_of(env, id):
 # ---------------------------------------------------------------- a talk
 class Talk:
     """the talk state of plan.steps (exam, words, offered, last_rev) and its own: id, owner, lines, messages, steps, names,
-    stamp, notes, lock, halt (the stop of the answer running), working, progress"""
+    stamp, notes, lock, halt (the stop of the answer or list job running), working, progress; reading (a list job runs),
+    lists (list id -> what waits for a yes) and waiting (the id of the list that waits, or None)"""
 
     def __init__(self, owner, names, stamp):
         self.id, self.owner = secrets.token_urlsafe(18), owner
@@ -93,6 +101,7 @@ class Talk:
         self.lock, self.halt = threading.Lock(), threading.Event()
         self.working, self.busy, self.progress, self.closed, self.begun, self.gone_said = False, False, "", False, False, False
         self.thread, self.used, self._n = None, _now(), 0
+        self.reading, self.lists, self.waiting = False, {}, None
 
     def add(self, kind, text, step=None, undo=None, quick=None) -> dict:
         """a line (under the talk's lock); n counts from 1 and never changes"""
@@ -250,7 +259,7 @@ def say(talk, env, text, pick=None, call=None):
         if pick is not None and words not in _last_quick(talk):
             raise Refused(NO_PICK)
         if talk.working or talk.busy:
-            raise Refused(WORKING)
+            raise Refused(READING if talk.reading else WORKING)
         if sum(l["kind"] == "me" for l in talk.lines) >= LIMITS["messages"]:
             raise Refused(LONG)
         stamp = _take()
@@ -441,8 +450,12 @@ def _handle(talk, env, name, args, quick, seen):
         got = args.get("answers")
         quick[:] = [x.strip()[:QUICK_LEN] for x in (got if isinstance(got, list) else []) if isinstance(x, str) and x.strip()][:QUICK]
         return SHOWN
-    if name in ("accept_list", "correct_list"):
-        return NO_LIST
+    if name == "accept_list":
+        from plan import listjob
+        return listjob.accept(talk, env, args, seen)
+    if name == "correct_list":
+        from plan import listjob
+        return listjob.correct(talk, env, args)
     return _ai.NO_SUCH
 
 
@@ -471,12 +484,17 @@ def undo(talk, env, step_id):
             talk.busy = False
 
 
-def paste(talk, env, text):
-    raise Refused(LIST_NEXT)
+def paste(talk, env, text=None, filename=None, data=None, call=None):
+    """the agreed list of papers, pasted (text) or given as a file (filename, data): its job starts on its own thread and
+    paste returns at once (plan/listjob.py). Refused with a sentence when it cannot start"""
+    from plan import listjob
+    listjob.paste(talk, env, text=text, filename=filename, data=data, call=call)
 
 
 def confirm_list(talk, env, list_id, yes):
-    raise Refused(LIST_NEXT)
+    """the person's Yes, all (yes) or Not now to the list that waits"""
+    from plan import listjob
+    listjob.confirm(talk, env, list_id, yes)
 
 
 def view(talk, env, after=0) -> dict:
@@ -489,12 +507,14 @@ def view(talk, env, after=0) -> dict:
             talk.gone_said = True
             talk.add("sys", GONE)
         after = after if isinstance(after, int) and not isinstance(after, bool) else 0
-        lines = [dict(l, quick=list(l["quick"]), buttons=list(l["buttons"])) for l in talk.lines if l["n"] > after]
+        lines = [copy.deepcopy(l) if l["kind"] == "list" else dict(l, quick=list(l["quick"]), buttons=list(l["buttons"]))
+                 for l in talk.lines if l["n"] > after]
         for l in lines:
             st = talk.steps.get(l["step"]) if l["step"] else None
             if st is not None:
                 l["undo"] = bool(st.get("can_undo")) and not st.get("undone")
         working, progress, last = talk.working, talk.progress if talk.working else "", talk._n
+        reading, waiting = talk.reading, talk.waiting
         long = sum(l["kind"] == "me" for l in talk.lines) >= LIMITS["messages"]
     pub, cal, xset = env.pub(), env.cal(), env.settings()
     exam = None
@@ -504,6 +524,7 @@ def view(talk, env, after=0) -> dict:
         checklist = _facts.checklist(s, pub, cal, xset, _facts.last_values(s, env.all_saved()))
     except _facts.ODD:
         checklist = []
-    why = WORKING if working else LONG if long else ""
+    why = READING if working and reading else WORKING if working else LONG if long else ""
+    can = dict(say=not why, list=not why and not waiting, stop=working, why=why or (WAIT_LIST if waiting else ""))
     return dict(lines=lines, working=working, progress=progress, exam=exam, checklist=checklist,
-                missing=_facts.missing(pub, cal, xset), can=dict(say=not why, list=not why, stop=working, why=why), last=last)
+                missing=_facts.missing(pub, cal, xset), can=can, last=last)

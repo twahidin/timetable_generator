@@ -327,13 +327,21 @@ def read_args(text, facts) -> dict:
                 system=READ_SYSTEM, messages=[dict(role="user", content=words)], betas=[BETA], fallbacks="default")
 
 
-def _real_read(text, facts) -> list:
+def _ended(stop, deadline) -> bool:
+    return (stop is not None and stop.is_set()) or (deadline is not None and time.monotonic() >= deadline)
+
+
+def _real_read(text, facts, stop=None, deadline=None) -> list:
+    """one streamed read; the stream is closed (on leaving the with) as soon as stop is set or the deadline passes"""
     with _client().beta.messages.stream(**read_args(text, facts)) as stream:
+        for _ in stream:
+            if _ended(stop, deadline):
+                raise ReadFailed(READ_FAILED)
         r = stream.get_final_message()
     if r.stop_reason in ("refusal", "max_tokens"):      # before the content is read
         raise ReadFailed(READ_FAILED)
-    got = [b.text for b in r.content if getattr(b, "type", "") == "text"]
-    return json.loads(got[-1])["rows"] if got else None
+    got = "".join(b.text for b in r.content if getattr(b, "type", "") == "text")   # a reply that fell back part-way splits it
+    return json.loads(got)["rows"] if got else None
 
 
 def _fold(s) -> str:
@@ -372,13 +380,15 @@ def _row_ok(r):
     return {k: copy.deepcopy(r[k]) for k in ROW}
 
 
-def read_piece(text, facts, call=None) -> list:
+def read_piece(text, facts, call=None, stop=None, deadline=None) -> list:
     """one piece of the agreed list (codes in place of names) -> rows for listread.match; a row of the wrong shape is dropped.
-    facts: dict(levels, subjects={level: [names]}, year). Anything that fails raises ReadFailed, never the provider's text"""
+    facts: dict(levels, subjects={level: [names]}, year). stop (an Event) and deadline (time.monotonic) end the real read
+    part-way; a stand-in call(text, facts) keeps its two arguments. Anything that fails raises ReadFailed, never the
+    provider's text"""
     if call is None:
-        call = _mock_read if typed.model() == "mock" else _real_read
+        call = _mock_read if typed.model() == "mock" else (lambda t, f: _real_read(t, f, stop, deadline))
     try:
-        if not isinstance(text, str):
+        if not isinstance(text, str) or _ended(stop, deadline):
             raise ReadFailed(READ_FAILED)
         rows = call(text, facts)
     except ReadFailed:

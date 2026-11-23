@@ -2947,8 +2947,7 @@ def offers_answers_and_lists_as_the_ai_sees_them():
     same(talk.offered[pid], want); same(talk.offered["none"], [])
     if want: same(json.loads(r["t1"])["offers"], want)
     same(r["t2"], "The app has no time to offer for that paper.")
-    raises(Refused, lambda: T.paste(talk, env, "a list"), "Reading a list comes next.")
-    raises(Refused, lambda: T.confirm_list(talk, env, "l1", True), "Reading a list comes next.")
+    raises(Refused, lambda: T.confirm_list(talk, env, "l1", True), "That list is not waiting any more.")      # Task 10 reads lists
 
 @t
 def a_talk_on_an_exam_tells_the_ai_which_and_a_new_publish_gives_fresh_codes():
@@ -3431,7 +3430,7 @@ def odd_input_is_refused_with_a_sentence_and_never_a_500():
         for body in ([1], dict(step=5), dict(step=None)):
             answered(c.post(u + "/undo", json=body), 400, WRONG_ANSWER)
         answered(c.post(u + "/undo", json=dict(step="nope")), 400, {"error": T.NO_STEP})
-        answered(c.post(u + "/list/L1", json=dict(yes=True)), 400, {"error": "Reading a list comes next."})   # Task 10 reads lists
+        answered(c.post(u + "/list/L1", json=dict(yes=True)), 400, {"error": "That list is not waiting any more."})   # Task 10 reads lists
         for body in (dict(yes="yes"), dict(), [True]):
             answered(c.post(u + "/list/L1", json=body), 400, WRONG_ANSWER)
         got, real = [], T.paste
@@ -3493,6 +3492,356 @@ def nothing_of_a_talk_reaches_the_server_s_log():
         assert bit.casefold() not in every.casefold(), (bit, every[-800:])
     same([l["kind"] for l in v["lines"]], ["me", "did", "ai"])
     assert teacher in v["lines"][0]["text"] and teacher in v["lines"][2]["text"], "the person sees the names"
+
+
+# ---------------------------------------------------------------- the agreed list inside a talk (plan/listjob.py)
+from plan import listjob as LJ  # noqa: E402
+
+def a_reader(meant=None, seen=None, hook=None):
+    """a scripted reader (text, facts) -> rows: each line "level, subject, paper, minutes, date, start" is a row; meant gives
+    the subjects a row's words stand for (by the words' start)"""
+    def call(text, facts_):
+        if seen is not None: seen.append((text, facts_))
+        if hook: hook()
+        rows = []
+        for i, line in enumerate(text.split("\n"), 1):
+            f = [x.strip() for x in line.split(",")]
+            if len(f) < 4: continue
+            f += [""] * (6 - len(f))
+            sub = next((v for k, v in (meant or {}).items() if f[1].startswith(k)), [])
+            rows.append(dict(line=i, level=f[0], subject=f[1], paper=f[2], minutes=int(f[3]) if f[3].isdigit() else None,
+                             date=f[4] or None, start=f[5] or None, all=False, subjects=list(sub)))
+        return rows
+    return call
+
+def no_reader(text, facts_): raise AssertionError("the reader was called")
+
+def list_talk(staff=(), pub=None):
+    """a talk on a new exam over the list's made-up timetable"""
+    fresh(); no_schedules()
+    env, talk = a_talk(staff=staff, pub=pub or a_list_pub())
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    return env, talk
+
+def pasted(talk, env, text=None, call=None, **kw):
+    T.paste(talk, env, text=text, call=call, **kw); ended(talk)
+    same(T._running[0], 0)
+    return talk.lines[-1]
+
+def papers_of(env, talk): return sorted((p["level"], p["subject"], p["paper"]) for p in env.load(talk.exam)["papers"])
+def list_lines(talk): return [l for l in talk.lines if l["kind"] == "list"]
+ENG = "Sec 3, English Language G3, Paper 1, 90, 2026-10-06, 08:00"
+SCI = "Sec 3, Combined Science, Paper 1, 60, 2026-10-07, 08:00"
+LIT = "Sec 4, Literature, Paper 1, 60, 2026-10-08, 10:00"
+MATHS = "Sec 3, Maths, Paper 1, 60, 2026-10-07, 10:00"
+BOTH = {"Maths": ["Mathematics G2", "Mathematics G3"]}
+
+@t
+def three_plain_rows_go_in_as_one_step_and_its_undo_takes_out_exactly_those():
+    env, talk = list_talk()
+    answer(talk, env, "Add", reply(use("t1", "set_papers", dict(add=[dict(level="Sec 4", subject="English", paper="Paper 1", minutes=60, who=None, together=None)], change=[], remove=[]))), reply(say("ok")))
+    before, hour, seen = papers_of(env, talk), len(T._starts), []
+    last = pasted(talk, env, "\n".join([ENG, SCI, LIT]), call=a_reader(seen=seen))
+    same(len(seen), 1); same(len(T._starts), hour + 1)                        # one piece: one answer of the hour
+    same(texts(talk, "me")[-1], "Pasted a list of 3 lines.")
+    did = [l for l in talk.lines if l["kind"] == "did"][-1]
+    same((did["text"], did["undo"]), ("Put 3 papers in the draft: their words are the timetable's own", True))
+    same(papers_of(env, talk), sorted(before + [("Sec 3", "English Language G3", "Paper 1"), ("Sec 3", "Combined Science", "Paper 1"), ("Sec 4", "Literature", "Paper 1")]))
+    same({k: last[k] for k in ("kind", "text", "table", "buttons", "left", "list")}, dict(kind="list", text="3 papers are in.", table=None, buttons=[], left=[], list=None))
+    v = T.view(talk, env)
+    same((v["working"], v["progress"], v["can"]), (False, "", dict(say=True, list=True, stop=False, why="")))
+    same(v["lines"][-1], last)
+    raw = repr(vars(talk))
+    for bit in (ENG, SCI, "08:00\nSec 3"):
+        assert bit not in raw, bit                                            # the raw text stays nowhere in the talk
+    assert "3 papers in the timetable's own words went in at once" in talk.notes[-1], talk.notes
+    call = answer(talk, env, "What now?", reply(say("ok")))
+    assert any("went in at once" in u for u in user_texts(call.sent[0])), "the AI is told the result"
+    assert all(ENG not in u for u in user_texts(call.sent[0]))
+    T.undo(talk, env, did["step"])
+    same(papers_of(env, talk), before)
+
+@t
+def a_mixed_list_asks_once_and_yes_puts_the_other_lines_in_tied():
+    env, talk = list_talk()
+    last = pasted(talk, env, "\n".join([ENG, MATHS, "Sec 5, Art, Paper 1, 60, 2026-10-08, 08:00"]), call=a_reader(BOTH))
+    same(texts(talk, "did")[-1], "Put 1 paper in the draft: its words are the timetable's own")
+    same(last["text"], "1 paper is in. 1 line needs a yes. 1 line was not put in.")
+    same(last["table"], dict(head=["As written", "Read as", "Date", "Start"], rows=[["Sec 3 Maths Paper 1", "Mathematics G2, Mathematics G3", "Wed 7 Oct", "10:00"]]))
+    same((last["buttons"], last["left"]), (["Yes, all", "Not now"], [dict(line=3, text="Sec 5 is not a level of this exam.")]))
+    lid = last["list"]; assert isinstance(lid, str) and lid
+    same(papers_of(env, talk), [("Sec 3", "English Language G3", "Paper 1")])     # nothing of Sec 5, nothing waiting yet
+    assert "Sec 5 is not a level of this exam." in talk.notes[-1] and 'line 2 "Sec 3 Maths Paper 1" read as Mathematics G2, Mathematics G3' in talk.notes[-1], talk.notes
+    v = T.view(talk, env)
+    same(v["can"], dict(say=True, list=False, stop=False, why="Say Yes, all or Not now to the list above first."))
+    raises(Refused, lambda: T.paste(talk, env, text=SCI, call=no_reader), T.WAIT_LIST)
+    raises(Refused, lambda: T.confirm_list(talk, env, "other", True), T.NOT_WAITING)
+    n = last["n"]
+    T.confirm_list(talk, env, lid, True)
+    same(texts(talk, "did")[-1], "Put 2 papers in the draft, as read above")
+    ms = [p for p in env.load(talk.exam)["papers"] if p["subject"].startswith("Mathematics")]
+    same(sorted((p["subject"], p["together"], p["date"], p["start"], p["minutes"]) for p in ms),
+         [("Mathematics G2", "Sec 3 Maths Paper 1", "2026-10-07", "10:00", 60), ("Mathematics G3", "Sec 3 Maths Paper 1", "2026-10-07", "10:00", 60)])
+    line = next(l for l in talk.lines if l["n"] == n)
+    same((line["buttons"], line["list"], line["table"]["rows"][0][0]), ([], None, "Sec 3 Maths Paper 1"))
+    raises(Refused, lambda: T.confirm_list(talk, env, lid, True), T.NOT_WAITING)           # not twice
+    assert "Yes, all" in talk.notes[-1], talk.notes
+    same(T.view(talk, env)["can"]["list"], True)
+
+@t
+def not_now_leaves_the_draft_as_it_was():
+    env, talk = list_talk()
+    lid = pasted(talk, env, "\n".join([MATHS, "Sec 3, Maths, Paper 2, 60, 2026-10-08, 10:00"]), call=a_reader(BOTH))["list"]
+    before = env.load(talk.exam)
+    T.confirm_list(talk, env, lid, False)
+    same(env.load(talk.exam), before)
+    same(texts(talk, "sys")[-1], "Left out: 2 lines of the list.")
+    same((list_lines(talk)[-1]["buttons"], list_lines(talk)[-1]["list"]), ([], None))
+    assert "Not now" in talk.notes[-1], talk.notes
+    raises(Refused, lambda: T.confirm_list(talk, env, lid, True), T.NOT_WAITING)
+
+@t
+def the_ai_corrects_a_line_for_every_line_of_the_same_words_and_accepts_on_the_persons_word():
+    env, talk = list_talk()
+    text = "\n".join([MATHS, "Sec 3, Maths, Paper 2, 60, 2026-10-08, 10:00", "Sec 3, Science, Paper 1, 60, 2026-10-09, 08:00"])
+    last = pasted(talk, env, text, call=a_reader(dict(BOTH, Science=["Combined Science"])))
+    n, lid = last["n"], last["list"]
+    call = answer(talk, env, "Only G3 sits maths", reply(use("t1", "correct_list", dict(line=1, subjects=["mathematics g3"])),
+                                                       use("t2", "correct_list", dict(line=3, subjects=["Music"])),
+                                                       use("t3", "correct_list", dict(line=9, subjects=["Mathematics G3"])),
+                                                       use("t4", "correct_list", dict(line=3, subjects=[])),
+                                                       use("t5", "accept_list", dict(said="Only G3"))), reply(say("ok")))
+    r = results(call.sent[-1])
+    same([r[k] for k in ("t1", "t2", "t3", "t4")], ["Lines 1 and 2 are now read as Mathematics G3.", "Sec 3 has no subject called Music.",
+                                                    "Line 9 is not waiting for a yes.", "Give the subjects the line stands for."])
+    line = next(l for l in talk.lines if l["n"] == n)
+    same([row[:2] for row in line["table"]["rows"]], [["Sec 3 Maths Paper 1", "Mathematics G3"], ["Sec 3 Maths Paper 2", "Mathematics G3"], ["Sec 3 Science Paper 1", "Combined Science"]])
+    same(list_lines(talk)[-1]["n"], n)                                         # the same line, rebuilt in place
+    assert json.loads(r["t5"])["text"] == "Put 3 papers in the draft, as read above", r["t5"]      # "Only G3" was typed: said passes
+    same(papers_of(env, talk), [("Sec 3", "Combined Science", "Paper 1"), ("Sec 3", "Mathematics G3", "Paper 1"), ("Sec 3", "Mathematics G3", "Paper 2")])
+    same({p["together"] for p in env.load(talk.exam)["papers"]}, {""})
+    same((line["buttons"], line["list"]), ([], None))
+    raises(Refused, lambda: T.confirm_list(talk, env, lid, True), T.NOT_WAITING)
+    call = answer(talk, env, "x", reply(use("t1", "accept_list", dict(said="x")), use("t2", "correct_list", dict(line=1, subjects=["Mathematics G3"]))), reply(say("ok")))
+    r = results(call.sent[-1]); same([r["t1"], r["t2"]], ["No list is waiting.", "No list is waiting."])
+
+@t
+def accept_list_needs_the_persons_own_yes():
+    env, talk = list_talk()
+    pasted(talk, env, MATHS, call=a_reader(BOTH))
+    before = env.load(talk.exam)
+    call = answer(talk, env, "hmm, let me think", reply(use("t1", "accept_list", dict(said="yes, put them in"))), reply(say("ok")))
+    same(results(call.sent[-1])["t1"], "The person has not said yes to the list in their own words.")
+    same(env.load(talk.exam), before); assert talk.waiting
+
+@t
+def what_is_too_big_empty_or_early_is_refused_and_changes_nothing():
+    fresh(); no_schedules()
+    env, talk = a_talk(pub=a_list_pub())
+    raises(Refused, lambda: T.paste(talk, env, text=ENG, call=no_reader), "Start the exam first: say what it is, its name and its dates.")
+    env, talk = list_talk()
+    n = len(talk.lines)
+    for kw, sentence in ((dict(filename="papers.docx", data=b"x" * (5 * 1024 * 1024 + 1)), BAD_FILE),
+                         (dict(text="x" * 20001), LONG_LIST), (dict(text="  \n "), "Paste the list, or give an Excel or Word file."),
+                         (dict(), "Paste the list, or give an Excel or Word file."), (dict(filename="papers.pdf", data=b"%PDF"), BAD_FILE),
+                         (dict(filename="papers.xlsx", data=an_xlsx([[" "]])), "Paste the list, or give an Excel or Word file.")):
+        raises(Refused, lambda: T.paste(talk, env, call=no_reader, **kw), sentence)
+    T.paste(talk, env, text="x" * 20000, call=lambda t_, f: []); ended(talk)            # 20,000 is still read
+    same(list_lines(talk)[-1]["text"], "No paper was found in the list.")
+    env.right = False
+    raises(Refused, lambda: T.paste(talk, env, text=ENG, call=no_reader), OPEN)
+    same((talk.working, T._running[0]), (False, 0))
+
+@t
+def stop_ends_the_job_and_nothing_of_the_list_is_put_in():
+    env, talk = list_talk()
+    inside, go = threading.Event(), threading.Event()
+    def hook():
+        inside.set(); assert go.wait(WAIT), "the test never let the reader go"
+    before = env.load(talk.exam)
+    T.paste(talk, env, text="\n".join([ENG, SCI, "a heading"]), call=a_reader(hook=hook))       # one piece: Stop after it is read
+    assert inside.wait(WAIT), "the reader was never called"
+    v = T.view(talk, env)
+    same((v["working"], v["progress"], v["can"]), (True, "Reading the list: 0 of 3 lines", dict(say=False, list=False, stop=True, why=T.READING)))
+    raises(Refused, lambda: T.paste(talk, env, text=ENG, call=no_reader), T.READING)
+    raises(Refused, lambda: T.say(talk, env, "hello", call=Script()), T.READING)
+    raises(Refused, lambda: T.undo(talk, env, "x"), T.WAIT_UNDO)
+    raises(Refused, lambda: T.confirm_list(talk, env, "x", True), T.READING)
+    T.stop(talk); go.set(); ended(talk)
+    same(texts(talk, "sys")[-1], "Stopped. Nothing of the list was put in.")
+    same(env.load(talk.exam), before); same(list_lines(talk), [])
+    same(T._running[0], 0); same(T.view(talk, env)["can"], dict(say=True, list=True, stop=False, why=""))
+
+@t
+def the_lines_of_a_later_piece_are_the_lists_own_and_the_progress_counts_them():
+    env, talk = list_talk()
+    seen, progress = [], []
+    hook = lambda: progress.append(T.view(talk, env)["progress"])
+    text = "\n".join(["a heading"] * 41 + [ENG, "Sec 9, Art, Paper 1, 60, 2026-10-06, 08:00", SCI])
+    last = pasted(talk, env, text, call=a_reader(seen=seen, hook=hook))
+    same(len(seen), 2); same(progress, ["Reading the list: 0 of 44 lines", "Reading the list: 40 of 44 lines"])
+    same(last["left"], [dict(line=43, text="Sec 9 is not a level of this exam.")])
+    same(last["text"], "2 papers are in. 1 line was not put in.")
+
+@t
+def a_name_goes_to_the_reader_as_a_code_and_comes_back_a_name():
+    env, talk = list_talk(staff=STAFF)
+    seen = []
+    kid = env.pub()["model"]["students"][0]
+    text = "\n".join([f"Sec 3, Maths with {TAN}, Paper 1, 60, 2026-10-07, 10:00", f"Note: {kid['id']} {kid['name']} sits in the hall"])
+    last = pasted(talk, env, text, call=a_reader(BOTH, seen=seen))
+    code = talk.names.code(TAN)
+    sent = seen[0][0]
+    assert code in sent and all(bit not in sent for bit in ("Tan", "Wei Ling", kid["id"], kid["name"])), sent
+    assert all(kid["id"] not in json.dumps(f_) and "Tan" not in json.dumps(f_) for _, f_ in seen)
+    same(last["table"]["rows"][0][0], f"Sec 3 Maths with {TAN} Paper 1")
+    call = answer(talk, env, "ok", reply(say("ok")))
+    every = json.dumps(call.sent[0]["messages"])
+    assert code in every and "Wei Ling" not in every, every[-600:]
+
+@t
+def the_hours_answers_running_out_ends_the_job_with_nothing_put_in():
+    env, talk = list_talk()
+    seen, before = [], env.load(talk.exam)
+    now = T._now()
+    T._starts.extend([now] * (T.LIMITS["an_hour"] - 1 - len(T._starts)))       # the paste takes the 60th; a second piece cannot
+    pasted(talk, env, "\n".join([ENG] + ["a heading"] * 40 + [SCI]), call=a_reader(seen=seen))
+    same(len(seen), 1); same(texts(talk, "sys")[-1], "The AI is busy. Try again in a few minutes.")
+    same(env.load(talk.exam), before); same(list_lines(talk), [])
+    fresh()
+
+@t
+def a_reader_that_fails_the_deadline_or_a_right_that_ends_puts_nothing_in():
+    env, talk = list_talk()
+    before = env.load(talk.exam)
+    def broken(text, facts_): raise RuntimeError("Ms Secret Person")
+    h = logged()
+    pasted(talk, env, ENG, call=broken)
+    same(texts(talk, "sys")[-1], AI.READ_FAILED)
+    assert all("Secret" not in l for l in h.lines); logging.getLogger("plan").removeHandler(h)
+    was = T.LIMITS["list_job"]; T.LIMITS["list_job"] = 0
+    try: pasted(talk, env, ENG, call=a_reader())
+    finally: T.LIMITS["list_job"] = was
+    same(texts(talk, "sys")[-1], "Reading the list took too long, so it stopped. Nothing of it was put in.")
+    def ends(): env.right = False
+    pasted(talk, env, ENG, call=a_reader(hook=ends))                          # the right ends while the piece is read
+    same(texts(talk, "sys")[-1], OPEN)
+    env.right = True
+    same(env.load(talk.exam), before); same(list_lines(talk), [])
+    pasted(talk, env, "\n".join([ENG, ENG.replace("90", "60")]), call=a_reader())      # match asks about a repeat; one goes in
+    same(list_lines(talk)[-1]["left"], [dict(line=2, text="Row 2 repeats row 1.")])
+
+@t
+def a_file_in_the_apps_own_layout_goes_in_without_the_reader():
+    env, talk = list_talk()
+    data = P.paper_list_xlsx(dict(levels=["Sec 3"], papers=[a_paper("Sec 3", "Mathematics G3", 90, "2026-10-06", "08:00", "groups", "Maths"),
+                                                            a_paper("Sec 3", "English Language G3", 120, None, None, "level")]))
+    hour = len(T._starts)
+    last = pasted(talk, env, filename="papers.xlsx", data=data, call=no_reader)
+    same(len(T._starts), hour)                                                # no AI: no answer of the hour
+    same(texts(talk, "me")[-1], "Gave the file papers.xlsx.")
+    same(last["text"], "2 papers are in.")
+    got = {p["subject"]: (p["minutes"], p["date"], p["start"], p["who"], p["together"]) for p in env.load(talk.exam)["papers"]}
+    same(got, {"Mathematics G3": (90, "2026-10-06", "08:00", "groups", "Maths"), "English Language G3": (120, None, None, "level", "")})
+    last = pasted(talk, env, filename="papers.xlsx", data=data, call=no_reader)      # again: changed never doubled
+    same(len(env.load(talk.exam)["papers"]), 2); same(last["text"], "2 papers are in.")
+    pasted(talk, env, filename="bad.xlsx", data=an_xlsx([P.HEADER, ["Sec 3", "Art", "P1", "long"]]), call=no_reader)
+    same(texts(talk, "sys")[-1], "Row 2: the minutes must be a whole number.")
+
+@t
+def the_practice_reader_walks_a_list_in_its_own_layout():
+    env, talk = list_talk()
+    was, real = os.environ.get("TYPED_REQUEST_MODEL"), AI._real_read
+    def no_network(*a, **k): raise AssertionError("a test reached for the real AI")
+    os.environ["TYPED_REQUEST_MODEL"] = "mock"; AI._real_read = no_network
+    try:
+        last = pasted(talk, env, "\n".join(["Level, Subject, Paper, Minutes, Date, Start", ENG, SCI, LIT, MATHS]))
+    finally:
+        AI._real_read = real
+        if was is None: os.environ.pop("TYPED_REQUEST_MODEL", None)
+        else: os.environ["TYPED_REQUEST_MODEL"] = was
+    same(last["text"], "3 papers are in. 1 line needs a yes.")
+    same(last["table"]["rows"], [["Sec 3 Maths Paper 1", "Mathematics G2, Mathematics G3", "Wed 7 Oct", "10:00"]])
+    T.confirm_list(talk, env, last["list"], True)
+    ms = sorted((p["subject"], p["together"]) for p in env.load(talk.exam)["papers"] if p["subject"].startswith("Math"))
+    same(ms, [("Mathematics G2", "Sec 3 Maths Paper 1"), ("Mathematics G3", "Sec 3 Maths Paper 1")])
+    same(len(env.load(talk.exam)["papers"]), 5)
+
+@t
+def a_list_pasted_over_http_with_the_practice_reader():
+    fresh(); no_schedules(); w_records()
+    was = os.environ.get("TYPED_REQUEST_MODEL")
+    os.environ["TYPED_REQUEST_MODEL"] = "mock"
+    try:
+        with ai_on(None):                                     # the route's CALL is None, as on the server: the practice helper
+            real = AI._real_read
+            def no_network(*a, **k): raise AssertionError("a test reached for the real AI")
+            AI._real_read = no_network
+            try:
+                c = w_person(UNA)
+                id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
+                answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09")), 200)
+                assert w_done(c, id)["exam"], "the practice helper started the exam"
+                v = answered(c.post(f"/api/plan/talks/{id}/list", json=dict(text="Sec 3, English, Paper 1, 90, 2026-10-06, 08:00\nSec 4, Literature, Paper 1, 60")), 200)
+                same(v["lines"][-1]["text"], "Pasted a list of 2 lines.")
+                v = w_done(c, id)
+                same([(l["kind"], l["text"]) for l in v["lines"] if l["kind"] in ("did", "list")][-2:],
+                     [("did", "Put 2 papers in the draft: their words are the timetable's own"), ("list", "2 papers are in.")])
+                same(answered(c.post(f"/api/plan/talks/{id}/list/nope", json=dict(yes=True)), 400), {"error": T.NOT_WAITING})
+            finally: AI._real_read = real
+    finally:
+        if was is None: os.environ.pop("TYPED_REQUEST_MODEL", None)
+        else: os.environ["TYPED_REQUEST_MODEL"] = was
+
+
+@t
+def the_real_read_joins_every_text_block_and_closes_its_stream_on_stop():
+    """a made-up client in place of the real one: nothing leaves the machine"""
+    class Block:
+        def __init__(self, text): self.type, self.text = "text", text
+    class Stream:
+        def __init__(self, events, final, log): self.events, self.final, self.log = events, final, log
+        def __enter__(self): return self
+        def __exit__(self, *a): self.log.append("closed")
+        def __iter__(self):
+            for e in self.events: self.log.append(e); yield e
+        def get_final_message(self): return self.final
+    class Client:
+        def __init__(self, stream): self.beta = type("B", (), {})(); self.beta.messages = type("M", (), {})(); self.beta.messages.stream = lambda **kw: stream
+    half = json.dumps(dict(rows=[ROW_OF]))
+    final = type("R", (), dict(stop_reason="end_turn", content=[Block(half[:10]), Block(half[10:])]))()
+    was, model = AI._client, os.environ.get("TYPED_REQUEST_MODEL")
+    try:
+        os.environ["TYPED_REQUEST_MODEL"] = ""
+        log = []; AI._client = lambda: Client(Stream(["e1", "e2"], final, log))
+        same(AI.read_piece("x", FACTS), [ROW_OF]); same(log, ["e1", "e2", "closed"])         # split over two blocks
+        stop, log = threading.Event(), []
+        class Stopping(Stream):                                               # Stop is pressed while the first event comes
+            def __iter__(self):
+                for e in self.events: self.log.append(e); stop.set(); yield e
+        AI._client = lambda: Client(Stopping(["e1", "e2", "e3"], final, log))
+        raises(AI.ReadFailed, lambda: AI.read_piece("x", FACTS, stop=stop), AI.READ_FAILED); same(log, ["e1", "closed"])
+        log = []
+        raises(AI.ReadFailed, lambda: AI.read_piece("x", FACTS, deadline=time.monotonic() - 1), AI.READ_FAILED); same(log, [])
+        log = []; AI._client = lambda: Client(Stream(["e1"], final, log))
+        raises(AI.ReadFailed, lambda: AI.read_piece("x", FACTS, stop=threading.Event(), deadline=time.monotonic() - 1), AI.READ_FAILED)
+        same(AI.read_piece("x", FACTS, call=lambda t_, f: [ROW_OF], stop=threading.Event(), deadline=time.monotonic() + 60), [ROW_OF])
+    finally:
+        AI._client = was
+        if model is None: os.environ.pop("TYPED_REQUEST_MODEL", None)
+        else: os.environ["TYPED_REQUEST_MODEL"] = model
+
+
+@t
+def the_apps_check_after_a_list_says_its_first_five_errors():
+    env, talk = list_talk()
+    real = facts.checks
+    facts.checks = lambda *a: dict(errors=[f"Problem {i}." for i in range(1, 8)], warnings=[], unchecked="Clashes not checked: no students yet.", hidden=0)
+    try: pasted(talk, env, ENG, call=a_reader())
+    finally: facts.checks = real
+    same(texts(talk, "sys")[-2:], ["Clashes not checked: no students yet.",
+                                   "The app's check says:\nProblem 1.\nProblem 2.\nProblem 3.\nProblem 4.\nProblem 5.\nand 2 more: see the Papers tab."])
+    same(kinds(talk)[-4:], ["did", "sys", "sys", "list"])
 
 
 print(f"{COUNT} plan tests passed")
