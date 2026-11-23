@@ -4,8 +4,9 @@ import store
 from relief import people as _relief
 
 PATH = os.path.join(store.DATA, "accounts", "people.json")
-GROUPS = ("committee", "leader", "hod", "sh", "teacher", "executive")
+GROUPS = ("leader", "hod", "sh", "teacher", "executive")
 LABELS = {"committee": "Timetable committee", "leader": "School leader", "hod": "HOD", "sh": "SH", "teacher": "Teacher", "executive": "Executive"}
+COMMITTEES = (("timetable", "Timetable committee"), ("relief", "Relief team"), ("exams", "Exams and events"))
 MANAGEMENT = {"leader", "hod", "sh"}
 HEADS = {"hod", "sh"}
 SHARED = ("committee", "head", "teacher", "student")
@@ -16,7 +17,7 @@ def blank():
             "migrated_exams": False}
 
 def _defaults():
-    return {"group": None, "depts": [], "extras": {"relief": False, "exams": None, "admin": False}, "username": None, "pw": None,
+    return {"group": None, "depts": [], "extras": {"timetable": False, "relief": False, "exams": None, "admin": False}, "username": None, "pw": None,
             "must_change": False, "google": None, "code_n": 0, "n": 0, "off": False, "added": False, "note": "", "signins": []}
 
 class Unreadable(Exception):
@@ -34,7 +35,7 @@ def _iso(v):
     try: return datetime.date.fromisoformat(v).isoformat() if isinstance(v, str) else None
     except ValueError: return None
 
-_KNOWN_EXTRAS = ("relief", "exams", "admin")
+_KNOWN_EXTRAS = ("timetable", "relief", "exams", "admin")
 
 def _clean(got):
     """a stored record with every known field forced to its proper type, so a hand-edited file cannot break callers.
@@ -45,7 +46,8 @@ def _clean(got):
     r.update(known)
     ex = got.get("extras") if isinstance(got.get("extras"), dict) else {}
     r["extras"] = {k: v for k, v in ex.items() if k not in _KNOWN_EXTRAS}
-    r["extras"].update(relief=ex.get("relief") is True, exams=_iso(ex.get("exams")), admin=ex.get("admin") is True)
+    old = got.get("group") == "committee"   # the old shape: the committee was a group, now a tick
+    r["extras"].update(timetable=old or ex.get("timetable") is True, relief=ex.get("relief") is True, exams=_iso(ex.get("exams")), admin=ex.get("admin") is True)
     r["group"] = got.get("group") if got.get("group") in GROUPS else None
     d = got.get("depts")
     r["depts"] = [x.strip() for x in d if isinstance(x, str) and x.strip()] if isinstance(d, list) else []
@@ -145,7 +147,7 @@ def admins(data):
     out = []
     for n in data["people"]:
         r = record(data, n)
-        if r["group"] == "committee" and r["extras"].get("admin") and not r["off"]: out.append(n)
+        if r["extras"].get("timetable") and r["extras"].get("admin") and not r["off"]: out.append(n)
     return out
 
 def usable_admins(data):

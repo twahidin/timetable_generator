@@ -16,14 +16,14 @@ def rights(person, via, shared=None, today=None):
     if person.get("off"): return frozenset()
     g, ex = person.get("group"), person.get("extras") or {}
     r = {"timetable", "files"}
-    if g in ("teacher", "leader", "hod", "sh", "committee"): r.add("relief")
+    if g in ("teacher", "leader", "hod", "sh") or ex.get("timetable"): r.add("relief")
     if g in ("leader", "hod", "sh"): r |= {"relief.plan", "relief.settings"}
-    if g == "committee": r |= {"relief.settings", "relief.save"}
+    if ex.get("timetable"): r |= {"relief.settings", "relief.save"}
     if ex.get("relief"): r |= {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team"}
     until = ex.get("exams")
     if until and until >= (today or datetime.date.today()).isoformat(): r.add("exams")
     if via in STRONG:
-        if g == "committee":
+        if ex.get("timetable"):
             r |= {"committee", "setup", "history", "codes"}
             if ex.get("admin"): r.add("admin")
         if g in ("hod", "sh"): r |= {"setup", "history.dept"}
