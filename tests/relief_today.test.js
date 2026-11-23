@@ -187,6 +187,16 @@ t("nothing else in the row moves when Remind all comes or goes: its place is kep
   assert.ok(css("relief.html", ".td-acts").includes("justify-content:flex-end"), "the row ends at the right: what comes first moves nothing");
   for (const x of ['.td-acts [data-td="remind-all"]', ".td-gap"]) assert.ok(/margin-right:(\d+)px/.exec(css("relief.html", x))[1] >= 10, "and Approve all's shorter words do not bring it under the pointer");
 });
+t("on a phone Remind all comes last, and no place is kept for it", () => {
+  const PHONE = "(max-width:640px)", button = '.td-acts [data-td="remind-all"]';
+  assert.ok(/(^|;)order:1(;|$)/.test(css("relief.html", button, PHONE)), "after the others, which have none");
+  assert.ok(css("relief.html", button, PHONE).includes("margin-right:0"));
+  assert.ok(css("relief.html", ".td-gap", PHONE).includes("display:none"), "no empty line above the buttons");
+  for (const x of [button, ".td-gap"]) {
+    assert.ok(!/(^|;)(order|display):/.test(css("relief.html", x)), `${x}: wider than that, first, with its place`);
+    assert.strictEqual(css("relief.html", x, "(max-width:760px)"), "");
+  }
+});
 t("at any width there is room between the buttons at the top and the day", () => {
   assert.ok(/margin-bottom:(\d+)px/.exec(css("relief.html", ".td-acts"))[1] >= 10, css("relief.html", ".td-acts"));
 });
