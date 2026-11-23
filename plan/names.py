@@ -183,7 +183,7 @@ class _Text:
     def end(self, j): return self._last[self.b[j] - 1] if self._last is not None else self.b[j]
     def between(self, j): return " ".join(self.norm[self.b[j - 1]:self.a[j]].split())
     def small(self, j): return self.raw[j].islower()
-    def tight(self, j): return self.gap[j] == _SOFT and self.between(j) in _TIGHT and (not self.between(j) or self.a[j] - self.b[j - 1] == 1)      # after spaces, or one tight join with no space
+    def tight(self, j): return self.gap[j] == _SOFT and self.between(j) in _TIGHT and (not self.between(j) or self.a[j] - self.b[j - 1] == 1 or self.norm[self.b[j - 1]:self.a[j]] == ". " and len(self.raw[j - 1]) == 1 and self.raw[j - 1].isalpha())      # after spaces, or one tight join with no space, or an initial's dot and a space ("S. Kumar")
 
     def after(self, j):
         """(the next word, what is between them) after word j; digits glued to the end of j or to the next word are a footnote's, and
@@ -574,7 +574,8 @@ class Names:
             step = node.get(t.key[j])
             if step is None or t.taken[j] or j > s and t.between(j) not in step[1] and not ("" in step[1] and t.tight(j)): break
             node = step[0]; j += 1
-            if None in node: out.append((j, node[None]))
+            inner, close = t.norm[t.a[s]:t.b[j - 1]], t.norm[t.b[j - 1]:t.b[j - 1] + 1]          # a bracket of it closes in the text, as in _titles
+            if None in node and all(inner.count(a) - inner.count(b) in (0, close == b) for a, b in ("()", "[]", "{}")): out.append((j, node[None]))
         return out
 
     def _wholes(self, t, where, grown):
