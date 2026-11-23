@@ -2131,6 +2131,7 @@ NO_EXAM = "That exam is not there any more."
 NO_EVENT = "That event is not there any more."
 ONLY_IN_CHARGE = "Only the teacher in charge and the timetable committee can open this event."
 PICK_IN_CHARGE = "Pick the teacher in charge."
+ONLY_GIVES = "Only the timetable committee can change the teacher in charge."
 EVENT_KEEPS = ("id", "kind", "in_charge", "created_at", "created_by", "status", "approved", "approved_at", "approved_by", "sent_at",
                "sent_by", "sent_fp", "note", "log", "handled")
 ONLY_APPROVE = "Only the timetable committee can approve, send back or withdraw."
@@ -2165,7 +2166,9 @@ def _event_rights(sched):
     if p is None: return None
     return (sched is None or sched.get("in_charge") == p["name"]), p["name"], False
 
-def _exams_today(): return datetime.date.today()
+def _exams_today():
+    """the school's date, as relief has it: the live server runs on UTC, where it is still yesterday until 8 in the morning"""
+    return relief_lessons.today()
 
 def _published_reader():
     """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for everyone
@@ -2686,24 +2689,25 @@ EXAM_STEPS = {"sent": "sent to the timetable committee", "sent again": "sent to 
               "changes sent": "changes sent to the timetable committee", "approved": "approved: on the main site",
               "changes approved": "changes approved: on the main site", "sent back": "sent back to {who}",
               "changes sent back": "changes sent back to {who}", "withdrawn": "withdrawn from the main site",
-              "replaced": "someone away replaced at once"}
+              "replaced": "someone away replaced at once", "in charge": "teacher in charge changed"}
 
 def _exam_step_words(s):
     """the history's words for the step act() has just logged on s: its log's newest entry"""
     e = (s.get("log") or [{}])[-1]
     words = EXAM_STEPS.get(e.get("what"), str(e.get("what") or "changed")).replace("{who}", exams_approval.WHO.get(s.get("kind"), "the exams committee"))
-    return f"{words} ({e['detail']})" if e.get("what") in ("changes sent", "replaced") and e.get("detail") else words
+    return f"{words} ({e['detail']})" if e.get("what") in ("changes sent", "replaced", "in charge") and e.get("detail") else words
 
 def _exam_approval(id, act, what, approver=False, check=False, event=False):
     """run act(pub, sched, who, now, body) on the stored schedule, save, record it in the history (what: the entry's kind
     of step) and answer with the review; locked from loading to saving, as _exam_changed is. Only Send checks the schedule
     against the timetable (check=True): approve, send back, withdraw and someone is away still work after a new publish.
-    event=True: the same for an event (its rights, wording and reply)"""
+    event=True: the same for an event (its rights, wording and reply). approver: the timetable committee's alone (True, or
+    the sentence anyone else is refused with)"""
     with exams_schedules.editing():
         if event: pub, who, s, _, err = _event_gate(id)
         else: (pub, who, err), s = _exams_gate(), None
         if err: return err
-        if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE}, 403
+        if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE if approver is True else approver}, 403
         if not event:
             s, err = _exam_or_404(id)
             if err: return err
@@ -2845,6 +2849,11 @@ def events_one_page(id):
     if _event_rights(None) is None: return redirect("/")
     return app.send_static_file("exams.html")
 
+def _may_be_in_charge(pub, name):
+    """raises unless name is someone the timetable committee may put in charge of an event: anyone relief and exams know"""
+    if not isinstance(name, str) or not name.strip(): raise ValueError(PICK_IN_CHARGE)
+    if name not in {p["name"] for p in relief_staff(pub)}: raise ValueError(f"{name} is not on the published timetable or the staff list.")
+
 @app.get("/api/events")
 @need("committee", "timetable")
 def events_list():
@@ -2864,8 +2873,8 @@ def events_create():
     b = _exam_json()
     in_charge = b.get("in_charge")
     if every:
-        if not isinstance(in_charge, str) or not in_charge.strip(): return {"error": PICK_IN_CHARGE}, 400
-        if in_charge not in {p["name"] for p in relief_staff(pub)}: return {"error": f"{in_charge} is not on the published timetable or the staff list."}, 400
+        try: _may_be_in_charge(pub, in_charge)
+        except ValueError as e: return {"error": str(e)}, 400
     else: in_charge = who
     try: sched = exams_schedules.new_event(b["name"], b["levels"], b.get("classes") or [], b["start"], b["end"], who, in_charge)
     except ValueError as e: return {"error": str(e)}, 400
@@ -2984,6 +2993,16 @@ def events_handled(id):
     with exams_schedules.editing():
         pub, who, s, _, err = _event_gate(id)
         return err or _handled(pub, who, s, True)
+
+def _event_in_charge(pub, s, by, now, b):
+    _may_be_in_charge(pub, b.get("name"))
+    exams_approval.set_in_charge(s, b["name"], by, now)
+
+@app.post("/api/events/<id>/in-charge")
+@need("committee", "timetable")
+def events_in_charge(id):
+    """{name}: the timetable committee gives the event to another teacher in charge, at once (exams.approval.set_in_charge)"""
+    return _exam_approval(id, _event_in_charge, "in-charge", approver=ONLY_GIVES, event=True)
 
 @app.get("/api/events/<id>/who")
 @need("committee", "timetable")

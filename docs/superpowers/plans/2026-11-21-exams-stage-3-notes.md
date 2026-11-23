@@ -274,6 +274,11 @@ Follow-up for the lead (Ruling: not fixed here, no second fix wave): `app._exams
 the live site), while relief uses the school's date. Between 00:00 and 08:00 Singapore time an approval or publish sync
 treats yesterday as today and may change yesterday's backup lessons. The fix is one line: make `_exams_today()` the
 school's date (as `relief.lessons.today()`); it also affects stage 2's banner and "today" on the main site.
+**Fixed 22 November 2026** on the lead's "Yes, fix it" (branch `exams-today`): `_exams_today()` is the school's date, and the
+stamps pages show (made, saved, sent, approved, replaced) are in school time, in the same shape as before; stamps saved earlier
+on the live site stay as they were, 8 hours early. Checked with the server on UTC and with the two zones 25 hours apart. Still
+on the server's date, for the accounts work: the last day of the Exams and events extra (`accounts/rights.py`,
+`app._exams_committee`, the daily tidy), which ends at 8 in the morning after, and the times the rest of the app shows.
 
 ## Merged with accounts (through stages 2 and 4, and relief stage 2)
 

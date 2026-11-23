@@ -1,5 +1,6 @@
 """Exam and test schedules: make, check, save, list. One JSON file each under DATA/exams/schedules."""
 import datetime, os, secrets, threading
+from zoneinfo import ZoneInfo
 
 import store
 from accounts import people as _accounts
@@ -27,7 +28,9 @@ def _path(id):
 
 
 def _now():
-    return datetime.datetime.now().isoformat(timespec="seconds")
+    """the school's date and time, for the stamps (made, saved, sent, approved, replaced), which pages show as they are: the
+    live server runs on UTC, 8 hours behind. No offset, as every stamp saved before"""
+    return datetime.datetime.now(ZoneInfo(os.environ.get("SCHOOL_TZ") or "Asia/Singapore")).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
 def _int(v):
@@ -56,14 +59,21 @@ def _time_or_none(v, sentence):
         raise ValueError(sentence)
 
 
-def _all():
-    out = []
+def _read_all():
+    """-> (every saved schedule, whether a file there could not be read as one)"""
+    out, bad = [], False
     if os.path.isdir(DIR):
         for f in os.listdir(DIR):
             if f.endswith(".json"):
-                s = store.read_json(os.path.join(DIR, f), None)
+                path = os.path.join(DIR, f)
+                s = store.read_json(path, None)
                 if isinstance(s, dict) and s.get("id"): out.append(s)
-    return out
+                elif os.path.exists(path): bad = True          # (one deleted since it was listed is simply gone)
+    return out, bad
+
+
+def _all():
+    return _read_all()[0]
 
 
 def new(kind, name, levels, start, end, by, pub=None) -> dict:
@@ -279,7 +289,13 @@ def delete(id):
 
 def on_site() -> list:
     """the approved copy (as a schedule) of every schedule that has one"""
-    return [a for a in (_approval.as_schedule(s) for s in _all()) if a]
+    return read_on_site()[0]
+
+
+def read_on_site():
+    """-> (on_site's, whether a schedule's file could not be read)"""
+    rows, bad = _read_all()
+    return [a for a in (_approval.as_schedule(s) for s in rows) if a], bad
 
 
 def copies(id) -> list:

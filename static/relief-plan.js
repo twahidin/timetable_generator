@@ -362,7 +362,7 @@
     const cover = (r.lessons || []).filter(x => x.needed && !x.stopped), k = cover.filter(x => R.approvedOf(x).length || (x.covers || []).some(c => c.planned)).length;
     const changedNow = !r.cancelled && (r.lessons || []).some(x => x.changed && x.date >= RF.today());
     let chip;
-    if (r.cancelled) chip = `<span class="chip st-off">Cancelled by ${esc(who(r.cancelled.by))}: ${esc(r.cancelled.why)}</span>`;
+    if (r.cancelled) chip = `<span class="chip st-off">${esc(`Cancelled${r.cancelled.by === "app" ? "" : ` by ${who(r.cancelled.by)}`}: ${r.cancelled.why}`)}</span>`;
     else if (r.acknowledged) chip = `<span class="chip st-ok">✓ acknowledged${cover.length && cover.every(hasWork) ? ", work set" : ""}</span>`;
     else chip = `<span class="chip st-amber">not acknowledged yet</span>`;
     return `<tr class="${r.cancelled ? "off" : ""}">

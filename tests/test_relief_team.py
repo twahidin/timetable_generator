@@ -985,6 +985,135 @@ def names_are_caught_in_every_form():
     assert choose(i, K5, call=says("Teacher 2", "Teacher 2 is free, and so is Mr Lee.")) == dict(
         who=SAM, by="ai", reason=f"{SAM} is free, and so is Mr Lee.", at=NOW), "Mr Lee is on the shortlist"
 
+# ---- an honorific with any word of a name: "Ms Tan" and "Ms Wei Ling" for Ms Tan Wei Ling ----
+WEI, MEI = "Ms Tan Wei Ling", "Lim Mei Hua"                                      # surname first, with an honorific and without
+
+def rule(text, staff, on=()):
+    """a rule as the model is sent it: staff are names or (name, short name)s, on the names on the shortlist ("Teacher 1" first)"""
+    people = [dict(zip(("name", "short"), p if isinstance(p, tuple) else (p, p))) for p in staff]
+    return PK._scrub(text, PK._matcher(people), {n: f"Teacher {i}" for i, n in enumerate(on, 1)})
+
+@pt
+def an_honorific_with_any_word_of_a_name_is_caught():
+    for said in ("Ms Tan", "Mdm Tan", "Ms Wei", "Ms Ling", "Ms Wei Ling", "Ms Tan Wei", "Ms Tan Ling", "Ms Wei Ling Tan", "ms tan", "MS TAN", "Ms. Tan",
+                 "ms wei ling", "Mrs  Wei\tLing", "Miss Tan", "miss tan", "miss Tan", "Dr. Ling", "Ms tan", "Ms Tan wei", "Ms Wei ling"):
+        assert rule(f"Ask {said} first.", [WEI], on=[WEI]) == "Ask Teacher 1 first.", said
+        assert rule(f"Ask {said} first.", [WEI]) == "Ask another teacher first.", said
+    for said in ("Ms Lim", "Mr Lim", "Mdm Mei Hua", "ms mei", "Ms Hua", "Ms Mei Hua Lim", "miss lim", "Lim Mei Hua"):
+        assert rule(f"Ask {said} first.", [MEI], on=[MEI]) == "Ask Teacher 1 first.", said
+    assert rule("Ms Tan's class, Ms Wei Ling's class, (Ms Tan) and Ms Tan.", [WEI], on=[WEI]) == "Teacher 1's class, Teacher 1's class, (Teacher 1) and Teacher 1."
+    # through choose_for: the rules the model gets, for people on the shortlist
+    pub = P.fake_pub(ROWS + [dict(name=WEI, dept="Mathematics"), dict(name=MEI, dept="Mathematics")], LESSONS, roles=[dict(role=FAT, what="Flexi adjunct teachers")])
+    pub["model"]["school"].update(start_time="08:00", period_minutes=30)
+    pub["model"]["NP"] = 12
+    pub["model"]["setup"]["rules"] = []
+    fresh()
+    i = absent(by=GRACE)["id"]
+    r, x, c = cov(i, K5)
+    _, names = PK.labelled(PK.shortlist(pub, ST, AB.all_records(), r, x, c), r, x, c, ST, AP.listing(pub))
+    lab = {who: k for k, who in names.items()}
+    st = dict(ST, rules=["Ms Tan before Mr Tan.", "Ms Wei Ling, then Mdm Lim, then Ms Mei Hua."])
+    del SAYS[:]
+    got = choose(i, K5, call=says(lab[WEI], f"{lab[WEI]} has the lightest week."), st=st, pub=pub)
+    assert got == dict(who=WEI, by="ai", reason=f"{WEI} has the lightest week.", at=NOW), got
+    assert SAYS[0]["rules"] == [f"{lab[WEI]} before {lab[SAM]}.", f"{lab[WEI]}, then {lab[MEI]}, then {lab[MEI]}."], SAYS[0]["rules"]
+    assert not re.search(r"(?i)\b(tan|wei|ling|lim|mei|hua)\b", json.dumps(SAYS[0], ensure_ascii=False))
+
+@pt
+def an_answer_naming_someone_by_an_honorific_and_any_word_is_refused():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    AP.update(lambda d: d["people"].update({WEI: dict(added=True, group="executive"), MEI: dict(added=True, group="executive")}))   # on no timetable
+    try:
+        for said in ("Ms Tan", "Ms Wei Ling", "mdm wei", "Ms Lim", "Mr Mei Hua"):
+            assert choose(i, K5, call=says("Teacher 2", f"Teacher 2 is free, unlike {said}.")) == APP, said
+        assert choose(i, K5, call=says("Teacher 2", "Teacher 2 is free, and so is Mr Tan.")) == dict(
+            who=SAM, by="ai", reason=f"{SAM} is free, and so is Mr Tan.", at=NOW), "Mr Tan is on the shortlist, and only he has that honorific"
+    finally: AP.update(lambda d: [d["people"].pop(n, None) for n in (WEI, MEI)])
+
+@pt
+def a_word_that_fits_several_people_is_another_teacher():
+    MEIFEN, LINGM = "Ms Tan Mei Fen", "Ms Ling Mui Choo"
+    both = [WEI, MEIFEN]
+    assert rule("Ms Tan first.", both, on=both) == "another teacher first."
+    assert rule("Mdm Tan first.", both, on=both) == "another teacher first."
+    assert rule("Ms Wei first, Ms Tan Mei last.", both, on=both) == "Teacher 1 first, Teacher 2 last."
+    assert rule("Ms Ling first.", [WEI, LINGM], on=[WEI, LINGM]) == "another teacher first.", "a last word or a surname: it cannot tell"
+    # the honorific as stored tells people apart, as now
+    assert rule("Mr Tan, then Ms Tan.", [WEI, SAM], on=[WEI, SAM]) == "Teacher 2, then Teacher 1."
+    assert rule("Mdm Tan first.", [WEI, SAM], on=[WEI, SAM]) == "another teacher first."
+    # a name stored with no honorific may go with any
+    bare = ["Tan Siew Eng", MEIFEN]
+    assert rule("Ms Tan first.", bare, on=bare) == "another teacher first."
+    assert rule("Mdm Tan first.", bare, on=bare) == "another teacher first."
+    assert rule("Ms Tan Siew first, Mr Eng last.", bare, on=bare) == "Teacher 1 first, Teacher 1 last."
+    # a name of one word, as stored, is its own person's, as now
+    assert rule("Ms Tan first.", ["Ms Tan", WEI], on=["Ms Tan", WEI]) == "Teacher 1 first."
+
+@pt
+def no_part_of_a_name_is_left_beside_a_form():
+    # a short name that starts with the word after the honorific
+    short = [(WEI, "Tan WL"), ("Ms Tan Mei Fen", "Tan MF"), ("Mdm Goh Wei", "Goh W")]
+    for said in ("Ms Tan WL", "Mdm Tan WL", "Tan WL"):
+        sent = rule(f"Ask {said} first.", short, on=[WEI])
+        assert not re.search(r"Tan|WL", sent) and ("Teacher 1" in sent or "another teacher" in sent), sent
+    assert rule("Ask Ms Tan WL first.", short[:2], on=[WEI]) == "Ask Teacher 1 first."
+    # marks inside a word, however they are typed
+    for name, forms in {"Mr Peter D'Souza": ("Mr D'Souza", "Mr D’Souza", "Mr Peter D’Souza", "Mr D'Souza Peter", "Mr Souza", "mr d'souza"),
+                        "Ms Grace Teo-Lim": ("Ms Teo-Lim", "Ms Teo‑Lim", "Ms Teo Lim", "Ms Teo", "Ms Grace Teo-Lim"),
+                        "Ms Tan Wei Ling": ("Ms Wei-Ling", "Ms Wei-Ling Tan"),
+                        "Ms Nur Aisyah binte Rahman": ("Ms Aisyah binte Rahman", "Ms Aisyah binte", "Ms Aisyah", "Mdm Rahman", "Ms Nur"),
+                        "Mr Ravi s/o Kumar": ("Mr Ravi", "Mr Kumar", "Mr Ravi Kumar", "Mr Ravi s/o Kumar"),
+                        "Ms Tan W L": ("Ms W. L. Tan", "Ms Tan W.L.", "Ms Tan"),
+                        "Ho Siew Eng (Ms)": ("Ms Ho", "Ms Siew Eng")}.items():
+        for said in forms: assert rule(f"Ask {said} first.", [name], on=[name]).replace("Teacher 1. first", "Teacher 1 first") == "Ask Teacher 1 first.", said
+
+@pt
+def ordinary_words_are_left_as_they_are():
+    staff = ["Ms Tan May Ling", "Mr Art Lim", "Ms A Rahman", "Mr Long Kah Mun", "Ms Sun Mon", "Mdm Hall Lee", "Mr Tan 1", "Or Siew Eng", "Ms An Hua"]
+    for text in ("May and June are busy; on Mon use the Art room, then the Hall.", "Teachers who miss May exams are covered first.",
+                 "Do not let a class miss Art, art, Mon, MON or a long lesson.", "No class may miss a lesson, an exam or long lessons.",
+                 "They miss. May exams come first.", "A lesson they miss in the hall counts; Art comes next.", "Rooms MR 1, DR 1 and MS 1 stay.",
+                 "Any Mr or Ms, Mr and Mrs.", "Whoever sees the Dr may be away; after the Dr a lesson, or the dr or home.", "Long lessons first. An exam counts. Sun is hot."):
+        assert rule(text, staff, on=staff) == text, rule(text, staff, on=staff)
+    MAY = "Ms Tan May Ling"
+    for text, sent in {"Ms Tan may take two.": "Teacher 1 may take two.", "Never Ms Tan. May exams come first.": "Never Teacher 1. May exams come first.",
+                       "Ms Tan, May and June.": "Teacher 1, May and June.", "Ms May may; Miss May too, and ms may ling.": "Teacher 1 may; Teacher 1 too, and Teacher 1.",
+                       "Ms Tan art and Ms Ling mon lessons": "Teacher 1 art and Teacher 1 mon lessons", "Ms May May exams": "Teacher 1 May exams", "Ms Tan - May exams": "Teacher 1 - May exams"}.items():
+        assert rule(text, [MAY], on=[MAY]) == sent, (text, rule(text, [MAY], on=[MAY]))
+    assert rule("Mr Ravi's class, Mr Lim art.", ["Mr Ravi s/o Kumar", "Mr Art Lim"], on=["Mr Ravi s/o Kumar", "Mr Art Lim"]) == "Teacher 1's class, Teacher 2 art."
+    assert rule("Give Ms Wei May exams.", [WEI, "Ms Goh May"], on=[WEI]) == "Give Teacher 1 May exams.", "May is in another person's name"
+    assert rule("Mr Art takes Art; Mr Long takes long lessons.", staff, on=["Mr Art Lim", "Mr Long Kah Mun"]) == "Teacher 1 takes Art; Teacher 2 takes long lessons."
+    assert rule("Do not miss Ms Ho's class.", ["Ho Siew Eng (Ms)"], on=["Ho Siew Eng (Ms)"]) == "Do not miss Teacher 1's class."
+    assert rule("Ask Ms may, Mr long, Dr May and Dr Long first.", [MAY, "Mr Long Kah Mun"], on=[MAY, "Mr Long Kah Mun"]) == "Ask Teacher 1, Teacher 2, Teacher 1 and Teacher 2 first."
+    # "miss" and "or" are words of a name all the same beside another word of it
+    assert rule("Ask miss May Lim, then miss may lim.", ["Lim May"], on=["Lim May"]) == "Ask Teacher 1, then Teacher 1."
+    assert rule("Ask miss Lim May, then miss An.", ["Lim May Hua", "Goh An Na"], on=["Lim May Hua", "Goh An Na"]) == "Ask Teacher 1, then Teacher 2."
+    assert rule("Ask miss Low, ms or, Ms or siew and Mdm Or.", ["Low Mei Hua", "Or Siew Eng"], on=["Low Mei Hua", "Or Siew Eng"]) == "Ask Teacher 1, Teacher 2, Teacher 2 and Teacher 2."
+
+@pt
+def a_good_reason_is_not_refused_for_an_ordinary_word():
+    pub = P.fake_pub(ROWS + [dict(name="Ms Yeo", dept="Mathematics")], LESSONS, roles=[dict(role=FAT, what="Flexi adjunct teachers")])
+    pub["model"]["school"].update(start_time="08:00", period_minutes=30)
+    pub["model"]["NP"] = 12
+    pub["model"]["setup"]["rules"] = []
+    off = ["Ms Yeo May Ling", "Mr Art Lim", "Ms A Rahman", "Ms Sam Tan May", "Ms Sun Mon", "Mr Long Flex"]        # none is on the timetable
+    AP.update(lambda d: d["people"].update({n: dict(added=True, group="executive") for n in off}))
+    try:
+        fresh()
+        i = absent(by=GRACE)["id"]
+        r, x, c = cov(i, K5)
+        _, names = PK.labelled(PK.shortlist(pub, ST, AB.all_records(), r, x, c), r, x, c, ST, AP.listing(pub))
+        yeo = next(k for k, who in names.items() if who == "Ms Yeo")
+        for reason in ("Rule 3: Teacher 2 may take it, so 1A does not miss Science, Art or a lesson in May.", "Teacher 2 would not miss May exams or a long lesson.",
+                       "Teacher 2 teaches Art on Mon; Teacher 1 does not.", f"{yeo} may be busy in May; Teacher 2 has the lightest week.",
+                       f"In {yeo} May and Teacher 2 May weeks, Teacher 2 May has the fewest.", "Teacher 1 Long is heavier; Teacher 2 is free.",
+                       f"Not Dr {yeo} May or Ms {yeo} Art: Teacher 2 is free."):
+            got = choose(i, K5, call=says("Teacher 2", reason), pub=pub)
+            assert got["by"] == "ai" and got["who"] == SAM, (reason, got)
+        assert choose(i, K5, call=says("Teacher 2", "Teacher 2 is free, unlike Ms Yeo May."), pub=pub) == APP, "that is someone off the shortlist"
+    finally: AP.update(lambda d: [d["people"].pop(n, None) for n in off])
+
 @pt
 def a_flexi_adjunct_teacher_who_teaches_the_subject_comes_first_whatever_the_department():
     pub = P.fake_pub(ROWS + [dict(name=FIONA, role=FAT)], LESSONS + [L(FRI, 5, 1, ["2C"], "Science", [FIONA])],
