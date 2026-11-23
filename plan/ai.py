@@ -34,10 +34,65 @@ def enabled() -> bool:
     return typed.enabled()
 
 
+_PAIRS = {'"': '"', "`": "`", "'": "'", "\u201c": "\u201d", "\u2018": "\u2019"}     # opening mark -> the mark that closes it
+_REASON_MAX = 300
+
+
+def _reason(text) -> str:
+    """the provider's short reason made safe for a log: every quoted stretch (quotes included) becomes one ellipsis, whitespace and
+    control characters one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
+    try:
+        if not isinstance(text, str):
+            return ""
+        out, i, n = [], 0, len(text)
+        while i < n:
+            c = text[i]
+            word = lambda k: 0 <= k < n and text[k].isalnum()
+            if c in _PAIRS and not (c == "'" and word(i - 1)):      # an apostrophe after a letter opens nothing
+                close, j = _PAIRS[c], i + 1
+                while j < n:
+                    if text[j] == close and not (close in "'\u2019" and word(j + 1)):   # inside a word it is an apostrophe
+                        break
+                    j += 1
+                out.append("\u2026")
+                i = j + 1                       # an unclosed mark (j == n) takes everything after it
+                continue
+            out.append(c)
+            i += 1
+        t = re.sub(r"[\x00-\x20\x7f-\x9f\s]+", " ", "".join(out)).strip()
+        return t if len(t) <= _REASON_MAX else t[:_REASON_MAX - 1] + "\u2026"
+    except Exception:
+        return ""
+
+
+def _refusal(e) -> str:
+    """" | status 400 invalid_request_error: reason" for the provider's 4xx status errors, else "" (read with getattr: no SDK import)"""
+    code = getattr(e, "status_code", None)
+    if not isinstance(code, int) or isinstance(code, bool) or not 400 <= code <= 499:
+        return ""
+    kind = reason = None
+    body = getattr(e, "body", None)
+    err = body.get("error") if isinstance(body, dict) else None
+    if isinstance(err, dict):
+        k, m = err.get("type"), err.get("message")
+        kind = k if isinstance(k, str) and re.fullmatch(r"[A-Za-z0-9_]{1,40}", k) else None
+        reason = m if isinstance(m, str) else None
+    if reason is None:
+        m = getattr(e, "message", None)
+        reason = m if isinstance(m, str) else None
+    reason = _reason(reason)
+    return f" | status {code}" + (f" {kind}" if kind else "") + (f": {reason}" if reason else "")
+
+
 def _fault(e):
-    """the type of a fault and its frames, never its text"""
+    """the type of a fault and its frames, never its text; the one exception: when the provider refuses a request (a 4xx status
+    error) its own short reason follows, with anything in quotes taken out and cut at 300 characters"""
     frames = "; ".join(f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.name}" for f in traceback.extract_tb(e.__traceback__))
-    log.error("plan.ai fault %s at %s", type(e).__name__, frames)
+    try:
+        extra = _refusal(e)
+    except Exception:                          # an odd exception object: the line is the old one
+        extra = ""
+    log.error("plan.ai fault %s at %s%s", type(e).__name__, frames, extra)
 
 
 # ---------------------------------------------------------------- the brief: the same bytes for every talk

@@ -4464,4 +4464,111 @@ def a_day_needs_whole_day_or_part_said_and_a_whole_day_takes_no_times():
     run(env, st, "days", dict(days=[a_day(date="2026-10-09", levels=["Sec 3"], whole=False, start="08:00", end="10:20")]), said="")   # (d)
     same(env.load(st.exam)["days"]["2026-10-09"], {"levels": ["Sec 3"], "whole": False, "from": "08:00", "to": "10:20"})
 
+# ---------------------------------------------------------------- R1: when the AI's server refuses a request, the log says why
+class _Refused(Exception):
+    """a made-up stand-in for the provider's status error (no SDK)"""
+    def __init__(self, status_code=None, body=None, message=None):
+        super().__init__("the text of the fault")
+        if status_code is not None: self.status_code = status_code
+        if body is not None: self.body = body
+        if message is not None: self.message = message
+
+def _refusal(msg, kind="invalid_request_error", code=400):
+    return _Refused(code, {"error": {"type": kind, "message": msg}})
+
+def _fault_line(e):
+    h = logged()
+    try: AI._fault(e)
+    finally: logging.getLogger("plan").removeHandler(h)
+    same(len(h.lines), 1)
+    return h.lines[0]
+
+@t
+def a_refused_request_logs_the_providers_short_reason_without_what_is_quoted():
+    msg = "tools.3.custom.input_schema: value 'Ms Tan Wei Ling' and \"8am on Tuesday\" are wrong"
+    h = logged()
+    got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), _refusal(msg)))
+    logging.getLogger("plan").removeHandler(h)
+    same((got["status"], len(msgs)), ("failed", 3))
+    sendable(msgs)
+    assert len(h.lines) == 1, h.lines
+    line = h.lines[0]
+    assert "status 400 invalid_request_error: tools.3.custom.input_schema" in line and "are wrong" in line, line
+    assert all(w not in line for w in ("Tan", "Tuesday", "8am", "Ling")), line
+    assert line.startswith("plan.ai fault _Refused at ") and " | status 400 " in line, line
+    credit = "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."
+    same(_fault_line(_refusal(credit)).split(" | ")[1], "status 400 invalid_request_error: " + credit)
+
+@t
+def reason_takes_out_quoted_stretches_and_cuts_and_never_raises():
+    R = AI._reason
+    same(R('a "b c" d'), "a … d")
+    same(R("a 'b c' d"), "a … d")
+    same(R("a `b c` d"), "a … d")
+    same(R("a \u201cb c\u201d d"), "a … d")
+    same(R("a \u2018b c\u2019 d"), "a … d")
+    same(R('a "b c'), "a …")                                  # never closes: takes the rest
+    same(R("a 'b c"), "a …")
+    same(R("it don't matter, the teachers' rooms are fine"), "it don't matter, the teachers' rooms are fine")
+    same(R('"all of it"'), "…")
+    same(R('"x" and "y"'), "… and …")
+    same(R("\"'\"nested'\" tail"), "…nested'…")
+    same(R("'a' 'b"), "… …")
+    same(R("a\nb\t\tc\r\n  d\x00e"), "a b c d e")
+    same(R(""), "")
+    same(R('"""'), "……")
+    long = R("word " * 200)
+    same((len(long), long[-1]), (300, "\u2026"))
+    same(R("x" * 300), "x" * 300)
+    same(R("x" * 301), "x" * 299 + "\u2026")
+    same(len(R("y" * 100000)), 300)
+    for bad in (5, None, {"a": 1}, ["x"], b"x", True, 1.5):
+        same(R(bad), "")
+
+@t
+def only_a_4xx_status_error_gets_a_reason_and_no_fault_makes_fault_raise():
+    class Raising(_Refused):
+        @property
+        def body(self): raise RuntimeError("body read")
+        @body.setter
+        def body(self, v): pass
+    class RaisingStatus(Exception):
+        @property
+        def status_code(self): raise RuntimeError("no")
+    why = "Rate limit, try later"
+    five = _fault_line(_refusal(why, code=500))
+    no_code = _fault_line(RuntimeError(why))
+    boolean = _fault_line(_refusal(why, code=True))
+    textual = _fault_line(_refusal(why, code="400"))
+    lst = _fault_line(_Refused(400, [1, 2]))
+    for l in (five, no_code, boolean, textual):
+        assert " | " not in l and "Rate" not in l, l
+    assert lst.endswith(" | status 400"), lst
+    assert _fault_line(_refusal(why, code=429)).endswith(" | status 429 invalid_request_error: " + why)
+    assert _fault_line(_refusal(why, code=399)).count(" | ") == 0 and _fault_line(_refusal(why, code=500)).count(" | ") == 0
+    l = _fault_line(Raising(400))
+    assert l.startswith("plan.ai fault Raising at ") and " | " not in l and "body read" not in l, l   # at worst the old line
+    l = _fault_line(RaisingStatus("secret"))
+    assert " | " not in l and "secret" not in l, l
+    same(_fault_line(_Refused(404, message="no such model")).split(" | ")[1], "status 404: no such model")
+    same(_fault_line(_Refused(401, message=7)).split(" | ")[1], "status 401")
+    same(_fault_line(_Refused(400, {"error": {"type": "bad type!", "message": why}})).split(" | ")[1], "status 400: " + why)
+    same(_fault_line(_Refused(400, {"error": {"type": "a" * 41, "message": why}})).split(" | ")[1], "status 400: " + why)
+    same(_fault_line(_Refused(400, {"error": {"type": "a" * 40, "message": "m"}})).split(" | ")[1], "status 400 " + "a" * 40 + ": m")
+    same(_fault_line(_Refused(400, {"error": "just text"})).split(" | ")[1], "status 400")
+    same(_fault_line(_Refused(400, {"error": {"type": "invalid_request_error"}})).split(" | ")[1], "status 400 invalid_request_error")
+    same(_fault_line(_refusal('"only a quote"')).split(" | ")[1], "status 400 invalid_request_error: …")
+
+@t
+def the_list_reader_logs_the_same_safe_line_and_still_raises_its_own_sentence():
+    h = logged()
+    msg = "papers.0.label: value 'Ms Tan Wei Ling' is wrong"
+    def refused(text, facts): raise _refusal(msg)
+    try:
+        raises(AI.ReadFailed, lambda: AI.read_piece("a line", dict(levels=[], subjects={}, year=2027), call=refused), AI.READ_FAILED)
+    finally:
+        logging.getLogger("plan").removeHandler(h)
+    assert len(h.lines) == 1 and "status 400 invalid_request_error: papers.0.label: value … is wrong" in h.lines[0], h.lines
+    assert "Tan" not in h.lines[0]
+
 print(f"{COUNT} plan tests passed")
