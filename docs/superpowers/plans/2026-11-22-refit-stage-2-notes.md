@@ -1,6 +1,6 @@
 # Re-fit (stage 2 of saved versions and re-fit): decisions made while building, and what was left
 
-From the build ledger of `2026-11-22-refit-stage-2.md` (design: `docs/superpowers/specs/2026-11-22-saved-versions-and-refit-design.md`, feature 3). Built on branch refit-1, with `origin/main` (be22d11) merged in before the final review.
+From the build ledger of `2026-11-22-refit-stage-2.md` (design: `docs/superpowers/specs/2026-11-22-saved-versions-and-refit-design.md`, feature 3). Built on branch refit-1, with `origin/main` (be22d11) merged in before the final review, and again (19ac240, accounts stage 2 with Put back) after it: one conflict, the two import lines of `app.py`, both sides kept. That merge changes none of the re-fit's files, and a re-fit's history line (kind `draft`) is not something Put back acts on.
 
 ## What it does
 
@@ -96,7 +96,7 @@ Left as they are, by ruling:
 
 ## Suites
 
-On the code of the final fix wave (with main merged in), each on its own, all passing: the 28 Python suites (`tests/smoke.py` 102 checks, `tests/test_refit.py` 166, `test_board` 58, `test_versions` 44, `test_routes` 18, `test_fixes` 65, `test_helper` 20 and the 21 others), the 17 `node tests/*.test.js` files, and `node --check` on the 28 scripts of `static/`. `tests/test_sync.py` failed once on its own one-second timing check while the machine was busy and passed when run again; this branch does not touch it.
+Each on its own, all passing, on the code of the final fix wave and again on the branch with today's main merged in: the 29 Python scripts (`tests/smoke.py` 102 checks, `tests/test_refit.py` 166, `test_board` 58, `test_versions` 44, `test_routes` 18, `test_fixes` 65, `test_helper` 20, main's new `test_putback` 37 and the others), the 18 `node tests/*.test.js` files, and `node --check` on the 28 scripts of `static/`. In one earlier run `tests/test_sync.py` failed on its own one-second timing check while the machine was busy and passed when run again; this branch does not touch it.
 
 ## Deferred small points
 
