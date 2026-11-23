@@ -324,6 +324,8 @@ GUARDS = {
     "relief_web.today": ('relief',),
     "relief_web.approve": ('relief',),
     "relief_web.approve_all": ('relief',),
+    "relief_web.send_out": ('relief',),
+    "relief_web.send_out_all": ('relief',),
     "relief_web.change": ('relief',),
     "relief_web.cover_free": ('relief',),
     "relief_web.split": ('relief',),
@@ -626,6 +628,7 @@ RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
     ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
     ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),
     ("POST", "/api/relief/today/remind"), ("GET", "/api/relief/summary"),
+    ("POST", f"/api/relief/absences/{_X}/covers/{_K}/send-out"), ("POST", "/api/relief/today/send-out"),
     ("GET", f"/api/relief/load/{urllib.parse.quote(TINA)}"), ("GET", "/api/relief/load.csv"))})
 
 @t

@@ -1648,7 +1648,7 @@ def rt(f):
         store.published = old; FL.SYNC = False; FL.ON = False; PK.CALL = None; PK._seen.clear()
 
 ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
-       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked"}
+       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out"}
 
 @rt
 def today_lists_covers_in_time_order_with_counts_and_no_reason():
@@ -1665,12 +1665,13 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     rows = got["rows"]
     assert [(r["p"], r["absent"]) for r in rows] == [(0, SAM), (2, EVE), (2, RUTH), (5, EVE), (6, RUTH), (9, SAM)], rows
     assert all(set(r) == ROW for r in rows), [set(r) ^ ROW for r in rows]
-    assert got["counts"] == dict(need=6, waiting=1, approved=2, acknowledged=0, change=0, nobody=0, open=3), got["counts"]
+    assert got["counts"] == dict(need=6, waiting=1, approved=0, unsent=2, held=0, acknowledged=0, change=0, nobody=0, open=3), got["counts"]
     r5 = rows[3]
     assert r5 == dict(id=i, ckey=K5, key=K5, split=False, absent=EVE, classes=["1A"], subject="Science", group="", room="R1", p=5, n=2,
                       start="10:30", end="11:30", work_set=True, state="approved",
                       pick=dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct."), approved=dict(by=TEAMER, at=NOW),
-                      ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM), stopped="", duty="", told=None, linked=False), r5
+                      ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM), stopped="", duty="", told=None, linked=False,
+                      out="unsent", goes_at=None, sent_out=None), r5
     r2, r6 = rows[1], rows[4]
     assert (r2["state"], r2["pick"]["who"], r2["pick"]["by"], r2["stale"], r2["over_now"], r2["work_set"]) == ("approved", FLEX, "team", False, True, False), r2
     assert (r6["id"], r6["state"], r6["pick"], r6["approved"], r6["over_now"], r6["warn"]) == (
@@ -1699,7 +1700,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     got = ok(team.get("/api/relief/today?date=2026-10-13"))
     assert [r["state"] for r in got["rows"] if r["id"] == j] == ["cancelled", "cancelled"] and got["counts"]["need"] == 4, got["counts"]
     assert ok(team.get("/api/relief/today")) == dict(date="2026-10-12", filling=False, rows=[], telegram=False,
-                                                    counts=dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0))
+                                                    counts=dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0))
     no(team.get("/api/relief/today?date=13/10/2026"), 400, "Choose the dates again.")
 
 OVER_ONLY = "Only teachers over a limit are free then: choose one yourself."
@@ -1723,7 +1724,8 @@ TEAM_ROUTES = lambda i: [("GET", "/api/relief/today?date=2026-10-13", None), ("P
                          ("POST", "/api/relief/today/approve-all", dict(date="2026-10-13")), ("PUT", cover_url(i, K5, "relief"), dict(relief=MAYA)),
                          ("GET", cover_url(i, K5, "free"), None), ("POST", lesson_url(i, K2, "split"), dict(at=3)), ("POST", lesson_url(i, K2, "join"), None),
                          ("POST", cover_url(i, K5, "keep"), None), ("POST", "/api/relief/today/fill", dict(date="2026-10-13")),
-                         ("GET", "/api/relief/load", None), ("GET", f"/api/relief/load/{q(SAM)}", None), ("GET", "/api/relief/load.csv", None)]
+                         ("GET", "/api/relief/load", None), ("GET", f"/api/relief/load/{q(SAM)}", None), ("GET", "/api/relief/load.csv", None),
+                         ("POST", cover_url(i, K5, "send-out"), dict(who=SAM)), ("POST", "/api/relief/today/send-out", dict(date="2026-10-13", covers=[]))]
 
 @rt
 def approve_routes_need_the_team():

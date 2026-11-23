@@ -4,7 +4,9 @@ queues them (relief/outbox.py sends them) and whether a queued one is still true
 Nothing is kept here: due works every message out from the absence records each time, under a key of its own, and a key is
 queued once (outbox.queue). So whatever restarts, however often and from wherever the sweep runs, nothing is sent twice and
 nothing is missed. due is pure (it is given all it needs). The keys, {name} at the end of a message to several people:
-relief:{absent}:{ckey}:{approved.at} to the relief teacher, once approved and while the lesson is not over (by the absent
+relief:{absent}:{ckey}:{approved.at} to the relief teacher, once approved, sent out and its time has come (cover.reached:
+made by the sweep from the record as it is then, never queued early; one sent out outside school hours is held until the
+earliest send-out time, and an approval from before Send out counts as sent out at once), while the lesson is not over (by the absent
 teacher's name and the cover key, not the absence's id: an exam's takeover moves a cover to another absence, and it is the
 same relief then; relief_key and _relief_key_for say what happens when two people were approved in one second);
 gone:{relief key} or moved:{relief key}, one of them once, to a person told of a relief (its message, or a reminder of it, sent
@@ -416,7 +418,7 @@ def _officer(w, r):
 def _of_cover(w, r, x, c, ckey):
     """what one cover (its lesson neither over nor stopped) has to say"""
     s = _cover.state(r, x, c)
-    if s == "approved": yield from _relief(w, r, x, c, ckey)
+    if s == "approved" and _cover.reached(r, x, c, w.now, w.settings, w.pub): yield from _relief(w, r, x, c, ckey)   # made once it goes, never early
     if s == "change": yield from _ask(w, r, x, c, ckey)
     yield from _kept(w, r, x, c, ckey)
 

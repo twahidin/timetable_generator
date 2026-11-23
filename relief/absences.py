@@ -29,7 +29,7 @@ IS_SPLIT = "This lesson is split: the relief team chooses for each part."
 NO_LESSONS = "There are no lessons to cover in that time."
 TOO_MANY = "A lesson can have at most 5 files."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
-COVER = ("relief", "relief_by", "pick", "approved", "ack", "change", "history", "parts")     # a lesson's cover (relief.cover), moved whole
+COVER = ("relief", "relief_by", "pick", "approved", "sent_out", "ack", "change", "history", "parts")     # a lesson's cover (relief.cover), moved whole
 
 
 def _path(id):

@@ -1514,7 +1514,7 @@ def todays_page_and_the_lists_show_a_stopped_lesson():
         j = _plan(DANIEL)["id"]
         team = _relief_team()
         got = ok(team.get("/api/relief/today?date=" + ISO))
-        assert (got["counts"]["need"], got["counts"]["approved"], got["counts"]["open"]) == (2, 1, 1), got["counts"]
+        assert (got["counts"]["need"], got["counts"]["approved"], got["counts"]["unsent"], got["counts"]["open"]) == (2, 0, 1, 1), got["counts"]   # approved, not sent out
         _exam(duty_names=(IVAN,))
         got = ok(team.get("/api/relief/today?date=" + ISO))
         row = next(v for v in got["rows"] if v["ckey"] == CKEY)

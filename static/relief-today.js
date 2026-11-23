@@ -2,23 +2,26 @@
 /* Today (/relief#today), for the relief team (me.can_team). Every lesson that needs relief on a date (today until another
    is chosen), from /api/relief/today, one row a cover (each part of a split lesson its own row), in time order: the
    periods and times, the class and subject, the room, the absent teacher and whether work is set, the relief teacher with
-   who picked them and why, and the state in plain words. Buttons: Approve; Choose or Change, which opens the "free then"
-   list (Relief.freeList, drawn as Plan relief's) and approves the one chosen at once; Split (a cover of two periods or
+   who picked them and why, and the state in plain words. Buttons: Approve; Send out (an approved relief not sent out yet:
+   nothing reaches its teacher until it is, and one sent out outside school hours goes at the earliest send-out time); Choose
+   or Change, which opens the "free then" list (Relief.freeList, drawn as Plan relief's) and approves the one chosen at once; Split (a cover of two periods or
    more that is not approved: the person chooses after which period); Join again (a split lesson none of whose parts is
-   approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting
-   and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
+   approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting,
+   Send out all approved and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
    this tab is on screen. After every action the day is read again; a refusal shows the server's sentence beside its row.
-   Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each): the server
+   Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each); Send out and Send
+   out all the same, with the approval shown ({id, ckey, who, approved_at}): the server
    refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
    re-read shows the new one. A lesson an approved exam or event stops is shown as "Not happening", with why, out of the
    counts and with no buttons; the teacher of a backup is in school, so the row says which duty they are on. A row is known by its absence id and cover key together (two absent co-teachers of one
    lesson share a cover key).
    While the bot is connected (telegram in the answer; nothing of this shows while it is not): an approved row says what was sent
-   on Telegram (told) or that its teacher is not there (linked); Remind on a row, for whoever can be reached, and Remind all not
+   on Telegram (told) or that its teacher is not there (linked); Remind on a row, for whoever can be reached once the relief has
+   reached them (sentOut: a row's out, or "sent" for an approved row of an answer without it), and Remind all not
    acknowledged, first of the buttons at the top (its place is kept when it is not there, so that no other button moves under the
    pointer), which answers above the rows (both only while the day they were pressed on is shown). While a row says
-   "Being sent…" the day is read again every 3 seconds, 5 times at most, only on screen; so it is for a row a step was taken on here,
-   until its teacher is told (a message is made after the step that asks for it). What came of it is said in a live line of its own
+   "Being sent…" the day is read again every 3 seconds, 5 times at most, only on screen; so it is for a row sent out or reminded here
+   (not one only approved), until its teacher is told (a message is made after the step that asks for it). What came of it is said in a live line of its own
    too (tdSaid, not seen). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
@@ -50,10 +53,12 @@
 
   /* ---------------------------------------------------------------- Telegram */
   const bot = () => !!T.data && T.data.telegram === true;
-  const toRemind = () => (bot() ? rows().filter(r => r.state === "approved" && r.linked) : []);   /* approved, not acknowledged, and can be reached */
+  /* "unsent" | "held" | "sent" (it has reached its teacher) for an approved row, null for the others; a row of an answer without out: as before, "sent" */
+  const sentOut = r => (typeof r.out === "string" ? r.out : r.out === null ? null : SENT.includes(r.state) ? "sent" : null);
+  const toRemind = () => (bot() ? rows().filter(r => r.state === "approved" && r.linked && sentOut(r) === "sent") : []);   /* approved, reached them, not acknowledged, and can be reached */
   const isWrong = r => r.linked && !!r.told && (r.told.state === "unsure" || r.told.state === "failed");
   const untold = r => !r.told || r.told.state === "dropped";
-  const isComing = r => r.state === "approved" && r.linked && (untold(r) ? T.follow.has(rid(r)) : r.told.state === "queued");   /* being sent, or about to be */
+  const isComing = r => r.state === "approved" && r.linked && sentOut(r) === "sent" && (untold(r) ? T.follow.has(rid(r)) : r.told.state === "queued");   /* being sent, or about to be */
   const again = () => !!T.data && (T.data.filling || (bot() && T.reads < READS && rows().some(isComing)));   /* the day is to be read again by itself */
 
   function told(r) {   /* an approved row's line: what its teacher was sent */
@@ -109,10 +114,11 @@
     const k = rid(r), off = T.busy.has(k) || T.all ? " disabled" : "", out = [];
     const b = (act, label, cls, more) => `<button type="button" class="small${cls ? " " + cls : ""}" data-td="${act}"${more || ""}${off}>${esc(label)}</button>`;
     if (r.state === "waiting" && !r.stale) out.push(b("approve", "Approve", "primary"));
+    if (r.state === "approved" && sentOut(r) === "unsent" && !r.stale) out.push(b("send-out", "Send out", "primary"));
     if (r.state === "change" && r.change && r.change.pick && !r.change.stale) out.push(b("approve", "Approve the new pick", "primary"));
     const listOpen = T.open === k;
     out.push(b(listOpen ? "close" : "free", listOpen ? "Close the list" : r.state === "open" ? "Choose" : "Change", "", ` aria-expanded="${listOpen ? "true" : "false"}"`));
-    if (bot() && r.state === "approved" && r.linked) out.push(b("remind", "Remind"));   /* after Change, where the focus goes when Approve is gone */
+    if (bot() && r.state === "approved" && r.linked && sentOut(r) === "sent") out.push(b("remind", "Remind"));   /* after Change, where the focus goes when Approve is gone */
     if (r.state === "change" && r.pick) out.push(b("keep", `Keep ${r.pick.who}`));
     if (Number(r.n) >= 2 && (r.state === "open" || r.state === "waiting")) {
       const on = T.split === k;
@@ -175,10 +181,11 @@
   }
 
   function paintActs() {
-    const c = (T.data && T.data.counts) || {}, w = Number(c.waiting) || 0, off = !T.data || past() || T.all;
+    const c = (T.data && T.data.counts) || {}, w = Number(c.waiting) || 0, u = Number(c.unsent) || 0, off = !T.data || past() || T.all;
     const all = "Remind all not acknowledged";
     const first = toRemind().length ? `<button type="button" data-td="remind-all"${off || T.busy.size ? " disabled" : ""}>${all}</button> ` : T.bot ? `<span class="td-gap" aria-hidden="true">${all}</span> ` : "";
     const html = `${first}<button type="button" class="primary" data-td="all"${off || !w ? " disabled" : ""}>${esc(w ? `Approve all ${w} waiting` : "Approve all waiting")}</button>
+      <button type="button" class="primary" data-td="send-all"${off || !u ? " disabled" : ""}>${esc(u ? `Send out ${u} approved` : "Send out approved")}</button>
       <button type="button" data-td="fill"${off ? " disabled" : ""}>Fill now</button>
       <button type="button" class="small" data-td="reload"${T.loading ? " disabled" : ""}>${T.loading ? "Reading…" : "Refresh"}</button>`;
     if (html === T.acts) return;
@@ -257,7 +264,7 @@
     const was = new Set(rows().filter(isComing).map(rid));
     T.err = null; T.data = res.data; T.bot = bot();
     T.said = !bot() ? "" : rows().filter(r => was.has(rid(r)) && r.state === "approved" && !isComing(r)).map(r => `${r.pick ? `${r.pick.who}, ` : ""}${lessonName(r)}: ${told(r)}`).join(". ");
-    for (const k of [...T.follow]) { const r = findRow(k); if (!r || r.state !== "approved" || !untold(r)) T.follow.delete(k); }
+    for (const k of [...T.follow]) { const r = findRow(k); if (!r || r.state !== "approved" || sentOut(r) !== "sent" || !untold(r)) T.follow.delete(k); }   /* held: it goes later, nothing to wait for */
     for (const [k, m] of [...T.msg]) if (!findRow(k)) { T.msg.delete(k); T.top.push(m); }   /* its row is gone (split, joined): said above the rows */
     const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
     if (T.open && !live(T.open)) T.open = null;
@@ -267,14 +274,14 @@
     schedule();
   }
 
-  async function act(k, method, url, body, done, here) {   /* one step on one row; then the day is read again. done(answer): what is said, or {text, bad}; here: said only while the day it was asked on is shown */
+  async function act(k, method, url, body, done, here, follow = true) {   /* one step on one row; then the day is read again. done(answer): what is said, or {text, bad}; here: said only while the day it was asked on is shown; follow: its teacher is to be told now (not after Approve or Change) */
     const f = focusNow(), date = T.date;
     T.busy.add(k); T.msg.delete(k); if (bot()) paintActs(); paintRows();
     const res = await R.api(url, R.json(method, body));
     T.busy.delete(k);
     if (here && T.date !== date) { paint(); return; }
     if (!res.ok) T.msg.set(k, { text: res.error, bad: true, status: res.status });
-    else { const m = done ? done(res.data) : ""; if (m) T.msg.set(k, typeof m === "string" ? { text: m, bad: false } : m); T.follow.add(k); }
+    else { const m = done ? done(res.data) : ""; if (m) T.msg.set(k, typeof m === "string" ? { text: m, bad: false } : m); if (follow) T.follow.add(k); }
     await load();
     if (f && !focusNow()) refocus(f, true);
   }
@@ -305,8 +312,8 @@
     if (s) s.busy = true;
     await act(k, "PUT", `/api/relief/absences/${enc(r.id)}/covers/${enc(r.ckey)}/relief`, { relief: name }, () => {
       T.open = null; T.free.delete(k);
-      return `${name} chosen and approved: they see it in Reliefs I'm covering.`;
-    });
+      return `${name} chosen and approved: press Send out to tell them.`;
+    }, false, false);
     if (s) s.busy = false;
   }
 
@@ -319,13 +326,33 @@
     if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
     else {
       const got = res.data || {}, skipped = Array.isArray(got.skipped) ? got.skipped : [];
-      covers.forEach(o => T.follow.add(rid(o)));
       T.top = [{ text: `Approved ${R.plural(Number(got.approved) || 0, "relief")}.${skipped.length ? ` Not approved: ${skipped.length}.` : ""}`, bad: false }];
-      for (const s of skipped) {   /* a skipped one is matched by its absence id and cover key */
-        const r = before.find(o => o.id === s.id && o.ckey === s.ckey);
-        T.top.push({ text: `${r ? `${lessonName(r)}, ${s.name}` : s.name}: ${s.why}`, bad: true });
-        if (r) T.msg.set(rid(r), { text: s.why, bad: true });
-      }
+      saySkipped(before, skipped);
+    }
+    await load();
+  }
+
+  function saySkipped(before, skipped) {   /* a line above the rows for each skipped one, and its sentence beside its row: matched by its absence id and cover key */
+    for (const s of skipped) {
+      const r = before.find(o => o.id === s.id && o.ckey === s.ckey);
+      T.top.push({ text: `${r ? `${lessonName(r)}, ${s.name}` : s.name}: ${s.why}`, bad: true });
+      if (r) T.msg.set(rid(r), { text: s.why, bad: true });
+    }
+  }
+
+  async function sendAll() {   /* Send out all approved: the approved rows not sent out that the page shows, as it shows them */
+    if (T.all || !T.data) return;
+    const before = rows(), date = T.date, list = before.filter(o => o.state === "approved" && sentOut(o) === "unsent" && o.pick && o.pick.who);
+    const covers = list.map(o => ({ id: o.id, ckey: o.ckey, who: o.pick.who, approved_at: (o.approved && o.approved.at) || null }));
+    T.all = true; T.top = []; paint();
+    const res = await R.api("/api/relief/today/send-out", R.json("POST", { date, covers }));
+    T.all = false;
+    if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
+    else {
+      const got = res.data || {}, skipped = Array.isArray(got.skipped) ? got.skipped : [], at = String(got.at || "").slice(11, 16);
+      covers.forEach(o => T.follow.add(rid(o)));
+      T.top = [{ text: `Sent out ${R.plural(Number(got.sent) || 0, "relief")} for ${day(date)}.${/^\d{2}:\d{2}$/.test(at) ? ` They will be sent at ${at}.` : ""}`, bad: false }];
+      saySkipped(before, skipped);
     }
     await load();
   }
@@ -386,6 +413,7 @@
       case "day": setDate(b.dataset.v === "tomorrow" ? RF.addDays(RF.today(), 1) : RF.today()); return;
       case "reload": T.err = null; load(); return;
       case "all": approveAll(); return;
+      case "send-all": sendAll(); return;
       case "fill": fillNow(); return;
       case "remind-all": remindAll(); return;
     }
@@ -395,9 +423,12 @@
     switch (a) {
       case "approve": {
         const who = (r.state === "change" ? r.change && r.change.pick && r.change.pick.who : r.pick && r.pick.who) || "";
-        act(k, "POST", `${cover}/approve`, { who }, () => `${who} approved: they see it in Reliefs I'm covering.`);   /* the name shown: refused if it changed */
+        act(k, "POST", `${cover}/approve`, { who }, () => `${who} approved: press Send out to tell them.`, false, false);   /* the name shown: refused if it changed */
         return;
       }
+      case "send-out":   /* the relief and the approval shown: refused if either changed */
+        act(k, "POST", `${cover}/send-out`, { who: (r.pick && r.pick.who) || "", approved_at: (r.approved && r.approved.at) || null }, () => "Sent out.");
+        return;
       case "free": openFree(k); return;
       case "close": case "pl-close": closeFree(k); return;
       case "pl-choose": choose(k, b.dataset.name || ""); return;
@@ -441,7 +472,7 @@
         <div class="td-counts" id="tdCounts"></div>
         <div id="tdTop" aria-live="polite"></div>
         <div id="tdRows"></div>
-        <div class="note">Nothing reaches a relief teacher until someone on the relief team approves it.</div></div>`;
+        <div class="note">Nothing reaches a relief teacher until someone on the relief team approves it and sends it out.</div></div>`;
       pane.addEventListener("click", onClick);
       pane.addEventListener("change", onChange);
       pane.addEventListener("keydown", onKey);
