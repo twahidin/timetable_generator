@@ -379,20 +379,26 @@ def _mine(r, x, c, me):
     if state(r, x, c) not in ("approved", "acknowledged", "change") or c.get("relief") != me: raise ValueError(NOT_YOURS_COVER)
 
 
-def acknowledge(id, ckey, me, links=None):
-    """the approved relief teacher acknowledges (once; after asking to change, it takes the relief after all)"""
+def acknowledge_once(id, ckey, me, links=None):
+    """the approved relief teacher acknowledges (once; after asking to change, it takes the relief after all) -> (the record,
+    whether this call did it: False when it was acknowledged already, on the page or on Telegram, and nothing was saved)"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
         _mine(r, x, c, me)
         _happens(links, x)
-        if state(r, x, c) == "acknowledged": return r
+        if state(r, x, c) == "acknowledged": return r, False
         now = _absences._now()
         new = (c.get("change") or {}).get("pick")
         if new: _log(c, "dropped", new["who"], me, now)                     # the request's new pick is not needed now
         c.update(ack=dict(at=now), change=None)
         _log(c, "acknowledged", me, me, now)
         _absences._save(r)
-    return r
+    return r, True
+
+
+def acknowledge(id, ckey, me, links=None):
+    """as acknowledge_once -> the record"""
+    return acknowledge_once(id, ckey, me, links=links)[0]
 
 
 def ask_change(id, ckey, why, me, links=None):

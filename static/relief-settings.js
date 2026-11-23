@@ -1,6 +1,7 @@
 "use strict";
 /* Relief settings (/relief/settings) for the timetable committee and the relief team: one form, one Save (at the top
-   and the bottom). The form is kept in S.f; a refused save shows the server's sentence and keeps everything typed. */
+   and the bottom). The form is kept in S.f; a refused save shows the server's sentence and keeps everything typed.
+   Under it, apart from the form and its Save, the Telegram card (TG). */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -147,7 +148,7 @@
       ${setting("Flexi Adjunct Teachers", "", fatRole())}
       ${setting("Relief rules", `<span>The AI follows these in order and quotes them in its reasons.</span>`, rules())}
       ${setting("Checked limits", `<span>The app checks these itself.</span>`, limits())}
-      ${setting("Reporting officer", "", `Is told when someone who names them asks for relief.`)}
+      ${setting("Reporting officer", "", `Is told on Telegram, when they have linked it, when someone who names them asks for relief.`)}
       ${setting("Times", "", times())}
       ${setting("School calendar", `<span>So the app knows which day of the timetable each date is.</span>`, calendar())}
       ${d.can_codes ? setting("Personal codes", "", codes()) : ""}
@@ -277,9 +278,166 @@
     links(); render();
   }
 
+  /* ================================================================ Telegram */
+  /* The bot, for whoever may save the settings (a 401 or a 403 shows nothing): whether its token is set and it is connected, who is
+     linked and who is not, from /api/relief/telegram/admin. Connect, Disconnect and Unlink are done at once, the last two after a
+     question, and each answers with how things are now; after a refusal they are read again, under the server's sentence. The card
+     draws itself only, and of itself only what changes: nothing typed in the form is lost, and the focus and an open list stay. */
+  const WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const TG_URL = "/api/relief/telegram/", UNREACHABLE = "Could not reach the server. Check the connection and try again.";
+  const NO_TOKEN = "Not set up yet. The bot's token goes in Railway's variables (TELEGRAM_BOT_TOKEN) of the copy the school uses; then come back here and press Connect. How to make the bot is in docs/DEPLOY.md.";
+  const NOT_YET = "The token is set. Connect points Telegram at this copy of the app.";
+  const ONE_COPY = "The bot works on one copy of the app only. Connect it on the copy the school uses.";
+  /* data: how things are, as last read (null: nothing shows, or err does); ask: {what: "disconnect"} or {what: "unlink", name} while
+     it is asked; busy: a step is on its way; msg: what the last one answered; drawn: part of the card -> its HTML */
+  const TG = { box: $("#telegram"), data: null, err: null, ask: null, busy: false, msg: null, drawn: {} };
+
+  const tgRows = v => (Array.isArray(v) ? v : []);
+
+  function dayOf(iso) {   /* "Mon 12 Oct" */
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+    return m ? `${WEEK[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()]} ${+m[3]} ${MONTHS[+m[2] - 1]}` : String(iso || "");
+  }
+
+  function tgButton(act, label, cls, name) {
+    return `<button type="button" class="${cls}" data-tg="${act}"${name === undefined ? "" : ` data-name="${esc(name)}"`}${TG.busy ? " disabled" : ""}>${esc(label)}</button>`;
+  }
+
+  function tgAsk(q, act, label, name) {
+    return `<div class="ask" role="group" aria-label="${esc(q)}"><span class="q">${esc(q)}</span>${tgButton(act, label, "small danger", name)}${tgButton("keep", "Keep it", "small")}</div>`;
+  }
+
+  function tgSay(m) {   /* signed out: a way to sign in again without losing this page */
+    const again = m.status === 401 ? ` <a href="/login" target="_blank" rel="noopener">Sign in again (opens a new tab)</a>, then try once more.` : "";
+    return `<span class="msg ${m.bad ? "bad" : "ok"}">${esc(m.text)}${again}</span>`;
+  }
+
+  function tgState(d) {
+    if (!d.connected) return esc(d.token_set ? NOT_YET : NO_TOKEN);
+    return `<b>${esc(`Connected as @${d.bot}${d.at ? ` since ${dayOf(d.at)}` : ""}${d.base ? `: ${d.base}` : ""}`)}</b>`;
+  }
+
+  function tgCount(d) {
+    const people = Number(d.people) || 0;
+    return d.connected ? esc(`${people - tgRows(d.not_linked).length} of ${people} linked`) : "";
+  }
+
+  function tgActs(d) {
+    if (!d.token_set) return "";
+    if (!d.connected) return `<div class="codes">${tgButton("connect", "Connect the bot", "primary")}</div>`;
+    const ask = TG.ask && TG.ask.what === "disconnect";
+    return `<div class="codes">${tgButton("connect", "Connect again", "")}${ask ? "" : tgButton("ask-off", "Disconnect", "danger")}</div>`
+      + (ask ? tgAsk("Disconnect? Nobody gets messages until it is connected again.", "disconnect", "Disconnect") : "");
+  }
+
+  function tgLinked(x) {
+    const ask = TG.ask && TG.ask.what === "unlink" && TG.ask.name === x.name, about = [x.handle ? `@${x.handle}` : "", x.at ? `since ${dayOf(x.at)}` : ""].filter(Boolean).join(" · ");
+    return `<li><span class="who">${esc(x.name)} <span class="muted">${esc(about)}</span></span>${ask ? tgAsk(`Stop relief messages to ${x.name}?`, "unlink", "Unlink", x.name) : tgButton("ask", "Unlink", "small", x.name)}</li>`;
+  }
+
+  function tgLists(d) {
+    if (!d.connected) return "";
+    const open = new Set([...TG.box.querySelectorAll("details")].filter(x => x.open).map(x => x.dataset.k));
+    const list = (k, title, rows) => `<details data-k="${k}"${open.has(k) ? " open" : ""}><summary data-k="${k}">${esc(`${title} (${rows.length})`)}</summary><ul class="tg-${k}">${rows.join("") || `<li class="muted">Nobody.</li>`}</ul></details>`;
+    return list("no", "Not linked", tgRows(d.not_linked).map(n => `<li>${esc(n)}</li>`)) + list("yes", "Linked", tgRows(d.linked).map(tgLinked));
+  }
+
+  function tgPut(id, html) {
+    if ((TG.drawn[id] || "") !== html) $(`#${id}`, TG.box).innerHTML = TG.drawn[id] = html;
+  }
+
+  function tgFind(act, name) { return [...TG.box.querySelectorAll(`[data-tg="${act}"]`)].find(b => name === undefined || b.dataset.name === name); }
+
+  function tgPaint() {
+    const d = TG.data;
+    TG.box.hidden = !d && !TG.err;   /* an empty one is no region of the page */
+    if (TG.box.hidden) { TG.box.innerHTML = ""; TG.drawn = {}; return; }
+    if (!TG.drawn.card) {   /* live: the lines that change, each on its own, so that one is not said with another */
+      TG.drawn = { card: true };
+      TG.box.innerHTML = `<div class="card tg"><h2>Telegram</h2><div id="tgTop"><div id="tgPractice"></div><p class="tg-state" id="tgState" aria-live="polite"></p><p class="tg-state" id="tgCount" aria-live="polite"></p>
+        <div class="small muted" id="tgOne"></div></div><div id="tgActs"></div><div id="tgSay" aria-live="polite"></div><div id="tgLists"></div></div>`;
+    }
+    const a = document.activeElement, had = a && TG.box.contains(a) ? a : null;
+    tgPut("tgPractice", d && d.practice ? `<p class="notice">Practice mode: nothing is sent to Telegram.</p>` : "");
+    tgPut("tgState", d ? tgState(d) : tgSay(TG.err));
+    tgPut("tgCount", d ? tgCount(d) : "");
+    tgPut("tgOne", d && d.token_set ? esc(ONE_COPY) : "");
+    tgPut("tgActs", d ? tgActs(d) : `<div class="codes">${tgButton("reload", "Try again", "small")}</div>`);
+    tgPut("tgSay", TG.msg ? tgSay(TG.msg) : "");
+    tgPut("tgLists", d ? tgLists(d) : "");
+    if (!had || TG.box.contains(had)) return;
+    const now = had.dataset.tg ? tgFind(had.dataset.tg, had.dataset.name) : had.dataset.k ? $(`summary[data-k="${had.dataset.k}"]`, TG.box) : null;
+    if (now) now.focus({ preventScroll: true });
+  }
+
+  function tgFocus(...els) {   /* what had the focus is gone: the first of these there is. Focus that is somewhere stays there */
+    const a = document.activeElement, el = els.find(Boolean);
+    if (el && (!a || a === document.body)) el.focus({ preventScroll: true });
+  }
+
+  async function tgApi(path, body) {
+    let r, j = {};
+    try {
+      r = await fetch(TG_URL + path, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      j = await r.json().catch(() => ({}));
+    } catch (err) { return { ok: false, status: 0, error: UNREACHABLE }; }
+    return r.ok ? { ok: true, status: r.status, data: j } : { ok: false, status: r.status, error: (j && j.error) || "Something went wrong. Try again." };
+  }
+
+  function tgSet(d) {   /* how things are now; a question about what is no more goes */
+    TG.data = d;
+    if (TG.ask && !(d.connected && (TG.ask.what === "disconnect" || tgRows(d.linked).some(x => x.name === TG.ask.name)))) TG.ask = null;
+  }
+
+  async function tgRead() {
+    const r = await tgApi("admin");
+    TG.busy = false;
+    if (r.ok) tgSet(r.data);
+    else TG.err = r.status === 401 || r.status === 403 ? null : { text: r.error, bad: true };
+    tgPaint();
+  }
+
+  async function tgStep(path, body, said) {
+    TG.busy = true; TG.msg = null; tgPaint();
+    const r = await tgApi(path, body);
+    if (r.ok) { TG.ask = null; tgSet(r.data); TG.msg = said ? { text: said, bad: false } : null; }
+    else {
+      TG.msg = { text: r.error, bad: true, status: r.status };
+      const now = await tgApi("admin");
+      if (now.ok) tgSet(now.data);
+    }
+    TG.busy = false;
+    tgPaint();
+    tgFocus(tgFind("keep"), path === "unlink" && $(`summary[data-k="yes"]`, TG.box), tgFind("connect"));
+  }
+
+  function tgAsking(ask) {
+    const was = TG.ask;
+    TG.ask = ask; TG.msg = null; tgPaint();
+    tgFocus(ask ? tgFind("keep") : was && was.what === "unlink" ? tgFind("ask", was.name) : tgFind("ask-off"));
+  }
+
+  function tgClick(e) {
+    const b = e.target.closest("button[data-tg]");
+    if (!b || b.disabled) return;
+    switch (b.dataset.tg) {
+      case "reload": TG.busy = true; tgPaint(); tgRead().then(() => tgFocus(tgFind("reload"), tgFind("connect"))); return;
+      case "connect": tgStep("connect", {}, "Connected."); return;
+      case "ask-off": tgAsking({ what: "disconnect" }); return;
+      case "ask": tgAsking({ what: "unlink", name: b.dataset.name }); return;
+      case "keep": tgAsking(null); return;
+      case "disconnect": tgStep("disconnect", {}); return;
+      case "unlink": tgStep("unlink", { name: b.dataset.name }); return;
+    }
+  }
+
+  TG.box.addEventListener("click", tgClick);
+  TG.box.addEventListener("keydown", e => { if (e.key === "Escape" && TG.ask && !TG.busy) { e.preventDefault(); tgAsking(null); } });
+
   document.addEventListener("click", onClick);
   document.addEventListener("input", onInput);
   document.addEventListener("keydown", onKey);
   window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
   start();
+  tgRead();
 })();

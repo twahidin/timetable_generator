@@ -124,6 +124,41 @@ var Draft = (function () {
   /* the word a choice question uses for the field the name was meant for */
   function choiceWord(field) { return { classes: "class", subject: "subject", teacher: "teacher", new_teacher: "teacher", new_room: "room" }[field] || "name"; }
 
-  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, others: others, answerText: answerText, sideText: sideText };
+  /* Re-fit's words (the window on step 8). n changes -> the plural the sentences use */
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  var num = function (a, b) { return a - b; };
+  /* the totals line of a list: "3 lessons move, 1 to another day · Critical 2 → 0 · Warnings 4 → 3 · 2 typed rules to check again (T2, T5)"; the typed part only when there are any,
+     and the numbers of the rules named up to eight */
+  function refitTotals(t) {
+    if (!t || !t.critical || !t.warnings) return "";
+    var typed = (t.typed || []).map(Number).sort(num), out = [plural(t.moved, "lesson moves", "lessons move") + ", " + t.another_day + " to another day", "Critical " + t.critical[0] + " → " + t.critical[1], "Warnings " + t.warnings[0] + " → " + t.warnings[1]];
+    if (typed.length) out.push(plural(typed.length, "typed rule", "typed rules") + " to check again" + (typed.length <= 8 ? " (" + typed.map(function (n) { return "T" + n; }).join(", ") + ")" : ""));
+    return out.join(" · ");
+  }
+  /* whether a count after the list is higher than before */
+  function refitRise(t) { return !!t && !!t.critical && !!t.warnings && (t.critical[1] > t.critical[0] || t.warnings[1] > t.warnings[0]); }
+  function refitApplyWord(n) { return n === 1 ? "Apply 1 change" : "Apply all " + n + " changes"; }
+  function refitKeeps(n) { return "The app keeps a version “Before re-fit …” first and applies " + (n === 1 ? "the change" : "all " + n + " changes as one") + "; Undo takes the whole re-fit back."; }
+  function refitDone(n, kept) { return "Re-fit applied: " + plural(n, "change", "changes") + "." + (kept ? " The draft before is kept as version “" + kept + "”." : ""); }
+  function refitRunning(done, total) { return !total ? "Starting…" : done >= total ? "Checking the list…" : "Looking at " + done + " of " + total + "…"; }
+  /* a step's tags as chips [{text, title, kind: "day" | "typed" | "plain"}]: its "check T{n} again" tags are one chip, at the place of the first (up to four numbers named; more are counted, the numbers in its title) */
+  function refitTags(tags) {
+    var out = [], typed = null;
+    (tags || []).forEach(function (g) {
+      var m = /^check T(\d+) again$/.exec(g);
+      if (!m) { out.push({ text: g, title: "", kind: g === "another day" ? "day" : "plain" }); return; }
+      if (!typed) { typed = { nums: [], chip: { text: "", title: "", kind: "typed" } }; out.push(typed.chip); }
+      if (typed.nums.indexOf(Number(m[1])) < 0) typed.nums.push(Number(m[1]));
+    });
+    if (typed) {
+      var n = typed.nums.sort(num), t = n.map(function (x) { return "T" + x; });
+      typed.chip.text = n.length <= 4 ? "check " + t.join(", ") + " again" : "check " + n.length + " typed rules again"; typed.chip.title = n.length <= 4 ? "" : t.join(", ");
+    }
+    return out;
+  }
+  /* the list of what does not fit: the first twelve, and the rest */
+  function refitSplit(list) { var l = list || []; return { head: l.slice(0, 12), rest: l.slice(12) }; }
+
+  return { refitTotals: refitTotals, refitRise: refitRise, refitApplyWord: refitApplyWord, refitKeeps: refitKeeps, refitDone: refitDone, refitRunning: refitRunning, refitTags: refitTags, refitSplit: refitSplit, askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, others: others, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;

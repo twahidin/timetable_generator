@@ -166,4 +166,50 @@ t("follow: a settled clash is not followed onto a lesson waiting in Not placed",
   assert.strictEqual(Draft.follow(was, [Object.assign(K("clash:notplaced:7", "clash", { cls: "1A", id: 7 }), { crit: "notplaced" })]), null);
   assert.deepEqual(Draft.follow(was, [Object.assign(K("clash:notplaced:7", "clash", { cls: "1A", id: 7 }), { crit: "notplaced" }), Object.assign(K("clash:Class clash: 1A on Tue", "clash", { cls: "1A" }), { crit: "class" })]), { key: "clash:Class clash: 1A on Tue", how: "changed" });
 });
+t("refitTotals: the totals line, with singulars and the typed rules", () => {
+  const T = (o) => Object.assign({ changes: 3, moved: 3, another_day: 1, critical: [2, 0], warnings: [4, 3], typed: [] }, o);
+  assert.strictEqual(Draft.refitTotals(T({ typed: [5, 2] })), "3 lessons move, 1 to another day · Critical 2 → 0 · Warnings 4 → 3 · 2 typed rules to check again (T2, T5)");
+  assert.strictEqual(Draft.refitTotals(T({ moved: 1, another_day: 0 })), "1 lesson moves, 0 to another day · Critical 2 → 0 · Warnings 4 → 3");   // no typed part when there are none
+  assert.strictEqual(Draft.refitTotals(T({ typed: [2] })).split(" · ")[3], "1 typed rule to check again (T2)");
+  assert.strictEqual(Draft.refitTotals(T({ typed: [1, 2, 3, 4, 5, 6, 7, 8] })).split(" · ")[3], "8 typed rules to check again (T1, T2, T3, T4, T5, T6, T7, T8)");   // up to eight are named
+  assert.strictEqual(Draft.refitTotals(T({ typed: [1, 2, 3, 4, 5, 6, 7, 8, 9] })).split(" · ")[3], "9 typed rules to check again");
+  assert.strictEqual(Draft.refitTotals(T({ typed: [10, 9, 2] })).split(" · ")[3], "3 typed rules to check again (T2, T9, T10)");   // numerically, not as text
+  assert.strictEqual(Draft.refitTotals(T({ moved: 0, another_day: 0, critical: [0, 0], warnings: [1, 0] })), "0 lessons move, 0 to another day · Critical 0 → 0 · Warnings 1 → 0");
+  assert.strictEqual(Draft.refitTotals(null), ""); assert.strictEqual(Draft.refitTotals({}), "");
+});
+t("refitRise: a number that goes up", () => {
+  assert.strictEqual(Draft.refitRise({ critical: [1, 0], warnings: [3, 3] }), false);
+  assert.strictEqual(Draft.refitRise({ critical: [1, 2], warnings: [3, 3] }), true);
+  assert.strictEqual(Draft.refitRise({ critical: [1, 0], warnings: [3, 4] }), true);
+  assert.strictEqual(Draft.refitRise(null), false);
+});
+t("refitApplyWord, refitKeeps and refitDone: the words of the button, the footer and the toast", () => {
+  assert.strictEqual(Draft.refitApplyWord(4), "Apply all 4 changes"); assert.strictEqual(Draft.refitApplyWord(1), "Apply 1 change");
+  assert.strictEqual(Draft.refitKeeps(4), "The app keeps a version “Before re-fit …” first and applies all 4 changes as one; Undo takes the whole re-fit back.");
+  assert.strictEqual(Draft.refitKeeps(1), "The app keeps a version “Before re-fit …” first and applies the change; Undo takes the whole re-fit back.");
+  assert.strictEqual(Draft.refitDone(4, "Before re-fit, 22 Nov 1.12 pm"), "Re-fit applied: 4 changes. The draft before is kept as version “Before re-fit, 22 Nov 1.12 pm”.");
+  assert.strictEqual(Draft.refitDone(1, null), "Re-fit applied: 1 change.");
+});
+t("refitRunning: what the window says while the job runs", () => {
+  assert.strictEqual(Draft.refitRunning(0, null), "Starting…"); assert.strictEqual(Draft.refitRunning(0, 0), "Starting…"); assert.strictEqual(Draft.refitRunning(undefined, undefined), "Starting…");
+  assert.strictEqual(Draft.refitRunning(0, 6), "Looking at 0 of 6…"); assert.strictEqual(Draft.refitRunning(3, 6), "Looking at 3 of 6…");
+  assert.strictEqual(Draft.refitRunning(6, 6), "Checking the list…");
+});
+t("refitTags: the typed rules of a step are one chip", () => {
+  assert.deepEqual(Draft.refitTags([]), []); assert.deepEqual(Draft.refitTags(null), []);
+  assert.deepEqual(Draft.refitTags(["another day", "no room"]), [{ text: "another day", title: "", kind: "day" }, { text: "no room", title: "", kind: "plain" }]);
+  assert.deepEqual(Draft.refitTags(["check T2 again"]), [{ text: "check T2 again", title: "", kind: "typed" }]);
+  assert.deepEqual(Draft.refitTags(["another day", "check T5 again", "no room", "check T2 again"]), [{ text: "another day", title: "", kind: "day" }, { text: "check T2, T5 again", title: "", kind: "typed" }, { text: "no room", title: "", kind: "plain" }]);
+  const four = Draft.refitTags([4, 3, 2, 1].map(n => `check T${n} again`)); assert.deepEqual(four, [{ text: "check T1, T2, T3, T4 again", title: "", kind: "typed" }]);
+  const many = Array.from({ length: 17 }, (_, i) => `check T${i + 1} again`), g = Draft.refitTags(many.concat(["another day"]));
+  assert.strictEqual(g.length, 2); assert.strictEqual(g[0].text, "check 17 typed rules again"); assert.strictEqual(g[0].kind, "typed"); assert.strictEqual(g[0].title, "T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17"); assert.strictEqual(g[1].text, "another day");
+  assert.strictEqual(Draft.refitTags(["check T2 again", "check T2 again"])[0].text, "check T2 again");   // a number twice is one
+  assert.strictEqual(Draft.refitTags(["check T1 again", "check T2 again", "check T3 again", "check T4 again", "check T5 again"])[0].text, "check 5 typed rules again");
+});
+t("refitSplit: the long list of what does not fit is cut after twelve", () => {
+  const L = n => Array.from({ length: n }, (_, i) => "t" + i);
+  assert.deepEqual(Draft.refitSplit(L(12)), { head: L(12), rest: [] });
+  const s = Draft.refitSplit(L(17)); assert.strictEqual(s.head.length, 12); assert.deepEqual(s.rest, ["t12", "t13", "t14", "t15", "t16"]);
+  assert.deepEqual(Draft.refitSplit(null), { head: [], rest: [] });
+});
 console.log(n + " checks passed");

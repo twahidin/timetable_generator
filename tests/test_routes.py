@@ -1,16 +1,19 @@
 """Plain-assert tests: every route checks a right, for every kind of session (accounts stage 1).
 .venv/bin/python tests/test_routes.py"""
-import datetime, html, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
+import datetime, hashlib, html, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
-for k in ("ADMIN_RECOVERY_CODE", "ANTHROPIC_API_KEY", "TYPED_REQUEST_MODEL", "AI_MODEL"): os.environ.pop(k, None)
+for k in ("ADMIN_RECOVERY_CODE", "ANTHROPIC_API_KEY", "TYPED_REQUEST_MODEL", "AI_MODEL", "TELEGRAM_BOT_TOKEN"): os.environ.pop(k, None)
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="anthropic", AI_API_KEY="", **CODES)
 sys.path.insert(0, ROOT)
 import app as A, history as H, store, sync  # noqa: E402
 from accounts import passwords as PW, people as P, rights as R  # noqa: E402
-from relief import people as RP  # noqa: E402
+from relief import links as TL, people as RP, tg, tgdb  # noqa: E402
 from ttgen.samples import secondary  # noqa: E402
+
+def no_network(*a, **k): raise AssertionError("a test reached the network")
+tg._send = no_network
 
 AGAIN = {"error": "Please sign in again."}
 GREY = "Sign in with your password to open this."
@@ -95,10 +98,13 @@ def by_guard(r):
     """the guard's refusal: 401 or 403 with its one sentence on the API, or a redirect to the sign-in page"""
     return (r.status_code in (401, 403) and r.get_json(silent=True) == AGAIN) or to_login(r)
 
+HOOK = "/telegram/hook"   # Telegram posts here without a session: its own secret header lets it in (the_hook_refuses_every_kind_without_the_header)
+
 def walked():
-    """every rule of the app the walk covers: all but the static files and the sign-in pages, which have no guard"""
+    """every rule of the app the walk covers: all but the static files, the sign-in pages and Telegram's hook, which have no guard"""
     for rule in A.app.url_map.iter_rules():
         if rule.endpoint == "static" or rule.rule.startswith("/login") or rule.rule in ("/logout", "/healthz", "/account/password"): continue
+        if rule.rule == HOOK: continue
         yield rule
 
 def walk(rules):
@@ -185,6 +191,10 @@ GUARDS = {
     "draft_options": ('committee',),
     "draft_place": ('committee',),
     "draft_preview": ('committee',),
+    "draft_refit_apply": ('committee',),
+    "draft_refit_get": ('committee',),
+    "draft_refit_preview": ('committee',),
+    "draft_refit_start": ('committee',),
     "draft_preview_page": ('committee',),
     "draft_printouts": ('committee',),
     "draft_publish": ('committee',),
@@ -323,6 +333,16 @@ GUARDS = {
     "relief_web.covering": ('relief',),
     "relief_web.cover_acknowledge": ('relief',),
     "relief_web.ask_change": ('relief',),
+    # Telegram (relief/tgweb.py): a person's own link, and connecting the bot (whoever saves the relief settings)
+    "relief_tg.status": ('relief',),
+    "relief_tg.code": ('relief',),
+    "relief_tg.unlink_mine": ('relief',),
+    "relief_tg.remind": ('relief',),
+    "relief_tg.summary": ('relief',),
+    "relief_tg.admin": ('relief.save',),
+    "relief_tg.connect": ('relief.save',),
+    "relief_tg.disconnect": ('relief.save',),
+    "relief_tg.unlink": ('relief.save',),
     "restore_setup": ('committee',),
     "status": ('setup',),
     "timetable": ('timetable',),
@@ -333,6 +353,36 @@ def the_whole_endpoint_map_is_pinned():
     got = {r.endpoint: tuple(A.app.view_functions[r.endpoint]._need) for r in A.app.url_map.iter_rules()
            if getattr(A.app.view_functions[r.endpoint], "_need", None)}
     assert got == GUARDS, ({k: (got.get(k), GUARDS.get(k)) for k in set(got) | set(GUARDS) if got.get(k) != GUARDS.get(k)})
+
+@t
+def the_hook_refuses_every_kind_without_the_header():
+    rules = [r for r in A.app.url_map.iter_rules() if r.endpoint.startswith("relief_tg.") and not getattr(A.app.view_functions[r.endpoint], "_need", None)]
+    assert [(r.rule, r.methods - {"OPTIONS"}) for r in rules] == [(HOOK, {"POST"})], rules     # the only one of Telegram's routes without a guard
+    stop = dict(update_id=41, message={"message_id": 1, "chat": dict(id=501, type="private"), "from": dict(id=501, is_bot=False), "text": "/stop"})
+    for kind, (keys, _) in KINDS.items(): assert client(keys).post(HOOK, json=stop).status_code == 404, kind     # no bot: not there at all
+    os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
+    tgdb.set_state("bot", dict(username="practice_bot", base="http://localhost", at="2026-11-22T08:00:00+08:00", key=hashlib.sha256(tg.hook_secret().encode()).hexdigest()))
+    TL.link(TINA, 501, None)
+    try:
+        right = tg.hook_secret(); assert len(right) == 64
+        for kind, (keys, _) in KINDS.items():
+            c = client(keys)
+            for headers in ({}, {"X-Telegram-Bot-Api-Secret-Token": ""}, {"X-Telegram-Bot-Api-Secret-Token": "x"}, {"X-Telegram-Bot-Api-Secret-Token": right[:-1]},
+                            {"Authorization": f"Bearer {right}"}):
+                r = c.post(HOOK, json=stop, headers=headers); assert r.status_code == 403 and r.data == b"", (kind, headers, r.status_code, r.data[:80])
+            assert c.post(f"{HOOK}?secret_token={right}", json=stop).status_code == 403 and c.get(HOOK).status_code == 405, kind
+            assert kept(c) == keys, (kind, kept(c))
+        assert TL.chat_of(TINA) == 501 and tg.PRACTICE_LOG == []
+        with tgdb.db(read=True) as d: assert d.execute("SELECT count(*) FROM updates").fetchone()[0] == 0, "a refused update is not remembered"
+        # with the header a session does not matter, and gives nothing more: the chat alone says who it is
+        c = client(KINDS["admin by password"][0])
+        r = c.post(HOOK, json=dict(stop, update_id=42, message={**stop["message"], "chat": dict(id=502, type="private"), "from": dict(id=502, is_bot=False)}), headers={"X-Telegram-Bot-Api-Secret-Token": right})
+        assert r.status_code == 200 and r.data == b"" and TL.chat_of(TINA) == 501 and kept(c) == KINDS["admin by password"][0]
+        assert [p["chat_id"] for m, p in tg.PRACTICE_LOG] == [502], "read, and answered there"
+        assert client({}).post(HOOK, json=stop, headers={"X-Telegram-Bot-Api-Secret-Token": right}).status_code == 200 and TL.chat_of(TINA) is None
+    finally:
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None); tg.PRACTICE_LOG.clear()
+        with tgdb.db() as d: d.execute("DELETE FROM state"); d.execute("DELETE FROM updates"); d.execute("DELETE FROM links")
 
 @t
 def a_shared_code_session_is_sent_from_the_password_page_to_login():
@@ -572,6 +622,7 @@ RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
     ("PUT", f"/api/relief/absences/{_X}/covers/{_K}/relief"), ("GET", f"/api/relief/absences/{_X}/covers/{_K}/free"),
     ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
     ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),
+    ("POST", "/api/relief/today/remind"), ("GET", "/api/relief/summary"),
     ("GET", f"/api/relief/load/{urllib.parse.quote(TINA)}"), ("GET", "/api/relief/load.csv"))})
 
 @t

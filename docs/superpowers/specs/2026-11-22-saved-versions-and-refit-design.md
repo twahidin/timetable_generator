@@ -35,6 +35,9 @@ are missing.
 - **Each class's day pattern stays the same.** A lesson moves only to another period of the same day.
 - **When a change forces another day** (for example a teacher who is now away every Friday), the lesson moves to another
   day and the list flags it ("another day").
+- **Another day as the last resort** (added by the lead on 23 November 2026, "Yes, allow it"): when nothing works on a
+  lesson's own day, it may move to another day, or change places with a lesson of another day, flagged the same way.
+  Same-day answers always come first.
 - The finding is done by **the app's own search** (approach A below), not by the solver and not by a language model.
 - **Typed rules (T1, T2… on step 6): allow and flag.** The app cannot check them, so the re-fit may move lessons a typed
   rule covers. Every such change says which rule to check again, the totals count them, and Apply reopens any of those
@@ -173,10 +176,13 @@ the earlier targets leave:
 2. Otherwise look for the shortest chain that makes it fit: the direct change plus up to three moves or swaps of the
    lessons in the way (the same class, teacher or room at that time), each judged by `fixes.judge` on what the earlier
    ones leave. Held to the lead's rules: a lesson of a band never changes day or period (its teacher or room may change);
-   any other lesson keeps its day. A lesson may go to another day only when **the lesson itself is barred from every
-   period of its own day**: its teacher (or one of them) is not available at any period of that day, or a setting or a
-   Must rule forbids every period of that day for it. Such a move is flagged "another day". A day that is only full is
-   never a reason: the search tries same-day chains up to its limit, and if none fits the target goes to Needs you.
+   any other lesson keeps its day. A lesson **barred from every period of its own day** (its teacher, or one of them,
+   is not available at any period of that day, or a setting or a Must rule forbids every period of that day for it)
+   may go to another day at once. For every other lesson, another day is **the last resort** (the lead's answer of
+   23 November 2026, after the measurement on the real file): only when no chain of up to three moves answers the
+   warning with the lessons on their own days may a lesson move to another day, or change places with a lesson of
+   another day. Same-day answers come first, always, for every warning of the list. Each such step is flagged
+   "another day". Two teachers who change places on step 5 are **traded** in one step (no lesson moves).
 3. Choose among the chains that fit: fewest lessons moved; then fewest "another day"; then fewest typed rules touched;
    then the moves nearest in period; then fewest new Prefer warnings. Never a chain that raises the number of open
    Prefer warnings overall; never one that touches a lesson an earlier target already moved (so the list never undoes
@@ -241,7 +247,8 @@ changes (M lessons moved, K to another day, T typed rules to check again)".
 - The re-fit leaves open Prefer warnings alone and never adds to them; it does not place lessons waiting in Not placed.
 - A change to a band itself (periods, groups joining or leaving) goes to Needs you; bands never move, gain or lose
   periods in this design. (This replaces the earlier idea of adding a whole period to a band.)
-- A lesson leaves its day only when it is barred from that whole day, never because the day is full.
+- A lesson leaves its day at once when it is barred from that whole day; otherwise only as the last resort, when
+  nothing works on its own day (changed on 23 November 2026: before, a full day was never a reason), and flagged.
 - A teacher change swaps only the teacher who changed; anything not one-for-one goes to Needs you.
 - Deleting surplus periods picks the ones that keep each class's days most even.
 - The re-fit's targets are all open deployment differences, clashes and broken Must rules, not only the ones caused by

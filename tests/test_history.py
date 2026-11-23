@@ -622,6 +622,17 @@ def download_keeps_the_filters():
     assert [(r[5], r[3]) for r in rows[1:]] == [("in", "shared code"), ("science", None)], rows
 
 @t
+def download_says_telegram_and_matches_the_page():
+    fresh()
+    H.add({"kind": "relief", "who": BOB, "as": BOB, "via": "telegram", "text": "covered"})
+    rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download")).iter_rows()]
+    assert rows[1][3] == "Telegram", rows
+    js = open(os.path.join(ROOT, "static", "history.js"), encoding="utf-8").read()
+    lit = re.search(r"^\s*const VIA = \{(.*?)\};", js, re.M).group(1)
+    page = dict(re.findall(r'(\w+):\s*"([^"]*)"', lit))
+    assert page and all(A._VIA.get(k) == v for k, v in page.items()), (page, A._VIA)
+
+@t
 def download_cells_are_never_formulas():
     fresh()
     for ch in "=+-@":
