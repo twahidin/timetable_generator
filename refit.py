@@ -23,7 +23,6 @@ NO_FIT = "No list of up to 3 moves fits it."
 BAND = "This changes the band itself: change it on the board, or ask the agent for a new timetable."
 SPLIT = "Its lessons are taught by different teachers: change them on the board."
 NOT_ONE = "More than one teacher changes: change it on the board."
-ONE_SIDED = "A teacher is added or taken off, not changed for another: change it on the board."
 NO_STAFF = "Step 5 has no teacher for it: choose one there first, then run Re-fit again."
 TOO_MANY = "More than 8 changes: change it on the board."
 LATE = "Not looked at in time; run Re-fit again."
@@ -70,9 +69,9 @@ def _teachers(m, spec, days, pool, plan, ks, e, rows, text):
     alike = all(set(x["teachers"]) == set(rows[0]["teachers"]) for x in rows); sided = len(gone) + len(new) == 1
     if not sided and not (len(gone) == 1 and len(new) == 1): return [], NOT_ONE
     if not alike: return [], SPLIT
-    if sided: return [], ONE_SIDED
     known = {t.get("name") for t in spec.get("teachers") or [] if isinstance(t, dict)}
     if not new <= known: return [], f"{next(iter(new))} is not on the setup's list of teachers."
+    if sided: return [[dict(kind="teacher", key=ks, teachers=[t for t in rows[0]["teachers"] if t not in gone] + sorted(new))]], None   # one added or one taken off: no trade, which needs one of each
     g, n = next(iter(gone)), next(iter(new))
     return [[dict(kind="teacher", key=ks, teachers=[n if t == g else t for t in rows[0]["teachers"]])]] + [[f] for f in _trades(m, spec, days, pool, plan, ks, g, n)], None
 
@@ -528,7 +527,12 @@ class _Search:
         """why a change of step 5 itself is made"""
         row5 = verify.planned_rows(self.spec).get(helper._dep_parts(self.target["key"])[0]) or {}
         n = row5.get("periods", 0); plan = f"Step 3 plans {n} period{'' if n == 1 else 's'} of it."
-        if f["kind"] == "teacher": return f"Step 5 now gives it to {fixes._names(f['teachers'])}."
+        if f["kind"] == "teacher":   # told by the teachers the key's lessons have on the timetable the search is given
+            had, now = {t for x in helper._of_key(self.m["lessons"], fixes._key(f["key"])) for t in x["teachers"]}, set(f["teachers"])
+            if not had: return f"Step 5 gives it to {fixes._names(f['teachers'])}."
+            if had < now and len(now - had) == 1: return f"Step 5 adds {next(iter(now - had))} to it."
+            if now < had and len(had - now) == 1: return f"Step 5 takes {next(iter(had - now))} off it."
+            return f"Step 5 now gives it to {fixes._names(f['teachers'])}."
         if f["kind"] == "trade": return f"Step 5 now gives {verify._name(fixes._key(f['a']))} to {f['y']} and {verify._name(fixes._key(f['b']))} to {f['x']}."
         if f["kind"] == "add": return "It was not on the timetable." if self.target["kind"] == "missing" else plan
         if f["kind"] == "delete": return plan

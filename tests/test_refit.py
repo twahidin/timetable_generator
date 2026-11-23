@@ -170,13 +170,16 @@ def test_two_teachers_changing_needs_you():
     step5_row(spec)["teachers"] = []
     c, s = refit.direct(m, spec, days, target("teachers", KEY, "its own words"), pool); assert c == [] and s == "its own words", (c, s)
 
-def test_a_teacher_added_or_taken_off_is_not_a_change():
-    m, spec, days, pool = world(ROWS); says = "A teacher is added or taken off, not changed for another: change it on the board."; assert refit.ONE_SIDED == says
-    step5_row(spec)["teachers"] = [TEACHERS[0], TEACHERS[1]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], says)   # added
-    m, spec, days, pool = world([dict(r, teachers=[TEACHERS[0], TEACHERS[1]]) if r["id"] == PLAIN_ID else r for r in ROWS]); step5_row(spec)["teachers"] = [TEACHERS[1]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], says)   # taken off
-    m, spec, days, pool = world([dict(r, teachers=[]) if r["id"] == PLAIN_ID else r for r in ROWS]); step5_row(spec)["teachers"] = [TEACHERS[0]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], says)   # nobody has it
+def test_a_teacher_added_or_taken_off_is_one_teacher_fix():
+    assert not hasattr(refit, "ONE_SIDED"); fix = lambda *names: ([[dict(kind="teacher", key=KEY, teachers=list(names))]], None)   # one candidate: no trade, which needs one who goes and one who comes
+    m, spec, days, pool = world(ROWS); before = snapshot(m, pool); step5_row(spec)["teachers"] = [TEACHERS[1], TEACHERS[0]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == fix(TEACHERS[0], TEACHERS[1]) and snapshot(m, pool) == before   # added: the row's teachers, then the new one
+    m, spec, days, pool = world([dict(r, teachers=[TEACHERS[2], TEACHERS[0], TEACHERS[1]]) if r["id"] == PLAIN_ID else r for r in ROWS]); step5_row(spec)["teachers"] = [TEACHERS[1], TEACHERS[2]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == fix(TEACHERS[2], TEACHERS[1])   # taken off: in the row's order
+    step5_row(spec)["teachers"] = [TEACHERS[1]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], refit.NOT_ONE)   # two taken off
+    m, spec, days, pool = world([dict(r, teachers=[]) if r["id"] == PLAIN_ID else r for r in ROWS]); step5_row(spec)["teachers"] = [TEACHERS[0]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == fix(TEACHERS[0])   # nobody has it: one added
     step5_row(spec)["teachers"] = [TEACHERS[0], TEACHERS[1]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], refit.NOT_ONE)   # two added
     m, spec, days, pool = world([dict(r, teachers=[TEACHERS[0], TEACHERS[1]]) if r["id"] == PLAIN_ID else r for r in ROWS]); step5_row(spec)["teachers"] = [TEACHERS[2]]; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], refit.NOT_ONE)   # two for one
+    m, spec, days, pool = world(ROWS); step5_row(spec)["teachers"] = [TEACHERS[0], TEACHERS[1]]; spec["teachers"] = [t for t in spec["teachers"] if t["name"] != TEACHERS[1]]   # one added who is not on the list
+    assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], f"{TEACHERS[1]} is not on the setup's list of teachers.")
 
 def test_a_lesson_of_a_row_with_nobody_is_not_offered():
     bare = lambda key, **k: lambda s: step5_row(s, key).update(teachers=[], **k); key = f"C:{CLASSES[1]}:{EL}"; says = "Step 5 has no teacher for it: choose one there first, then run Re-fit again."; assert refit.NO_STAFF == says
@@ -549,6 +552,24 @@ def test_a_lesson_the_new_teacher_may_not_take_then_is_moved():
     m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[cls_rule]); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [GIVE], got
     m, spec, days, pool, ts = case(BUSY, gives(T1), rules=[cls_rule]); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1}); assert got["moved"] == {2}, got   # so the lesson in the way may still move for it
     got, _ = solved(m, spec, days, ts[TEACH], pool, moved={2}); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE], got   # and it may go where it breaks that rule as it did
+
+ADDS = lambda s: step5_row(s).update(teachers=[T0, T1]); ADD_T1 = dict(kind="teacher", key=KEY, teachers=[T0, T1]); GIVE_T0 = dict(kind="teacher", key=KEY, teachers=[T0]); BOTH = [dict(one(1, 0, 1), teachers=[T0, T1])]   # step 5 adds T1 to 1A's English; a timetable where both teach it
+def test_a_teacher_added_is_made_as_one_changed_for_another():
+    m, spec, days, pool, ts = case([one(1, 0, 1)], ADDS); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got == dict(fixes=[ADD_T1], moved=set(), other=0, typed=set(), why=[f"Step 5 adds {T1} to it."]), got
+    m, spec, days, pool, ts = case(BUSY + full(1), ADDS); got, _ = solved(m, spec, days, ts[TEACH], pool)   # T1 has 1B then and 1A's day is full: the lesson in the way moves
+    assert got["fixes"] == [dict(kind="move", id=2, d=0, p=2), ADD_T1] and got["why"] == [f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[0]} period 1.", f"Step 5 adds {T1} to it."], got
+    m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1)], ADDS); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), ADD_T1] and got["why"][0] == f"{T1} teaches group Q3 on {DAYS[0]} period 1.", got   # a band in the way: the key's own lesson moves
+    got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1}); assert got is None and stats == dict(nodes=1, reason=f"{T1} is teaching group Q3 then.", late=False), (got, stats)   # moved once already: it stays
+    m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1)] + full(1), ADDS); got, stats = hunt(m, spec, days, ts[TEACH], pool); assert got is None and stats == dict(nodes=1, reason=f"{T1} is teaching group Q3 then.", late=False), (got, stats)   # and with nowhere to go: the judge's sentence
+    m, spec, days, pool, ts = case([one(1, 0, 1)], ADDS, rules=[AWAY(T1, 0, 1, 1)]); got, _ = solved(m, spec, days, ts[TEACH], pool)   # a Must rule of the added teacher's: not there then
+    assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), ADD_T1] and got["why"][0].startswith(f"Rule Teacher · {T1} · Not available: ") and got["why"][1] == f"Step 5 adds {T1} to it.", got
+    row = dict(scope="Teacher", target=T1, rule="Max periods in a row", number=2, week="Both", day="All", strength="Must")   # or a rule of the added teacher's day: T1 has the next two periods
+    m, spec, days, pool, ts = case([one(1, 0, 1), one(2, 0, 2, CLS_B, SUBJ2, T1), one(3, 0, 3, "1C", "Mathematics", T1)], ADDS, rules=[row]); got, _ = solved(m, spec, days, ts[TEACH], pool)
+    assert got["fixes"] == [dict(kind="move", id=1, d=0, p=5), ADD_T1] and got["why"][0].startswith(f"Rule Teacher · {T1} · Max periods in a row: "), got
+
+def test_a_teacher_taken_off_or_given_to_a_lesson_with_nobody_needs_no_move():
+    m, spec, days, pool, ts = case(BOTH + full(1), gives(T0)); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got == dict(fixes=[GIVE_T0], moved=set(), other=0, typed=set(), why=[f"Step 5 takes {T1} off it."]), got
+    m, spec, days, pool, ts = case([dict(one(1, 0, 1), teachers=[])], gives(T0)); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got == dict(fixes=[GIVE_T0], moved=set(), other=0, typed=set(), why=[f"Step 5 gives it to {T0}."]), got
 
 def test_the_lesson_keeps_its_day_unless_it_is_barred_for_the_new_teacher():
     m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1)], gives(T1), rules=[AWAY(T0)])   # the teacher it has is away that whole day, the one it will have is not
@@ -1105,7 +1126,7 @@ def test_the_lessons_not_placed_count():
 # ----------------------------------------------------------------------------------------------- another day, as the last resort
 def a_school(seed):
     """a random timetable of three classes, on two or three days of the week or on the mornings of four (the rest is bands), and a setup that does not agree with it:
-    some keys have another teacher on step 5, two may trade theirs, one may have a period more or less; rules of every kind, typed ones too -> ready's arguments"""
+    some keys have another teacher on step 5, two may trade theirs, one may have a period more or less, one may have a teacher added and one a teacher taken off; rules of every kind, typed ones too -> ready's arguments"""
     r = random.Random(seed); team = [t["name"] for t in SPEC["teachers"]]; who, subj = team[:r.choice((4, 5, 7))], [EL, "Mathematics", "Art", "Music", "Science"]; rows, used, plan, days_, mornings = [], set(), {}, r.sample(range(5), r.choice((2, 2, 3))), r.random() < .5
     for cls in ("1A", "1B", "1C"):
         open_, give, gaps, end = r.choice((days_, days_, r.sample(range(5), 2))), {s: r.choice(who) for s in subj}, r.choice((.05, .05, .4)), 11
@@ -1127,11 +1148,15 @@ def a_school(seed):
     if r.random() < .6: k = keys_[-1]; want[k][0] = max(1, want[k][0] + r.choice((-1, 1)))
     def change(s):
         base = step5_row(s); row = lambda cls, subject, periods, teachers, **k: dict(copy.deepcopy(base), classes=[cls], subject=subject, periods=periods, length=1, teachers=teachers, room_kind=None, **k)
-        s["lessons"] = [row(cls, sub, n, [t]) for (cls, sub), (n, t) in sorted(want.items())] + [row(x["classes"][0], EL, x["n"], list(x["teachers"]), **dict(code=x["group"], code_override=x["group"], block=x["block"])) for x in rows if x.get("block")]
+        s["lessons"] = [row(cls, sub, n, t if isinstance(t, list) else [t]) for (cls, sub), (n, t) in sorted(want.items())] + [row(x["classes"][0], EL, x["n"], list(x["teachers"]), **dict(code=x["group"], code_override=x["group"], block=x["block"])) for x in rows if x.get("block")]
     rules = [AWAY(r.choice(who), r.randrange(5)) for _ in range(r.randrange(3))] + [AWAY(r.choice(who), r.randrange(5), p, p + 1) for p in r.sample(OPEN, r.randrange(3))] + [dict(AWAY(r.choice(who), r.randrange(5), 1, 2), strength="Prefer") for _ in range(r.randrange(3))]
     rules += [dict(scope="School", target="Whole school", rule="Once a day per group", strength=r.choice(("Must", "Prefer")))] + [dict(scope="Teacher", target=t, rule="Max periods in a row", number=5, week="Both", day="All", strength="Must") for t in r.sample(who, 1)]
     rules += [words("Class", "1B"), words("Teacher", who[0]), words("School", "Whole school", "Prefer")][:r.randrange(4)]
-    return dict(rows=rows, change=change, rules=rules, report=[line(n) for n in range(1, 4)], lifted=set(r.sample([x["id"] for x in rows if not x.get("block")], r.choice((0, 0, 1)))))
+    lifted = set(r.sample([x["id"] for x in rows if not x.get("block")], r.choice((0, 0, 1)))); r2 = random.Random(-seed)   # (a generator of its own: the rest is as it was)
+    same = [k for k in keys_[2:-1] if want[k][1] == plan[k][1]]; r2.shuffle(same)
+    if same and r2.random() < .4: k = same.pop(); want[k][1] = [plan[k][1], r2.choice([t for t in who if t != plan[k][1]])]   # step 5 adds a teacher
+    if same and r2.random() < .4: k = same.pop(); rows = [dict(x, teachers=x["teachers"] + [team[8]]) if (x["classes"][0], x["subject"]) == k and not x.get("block") else x for x in rows]   # the timetable has one more than step 5 (team[8] teaches nothing else)
+    return dict(rows=rows, change=change, rules=rules, report=[line(n) for n in range(1, 4)], lifted=lifted)
 def a_case(seed): k = a_school(seed); k.pop("lifted"); return case(**k)
 
 def day_moves_before(m, spec, days, lesson_id, ctx, memo, moved, limit=refit.CAND_SLOTS):
@@ -1623,6 +1648,14 @@ def test_only_an_add_of_the_same_key_waits():
     given = ready([one(20, 0, 2, row["classes"][0], row["subject"], had, block=row["block"], group=b[1]), band(21, 0, 2, "2A", who)]); teach, periods = f"dep:G:{b[1]}:teachers", f"dep:G:{b[1]}:periods"
     p = planned(given, teach, periods); assert needs(p) == {teach: f"{who} is teaching group Q21 then.", periods: refit.BAND}, p
 
+def test_a_period_waits_for_a_teacher_added_or_taken_off_and_is_free_after():
+    with asking() as asked: given = ready(BUSY + full(1), both(ADDS, plans(2))); p = planned(given, TEACH, SHORT)
+    assert keys(p) == [TEACH, SHORT] and [f["kind"] for f in p["fixes"]] == ["move", "teacher", "add"] and p["fixes"][1] == ADD_T1 and p["needs"] == [] and asked == [(TEACH, 0), (TEACH, None), (SHORT, 0)], (p, asked)
+    assert [x["teachers"] for x in lessons_of(p, given)] == [[T0, T1]] * 2, lessons_of(p, given)   # the period added has both
+    given = ready(BOTH, both(gives(T0), plans(2))); p = planned(given, TEACH, SHORT); assert keys(p) == [TEACH, SHORT] and [f["kind"] for f in p["fixes"]] == ["teacher", "add"] and [x["teachers"] for x in lessons_of(p, given)] == [[T0]] * 2, p
+    given = ready(BOTH + [dict(one(6, 2, 1), teachers=[T0, T1])], gives(T0), rules=[words("Teacher", T1)], report=[line(1)], lifted={6}); p = planned(given, TEACH)   # one waits in Not placed: it is reached too, and the typed rule about the one who leaves is checked again
+    assert p["fixes"] == [GIVE_T0] and p["groups"][0]["steps"][0]["tags"] == ["check T1 again"] and refit.waiting(given[0]["pool"], p["fixes"])[1][0]["teachers"] == [T0], p
+
 # ------------------------------------------------------------ the time
 def sec(x): return round(x, 6)
 PAST = 1 / 1024   # how far past its deadline a look that is cut short ends
@@ -1869,7 +1902,7 @@ def test_some_are_never_looked_at_on_other_days():
     finally: refit._teachers, log.disabled = was_t, False
 
 def test_random_timetables_hold_with_other_days_and_trades():
-    n, sayings = dict.fromkeys(("trades", "another day", "exchanges", "also", "needs", "far answers"), 0), set()
+    n, sayings = dict.fromkeys(("trades", "another day", "exchanges", "also", "needs", "far answers", "added", "taken off"), 0), set()
     for seed in (12, 21, 27, 43, 81, 98, 106):
         given = ready(**a_school(seed)); m, rec, fx = given; spec, days, pool = m["checked_setup"], m["days"], m["pool"]; starts = ("dep:C:", "rule:", "clash:Teacher", "clash:Class", "clash:notplaced"); ts = refit.targets(said(m, fx, *starts)); real, far_, done, last = refit.solve, [], set(), {}
         def solve(m_, sp, dy, t, pl, moved, deadline, stats=None, most=None, far=False):
@@ -1885,7 +1918,7 @@ def test_random_timetables_hold_with_other_days_and_trades():
         for t in ts:   # and what needs you has none on any day, with the list made
             if needs(p).get(t["key"]) not in (None, refit_plan.TEACHER_FIRST): assert free(last["m"], last["moved"], t, True) is None and needs(p)[t["key"]] != refit.LATE, (seed, t["key"])
         steps = [s for g in p["groups"] for s in g["steps"]]; n["trades"] += sum(s["fix"]["kind"] == "trade" for s in steps); n["another day"] += sum("another day" in s["tags"] for s in steps); n["exchanges"] += sum("another day" in s["tags"] and s["fix"]["kind"] == "swap" for s in steps)
-        n["also"] += len(p["also"]); n["needs"] += len(p["needs"]); n["far answers"] += len(far_)
+        n["also"] += len(p["also"]); n["needs"] += len(p["needs"]); n["far answers"] += len(far_); n["added"] += sum(s["why"].startswith("Step 5 adds ") for s in steps); n["taken off"] += sum(s["why"].startswith("Step 5 takes ") for s in steps)
     assert all(n.values()), n
 
 # ------------------------------------------------------------ trades
@@ -2550,6 +2583,19 @@ def test_a_trade_goes_through_the_preview_the_apply_and_one_undo():
         m, rec, fx = draft.model_now(); assert {x["id"]: x["teachers"] for x in m["lessons"]} == {1: [T1], 2: [T0]} and [x["teachers"] for x in fx["pool"]] == [[T1]] and not [w for w in b["info"]["warnings"] if w["key"] in (TEACH, TEACH_B)]   # the lesson not placed too
         assert A.history.read(limit=1)[0]["text"] == "Re-fit: 1 change (0 lessons moved, 0 to another day, 1 typed rule to check again)"
         u = c.post("/api/draft/undo"); assert u.status_code == 200 and fixes_now() == before and {w["key"] for w in u.get_json()["warnings"]} >= {TEACH, TEACH_B}
+    finally: A._refit_clear(); put_setup(was)
+
+def test_a_teacher_added_goes_through_the_preview_the_apply_and_one_undo():
+    was = json.loads(json.dumps(store.setup_record()["spec"])); s = json.loads(json.dumps(was)); row = dict(next(r for r in s["lessons"] if r["subject"] == EL and CLS in r["classes"] and r.get("code") == ENTIRE), periods_override=1, teachers=[T0, T1])
+    s["school"]["lesson_length"] = 1; s["lessons"] = [row]; s["rules"] = [words("Class", CLS)]
+    try:
+        put_setup(s); save_draft([one(1, 0, 1), one(6, 2, 1)], report=[(1, "Must", "", "made-up words", "Met", "")]); A._refit_clear(); draft.fix(dict(kind="lift", id=6)); before = fixes_now()
+        j = run_job(); assert A.REFIT["plan"]["fixes"] == [ADD_T1] and [g["key"] for g in j["plan"]["groups"]] == [TEACH] and j["plan"]["totals"]["typed"] == [1], j["plan"]
+        assert j["plan"]["groups"][0]["steps"] == [dict(n=1, text=f"Give {EL} for {CLS} to {T0}, {T1}.", why=f"Step 5 adds {T1} to it.", tags=["check T1 again"])], j["plan"]["groups"]
+        pre = c.get("/api/draft/refit/preview?id=" + j["id"]).get_json(); assert pre["state"] == "ok" and pre["texts"] == [f"{EL} for {CLS} is now taught by {T0}, {T1}, not {T0}."] and fixes_now() == before, pre
+        r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); b = r.get_json(); assert r.status_code == 200 and b["changes"] == 1 and len(fixes_now()) == len(before) + 1, b
+        m, rec, fx = draft.model_now(); assert [x["teachers"] for x in m["lessons"] if x["id"] == 1] == [[T0, T1]] and [x["teachers"] for x in fx["pool"]] == [[T0, T1]] and not [w for w in b["info"]["warnings"] if w["key"] == TEACH], b["info"]["warnings"]   # the lesson not placed too
+        u = c.post("/api/draft/undo"); assert u.status_code == 200 and fixes_now() == before and TEACH in {w["key"] for w in u.get_json()["warnings"]}
     finally: A._refit_clear(); put_setup(was)
 
 def test_info_says_whether_there_is_anything_to_refit():

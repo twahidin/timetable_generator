@@ -52,7 +52,7 @@ The newest real setup with the timetable that goes with it: 1,026 lessons (1,985
 - The list has "Settled by these changes too" for warnings that other warnings' changes settle, and the tag "no room" on an added lesson without a room. A last look puts there whatever the final list settles.
 - A missing lesson of a subject whose teacher also changes waits for the teacher change. When that has no answer: "Its teachers differ from step 5 too: settle that first, then run Re-fit again."
 - A lesson is never added for a subject that has no teacher on step 5: "Step 5 has no teacher for it: choose one there first, then run Re-fit again."
-- A teacher only added or only taken off is not "one for another": "A teacher is added or taken off, not changed for another: change it on the board." (The lead's rule names one removed and one added. Whether Re-fit should also do these is the lead's to say.)
+- A teacher only added or only taken off (or given to a lesson that had nobody) is one teacher fix, searched as a change of one for another, with no trade; its reason says "Step 5 adds {name} to it.", "Step 5 takes {name} off it." or "Step 5 gives it to {name}.". More than one teacher changing still needs you. The lead decided this on 23 November 2026, after the merge (before, these needed you).
 - The check of the whole list compares sets (mistakes, Prefer wishes, Must rules), judges answer by answer, and when the list as a whole is not one to offer, gives up only the answer at fault, inside 10 seconds.
 - A line in the server's log names the kind, the error type and the file and line only, never a word of the timetable.
 - The plan lives in its own file, `refit_plan.py`.
@@ -84,7 +84,7 @@ Verdict: ready with fixes, nothing critical. Made in the one fix wave: the chip 
 
 Left as they are, by ruling:
 
-- **Focus after an Apply that settles everything.** The fix made is not reached in the real flow: the Re-fit button is still on when the window closes, takes the focus, and is turned off by the redraw that follows, so the focus ends on the page (seen in the browser). A keyboard user presses Tab once more. The comment on that line in `rfClose` says more than the code does. To put right in the next change to the window: give the focus after the draft is redrawn.
+- **Focus after an Apply that settles everything.** Put right in the follow-up of 23 November 2026: after the redraw that follows a made Apply, `rfRefocus` gives a focus left on nothing to the first of Re-fit and Versions that is on.
 - When the check of the whole list takes an answer out, a later answer that went to another day because of it stays, and the answer taken out says "No list of up to 3 moves fits it." though a list was found. Rare: no list was at fault in any run on the real file.
 - With only Not placed lessons, lessons without a teacher or two bands at one time on the draft, the button is on and the window says "The app has no change to offer for these." with each under Needs you. Greying the button would say "the timetable fits the setup", which would be untrue.
 - A deletion, and a teacher change that is blocked for good, still get a look on other days that cannot help them, and can say "Not looked at in time" when the time is up first.
@@ -117,4 +117,14 @@ Each on its own, all passing, on the code of the final fix wave and again after 
 - "Keep looking" for a list that ran out of time, instead of applying and running again.
 - Placing lessons that wait in Not placed.
 - Changes to a band itself (a banded subject gaining or losing periods, a group joining or leaving).
-- A teacher only added or only taken off, if the lead wants Re-fit to do these.
+
+## Follow-up after the merge (23 November 2026, branch refit-2)
+
+The lead answered "Yes" to both open points, so:
+
+- **A teacher only added or only taken off is made.** One teacher added to a subject, one taken off it, or one given to a lesson that had nobody, is one teacher change in the list, with its own reason ("Step 5 adds … to it.", "Step 5 takes … off it.", "Step 5 gives it to ….").  More than one teacher changing still needs you. Ruling: "a teacher" is read as exactly one (the question was in the singular).
+- **The focus after Apply.** After the draft is redrawn the focus goes to "Re-fit to the setup" when it is still on, else to Versions. Seen in a browser in both cases.
+
+On the real file (counts only, 30 made-up changes each, the scratch folder deleted): a second teacher added, the colleague of the subject who is free most: 16 of 30 answered (2 s on average, 10 s at most; 6 take a lesson to another day); a random colleague: 11 of 30 (one not looked at in time). These are the same numbers as for one teacher changed for another, because what stands in the way is the same: the new teacher's own lessons. One of two teachers taken off: 8 of 8 answered with no move, under a second (for 22 of the 30 rows picked, step 8 listed no difference at all, so there was nothing to re-fit). Nothing wrong was offered in any run.
+
+Checked: a review of the change (approved, nothing to fix before merging); every suite on the result. Left as small points: the test of a period that waits for a teacher taken off shows the result but not the order of the looks; if the window is opened again in the instant before the draft is fetched after a failed check, the focus can go to the button behind it.

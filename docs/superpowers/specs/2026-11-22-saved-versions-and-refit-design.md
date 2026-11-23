@@ -160,9 +160,10 @@ lesson on the timetable but not on step 5, a room of the wrong kind), clashes, a
 **The direct change for each kind** (then the search clears what it causes):
 - another teacher → swap **only the teacher who changed**: compare the timetable's teachers with step 5's for that class
   and subject (or group); where one teacher is replaced by one other (B → C), a `teacher` fix gives C the lessons B
-  taught and leaves the other teachers as they are (a class and subject split between A and B stays split). When the
-  change is not one-for-one (two replaced by one, a teacher added, the rows' teachers cannot be told apart), it goes to
-  Needs you with the step 5 sentence;
+  taught and leaves the other teachers as they are (a class and subject split between A and B stays split). One teacher
+  added (C joins A) or one taken off (B leaves A) is a `teacher` fix too, the others kept as they are. When more than
+  one teacher changes (two replaced by one, two added) or the rows' teachers cannot be told apart, it goes to Needs you
+  with the step 5 sentence;
 - more periods → `add` the missing periods (one per lesson length), for a lesson that is not in a band;
 - fewer periods, or not on step 5 → `delete` the surplus (the lessons whose removal leaves the class's day pattern most
   even; builder's call how to pick, deterministically);
@@ -249,7 +250,8 @@ changes (M lessons moved, K to another day, T typed rules to check again)".
   periods in this design. (This replaces the earlier idea of adding a whole period to a band.)
 - A lesson leaves its day at once when it is barred from that whole day; otherwise only as the last resort, when
   nothing works on its own day (changed on 23 November 2026: before, a full day was never a reason), and flagged.
-- A teacher change swaps only the teacher who changed; anything not one-for-one goes to Needs you.
+- One teacher changed for another, one added or one taken off is made; more than one teacher changing goes to Needs you
+  (changed by the lead on 23 November 2026: before, only one for another).
 - Deleting surplus periods picks the ones that keep each class's days most even.
 - The re-fit's targets are all open deployment differences, clashes and broken Must rules, not only the ones caused by
   setup changes since the upload (the app cannot tell those apart; the list shows each target so the lead sees them).
