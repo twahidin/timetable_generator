@@ -3769,11 +3769,13 @@ def the_hours_answers_running_out_ends_the_job_with_nothing_put_in():
     env, talk = list_talk()
     seen, before = [], env.load(talk.exam)
     now = T._now()
-    T._starts.extend([now] * (T.LIMITS["an_hour"] - 1 - len(T._starts)))       # the paste takes the 60th; a second piece cannot
-    pasted(talk, env, "\n".join([ENG] + ["a heading"] * 40 + [SCI]), call=a_reader(seen=seen))
-    same(len(seen), 1); same(texts(talk, "sys")[-1], "The AI is busy. Try again in a few minutes.")
-    same(env.load(talk.exam), before); same(list_lines(talk), [])
-    fresh()
+    try:
+        T._starts.extend([now] * (T.LIMITS["an_hour"] - 1 - len(T._starts)))   # the paste takes the 60th; a second piece cannot
+        pasted(talk, env, "\n".join([ENG] + ["a heading"] * 40 + [SCI]), call=a_reader(seen=seen))
+        same(len(seen), 1); same(texts(talk, "sys")[-1], "The AI is busy. Try again in a few minutes.")
+        same(env.load(talk.exam), before); same(list_lines(talk), [])
+    finally:
+        T._starts.clear()
 
 @t
 def a_reader_that_fails_the_deadline_or_a_right_that_ends_puts_nothing_in():
@@ -3810,8 +3812,10 @@ def a_file_in_the_apps_own_layout_goes_in_without_the_reader():
     same(got, {"Mathematics G3": (90, "2026-10-06", "08:00", "groups", "Maths"), "English Language G3": (120, None, None, "level", "")})
     last = pasted(talk, env, filename="papers.xlsx", data=data, call=no_reader)      # again: changed never doubled
     same(len(env.load(talk.exam)["papers"]), 2); same(last["text"], "2 papers are in.")
-    pasted(talk, env, filename="bad.xlsx", data=an_xlsx([P.HEADER, ["Sec 3", "Art", "P1", "long"]]), call=no_reader)
-    same(texts(talk, "sys")[-1], "Row 2: the minutes must be a whole number.")
+    n = len(talk.lines)
+    raises(Refused, lambda: T.paste(talk, env, filename="bad.xlsx", data=an_xlsx([P.HEADER, ["Sec 3", "Art", "P1", "long"]]), call=no_reader),
+           "Row 2: the minutes must be a whole number.")                     # said at once: the file is read before a job starts
+    same((len(talk.lines), talk.working), (n, False))
 
 @t
 def the_practice_reader_walks_a_list_in_its_own_layout():
@@ -3907,6 +3911,98 @@ def the_apps_check_after_a_list_says_its_first_five_errors():
     same(texts(talk, "sys")[-2:], ["Clashes not checked: no students yet.",
                                    "The app's check says:\nProblem 1.\nProblem 2.\nProblem 3.\nProblem 4.\nProblem 5.\nand 2 more: see the Papers tab."])
     same(kinds(talk)[-4:], ["did", "sys", "sys", "list"])
+
+
+# ---------------------------------------------------------------- the agreed list, fix round 1
+def rows_reader(*rows):
+    """a scripted reader that gives these rows for the one piece"""
+    return lambda text, facts_: [dict(dict(level="Sec 3", paper="Paper 1", minutes=60, date=None, start=None, all=False, subjects=[]), **r) for r in rows]
+
+@t
+def a_list_line_of_two_papers_shows_each_and_puts_each_in_at_its_own_time():
+    env, talk = list_talk()
+    reader = rows_reader(dict(line=1, subject="Maths", paper="Paper 1", date="2026-10-06", start="08:00", subjects=BOTH["Maths"]),
+                         dict(line=1, subject="Maths", paper="Paper 2", minutes=90, date="2026-10-08", start="10:30", subjects=BOTH["Maths"]),
+                         dict(line=2, level="Sec 3", subject="Eng", date="2026-10-09", start="08:00", subjects=["English Language G3"]),
+                         dict(line=2, level="Sec 4", subject="Eng", date="2026-10-09", start="09:00", subjects=["English"]))
+    last = pasted(talk, env, "Sec 3 Maths Paper 1 and 2\nSec 3/4 Eng", call=reader)
+    same(last["text"], "2 lines need a yes.")
+    same(last["table"]["rows"], [["Sec 3 Maths Paper 1", "Mathematics G2, Mathematics G3", "Tue 6 Oct", "08:00"],
+                                 ["Sec 3 Maths Paper 2", "Mathematics G2, Mathematics G3", "Thu 8 Oct", "10:30"],
+                                 ["Sec 3 Eng Paper 1", "English Language G3", "Fri 9 Oct", "08:00"],
+                                 ["Sec 4 Eng Paper 1", "English", "Fri 9 Oct", "09:00"]])
+    assert 'line 1 "Sec 3 Maths Paper 2" read as Mathematics G2, Mathematics G3' in talk.notes[-1] and 'line 2 "Sec 4 Eng Paper 1" read as English' in talk.notes[-1], talk.notes[-1]
+    call = answer(talk, env, "Only G3", reply(use("t1", "correct_list", dict(line=1, subjects=["Mathematics G3"])),
+                                              use("t2", "correct_list", dict(line=2, subjects=["English"]))), reply(say("ok")))
+    r = results(call.sent[-1])
+    same((r["t1"], r["t2"]), ("Line 1 is now read as Mathematics G3.", "Sec 3 has no subject called English."))
+    same(list_lines(talk)[-1]["table"]["rows"], [["Sec 3 Maths Paper 1", "Mathematics G3", "Tue 6 Oct", "08:00"],
+                                                 ["Sec 3 Maths Paper 2", "Mathematics G3", "Thu 8 Oct", "10:30"],
+                                                 ["Sec 3 Eng Paper 1", "English Language G3", "Fri 9 Oct", "08:00"],
+                                                 ["Sec 4 Eng Paper 1", "English", "Fri 9 Oct", "09:00"]])     # no paper of line 1 lost
+    T.confirm_list(talk, env, last["list"], True)
+    same(texts(talk, "did")[-1], "Put 4 papers in the draft, as read above")
+    same(sorted((p["level"], p["subject"], p["paper"], p["minutes"], p["date"], p["start"], p["together"]) for p in env.load(talk.exam)["papers"]),
+         [("Sec 3", "English Language G3", "Paper 1", 60, "2026-10-09", "08:00", ""), ("Sec 3", "Mathematics G3", "Paper 1", 60, "2026-10-06", "08:00", ""),
+          ("Sec 3", "Mathematics G3", "Paper 2", 90, "2026-10-08", "10:30", ""), ("Sec 4", "English", "Paper 1", 60, "2026-10-09", "09:00", "")])
+
+@t
+def a_paper_the_list_changes_says_what_it_was():
+    env, talk = list_talk()
+    pasted(talk, env, ENG, call=a_reader())                                    # English Language G3 at 08:00 on 6 Oct, 90 min
+    last = pasted(talk, env, "\n".join([ENG.replace("90, 2026-10-06, 08:00", "120, 2026-10-07, 10:00"), SCI, LIT]), call=a_reader())
+    same(texts(talk, "did")[-1], "Put 3 papers in the draft: their words are the timetable's own")
+    same(last["text"], "3 papers are in.")
+    same([x for x in texts(talk, "sys") if x.startswith("Changed by the list")],
+         ["Changed by the list:\nSec 3 English Language G3 Paper 1: was 08:00 on Tue 6 Oct, 90 min, now 10:00 on Wed 7 Oct, 120 min."])
+    assert "Changed by the list: Sec 3 English Language G3 Paper 1: was 08:00 on Tue 6 Oct, 90 min, now 10:00 on Wed 7 Oct, 120 min." in talk.notes[-1], talk.notes[-1]
+    lid = pasted(talk, env, MATHS, call=a_reader(BOTH))["list"]                # the yes says it too
+    T.confirm_list(talk, env, lid, True)
+    lid = pasted(talk, env, MATHS.replace("10:00", "11:00").replace("60", "45"), call=a_reader(BOTH))["list"]
+    T.confirm_list(talk, env, lid, True)
+    ch = [x for x in texts(talk, "sys") if x.startswith("Changed by the list")]
+    same(len(ch), 2)                                                          # the first yes only added: nothing said
+    assert "Sec 3 Mathematics G2 Paper 1: was 10:00 on Wed 7 Oct, 60 min, now 11:00 on Wed 7 Oct, 45 min." in ch[-1], ch[-1]
+    assert "Changed by the list:" in talk.notes[-1], talk.notes[-1]
+    many = [f"Sec 3, Mathematics G{g}, Paper {i}, 60" for g in (2, 3) for i in range(1, 4)]
+    pasted(talk, env, "\n".join(many), call=a_reader())
+    pasted(talk, env, "\n".join(x + ", 2026-10-08, 08:00" for x in many), call=a_reader())
+    got = [x for x in texts(talk, "sys") if x.startswith("Changed by the list")][-1].split("\n")
+    same((len(got), got[1], got[-1]), (7, "Sec 3 Mathematics G2 Paper 1: was no time, 60 min, now 08:00 on Thu 8 Oct, 60 min.", "and 1 more: see the Papers tab."))
+
+@t
+def a_file_in_the_apps_own_layout_is_never_refused_for_the_ais_limits():
+    env, talk = list_talk()
+    data = P.paper_list_xlsx(dict(levels=["Sec 3"], papers=[a_paper("Sec 3", "Mathematics G3", 90, "2026-10-06", "08:00", "groups", "")]))
+    try:
+        T._running[0] = T.LIMITS["at_once"]
+        T._starts.extend([T._now()] * T.LIMITS["an_hour"]); hour = len(T._starts)
+        raises(Refused, lambda: T.paste(talk, env, text=ENG, call=no_reader), T.BUSY)
+        T.paste(talk, env, filename="papers.xlsx", data=data, call=no_reader)
+        assert T.wait(talk, WAIT) and not talk.working
+        same((T._running[0], len(T._starts)), (T.LIMITS["at_once"], hour))     # no slot taken, none given back
+    finally:
+        T._running[0] = 0; T._starts.clear()
+    same(list_lines(talk)[-1]["text"], "1 paper is in.")
+
+@t
+def the_lines_are_the_persons_own_when_the_paste_starts_with_blank_lines():
+    env, talk = list_talk()
+    last = pasted(talk, env, "\n\n" + ENG + "\n\nSec 9, Art, Paper 1, 60, 2026-10-06, 08:00", call=a_reader())
+    same(last["left"], [dict(line=5, text="Sec 9 is not a level of this exam.")])
+    same(texts(talk, "me")[-1], "Pasted a list of 2 lines.")
+
+@t
+def a_fault_after_the_plain_papers_went_in_says_what_is_in():
+    env, talk = list_talk()
+    real = LJ._summary
+    def broken(*a): raise RuntimeError("Ms Secret Person")
+    LJ._summary = broken
+    try: pasted(talk, env, "\n".join([ENG, MATHS]), call=a_reader(BOTH))
+    finally: LJ._summary = real
+    same(texts(talk, "sys")[-1], "The rest of the list could not be finished. 1 paper is in; the other lines were not put in: give them again.")
+    assert "went in at once" in talk.notes[-1] and "could not be finished" in talk.notes[-1], talk.notes
+    same(papers_of(env, talk), [("Sec 3", "English Language G3", "Paper 1")]); same(talk.waiting, None)
 
 
 print(f"{COUNT} plan tests passed")
