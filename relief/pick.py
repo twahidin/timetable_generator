@@ -346,7 +346,7 @@ def choose_for(pub, settings, records, record, x, c, call=None, without=(), link
     then no call is made. For an open cover (a planner's choice is already its pick) or a change request's new pick.
     Saves nothing and takes no lock; never raises for the model's sake (free_then's own errors, such as a date the
     calendar no longer has as a school day, are the caller's, as for cover.set_pick). Each fallback logs its kind (off,
-    busy, failed, bad answer) and nothing else: no data, exception text or name. With wait=True a full guard (BUSY) is not a
+    busy, failed, bad answer) and nothing else: no data, exception text or name. With wait=True (the caller's rule: a lesson of a later date) a full guard (BUSY) is not a
     fallback: WAIT is returned and no pick is made, so the cover stays open for the next run (the other fallbacks are as above)."""
     staff = _accounts.listing(pub)      # every person the accounts know: the published teachers and the staff added there
     leave = {without} if isinstance(without, str) else set(without or ())

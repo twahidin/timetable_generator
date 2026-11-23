@@ -2331,6 +2331,51 @@ def a_full_guard_leaves_the_rest_open_for_the_next_run():
     PK._seen.clear()
     with stand_in(PK, "CALL", None), stand_in(PK.typed, "enabled", lambda: False): fresh(); i = absent()["id"]; assert FL.run(now=mon("09:00"))["picked"] == 2 and cov(i, K2)[2]["pick"]["by"] == "app", "no model: the app's order, as today"
 
+# ---- Send-out, Task 2 fix round 1: a lesson of today never waits for the guard ----
+@ft
+def a_lesson_of_today_never_waits_for_a_full_guard():
+    fresh()
+    i = absent(dates=("2026-10-13", "2026-10-16"))["id"]
+    with at("2026-10-13T08:00:00+08:00"), stand_in(PK, "GUARD_N", 0):
+        got = FL.run(call=first)
+        assert got == dict(picked=2, nobody=0, held=1), got
+        assert (st(i, K2), st(i, K5), st(i, KF)) == ("waiting", "waiting", "open")
+        assert cov(i, K2)[2]["pick"]["by"] == "app" and cov(i, K5)[2]["pick"]["by"] == "app", "today: the app's own order at once"
+        assert cov(i, K2)[2]["pick"]["reason"] == PK.APP_ORDER
+    with at("2026-10-13T08:01:00+08:00"):
+        PK._seen.clear(); assert FL.run(call=first) == dict(picked=1, nobody=0) and cov(i, KF)[2]["pick"]["by"] == "ai", "the later date: the next run, the model's"
+    fresh(); PK._seen.clear()
+    i = absent(dates=("2026-10-13",))["id"]
+    with at("2026-10-13T08:00:00+08:00"):
+        assert FL.run(call=first) == dict(picked=2, nobody=0) and cov(i, K2)[2]["pick"]["by"] == "ai", "guard not full: today is the model's pick"
+
+@ft
+def a_request_to_change_for_today_is_picked_at_once_by_a_full_guard():
+    fresh()
+    i = absent(by=GRACE, dates=("2026-10-13",))["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST); CV.ask_change(i, K5, "A meeting", SAM)
+    with at("2026-10-13T08:00:00+08:00"), stand_in(PK, "GUARD_N", 0):
+        assert FL.run(call=first) == dict(picked=2, nobody=0)
+        c = cov(i, K5)[2]
+        assert c["change"]["pick"]["by"] == "app" and c["change"]["pick"]["who"] != SAM, c["change"]
+
+@ft
+def a_stale_pick_dropped_under_a_full_guard_waits_or_not_by_its_date():
+    fresh()
+    i = absent(by=GRACE, dates=("2026-10-13",), lessons=[dict(key=K5, relief=SAM)])["id"]
+    absent(teacher=SAM, dates=("2026-10-13",))
+    with at("2026-10-13T08:00:00+08:00"), stand_in(PK, "GUARD_N", 0):
+        FL.run(call=first)
+        assert st(i, K5) == "waiting" and relief_of(i, K5) != SAM and cov(i, K5)[2]["history"][-1]["by"] == "app", "today: dropped and picked by the app's order in the same run"
+        assert [h["what"] for h in cov(i, K5)[2]["history"]][:2] == ["pick", "dropped"]
+    fresh(); PK._seen.clear()
+    i = absent(by=GRACE, dates=("2026-10-16",), lessons=[dict(key=KF, relief=SAM)])["id"]
+    with at("2026-10-13T08:00:00+08:00"), stand_in(PK, "GUARD_N", 0), saved_settings(limits=dict(never=[SAM])):          # Mr Sam Tan is no longer to be asked
+        FL.run(call=first)
+        assert st(i, KF) == "open" and [h["what"] for h in cov(i, KF)[2]["history"]] == ["pick", "dropped"], "later date: dropped, held open, no app pick"
+    with at("2026-10-13T08:01:00+08:00"):
+        PK._seen.clear(); FL.run(call=first); assert st(i, KF) == "waiting" and cov(i, KF)[2]["pick"]["by"] == "ai"
+
 assert REAL == [], "a test reached the real call"
 
 print(f"{COUNT} relief team tests passed")
