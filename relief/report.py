@@ -66,7 +66,7 @@ BEFORE, EVERY = 60, 15                          # minutes: the first report befo
 OLD = datetime.timedelta(minutes=30)            # a report or an all clear this old does not go any more
 WAIT = datetime.timedelta(minutes=5)            # a relief is not sent again sooner
 WEEKLY, DAY = ("Fri", "15:00"), datetime.timedelta(days=1)               # when the summary goes, where the settings cannot be read; how long after that it may
-AGAIN, OPEN_TODAY, OPEN_SUMMARY = "Remind them again", "Open relief today", "Open the full summary"
+AGAIN, OPEN_TODAY, OPEN_SUMMARY = "Remind them again", tell.OPEN_TODAY, "Open the full summary"
 NOBODY = "Nobody to remind."
 NOT_ON = "Not on Telegram."
 TOO_SOON = "Sent at {at}: wait a few minutes."                   # the last of a relief's messages (itself, or a reminder of it) went

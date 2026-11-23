@@ -2214,7 +2214,7 @@ def the_module_stands_alone():
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "report", "clear", "weekly"} == set(TE.CHECKS)
+    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "report", "clear", "weekly"} == set(TE.CHECKS)
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -5091,7 +5091,7 @@ def a_reminder_is_the_relief_again_and_no_relief_of_its_own():
     with school(SAM, MAYA, TEAM):
         i = today_reliefs((K5, SAM)); change_record(i, lambda r: [x.update(work=dict(text="Read p.4", link="", files=[dict(id="f1", name="a.pdf", size=1)])) for x in r["lessons"] if x["key"] == K5]); at("07:00", 13); remind(asks(i, K5)); r, = [x for x in outs("relief") if x["key"].endswith(":r1")]
         assert r["text"].endswith("\nWork from Ms Evelyn Koh: Read p.4\nFiles: 1, sent after this message.") and json.loads(r["files"]) == [dict(id=i, file="f1", name="a.pdf")], "the work set since"
-        put(r["key"], state="sent", sent_at="2026-10-13T07:00:00+08:00"); assert TE.sweep() == 0; at("07:10", 13); give(i, K5, MAYA); swept(); swept()
+        put(r["key"], state="sent", sent_at="2026-10-13T07:00:00+08:00"); assert TE.sweep() == 1 and told_of("new") == [("new", TEAM)], "the team's ping alone"; at("07:10", 13); give(i, K5, MAYA); swept(); swept()
         assert told_of("moved") == [("moved", SAM)] and [x["key"] for x in outs("relief", MAYA)] == [relief_key_of(i, K5)], "one moved, and her own message"
         absences.cancel(i, "Better", HUGO); swept(); assert told_of("gone") == [("gone", MAYA)]
     def copy(): r = next(x for x in outs("relief") if x["key"].endswith(":r1")); return dict(r, ref=json.loads(r["ref"]))
@@ -5663,7 +5663,7 @@ def stopped_is_said_again_once_something_said_that_it_is_on():
     def stopped(i): return [x["key"] for x in dues(links=exam_links()) if x["kind"] == "stopped"]
     for unread in (*UNREAD, unreadable):                                                   # reminded by the team while it is not known, and stopped still
         with exam_school(SAM, TEAM):
-            i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); assert swept() == 1 and said(SAM) == [RELIEF_K5, STOPPED_K5]
+            i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); assert swept() == 2 and said(SAM) == [RELIEF_K5, STOPPED_K5] and told_of("new") == [("new", TEAM)]   # and the team's ping
             for hm in ("06:56", "06:57", "06:59"): at(hm, 13); assert swept() == 0, "once, while nothing said since that it is on"
             at("07:00", 13)
             with unread(): assert remind(asks(i, K5))["sent"] == 1 and send() == 1 and swept() == 0 and said(SAM)[2:] == [RELIEF_K5]
@@ -7460,6 +7460,78 @@ def only_a_blocked_bot_makes_the_line():
         links.unlink(TIA); links.link(TIA, 501, None); f, seen = tele(BLOCKED, before=lambda *a: links.unlink(TIA)); q("c"); with_send(f, OB.send_due)
         assert links.blocked(TIA) is None, "unlinked by hand between: the bot was not what unlinked them"
         links.link(TIA, 501, None); tgdb.set_state("blocked:" + TIA, "2026-10-13T07:10:00+08:00"); assert status_of(TIA)["blocked"] is None, "a note left behind is not shown while linked"
+
+# ---- Answers, Task 3: the team pinged for a request for today ----
+from relief import report as RO  # noqa: E402
+NEW_EVE = "🆕 Relief asked for today · Ms Evelyn Koh\nwhole day\n2 lessons are waiting for your approval."
+OPEN_TODAY = [[dict(text="Open relief today", url=BASE + "/relief#today")]]
+def news(): return sorted((r["key"], r["name"], r["text"]) for r in outs("new"))
+def pick(i, ckey, who_=SAM): return CV.set_pick(i, ckey, dict(who=who_, by="ai", reason="Free then.", at=clock.now), SCHOOL, rs())
+
+@t
+def the_team_hears_once_of_a_request_for_today():
+    assert TE.new_text("{absent}", "{whole day or periods}", 1).endswith("\n1 lesson is waiting for your approval.") and TE.OPEN_TODAY == RO.OPEN_TODAY
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(reason="Other", reason_text="zebra-private"); swept(); assert news() == [], "not before a pick"
+        FL.run(ids=[i]); swept()
+        assert news() == [(f"new:{i}:{LEE}", LEE, NEW_EVE), (f"new:{i}:{TEAM}", TEAM, NEW_EVE)] and all(buttons_of(r) == OPEN_TODAY for r in outs("new"))
+        assert said(TEAM)[-1] == NEW_EVE and not any("zebra" in r["text"] or "Other" in r["text"] for r in outs())
+        FL.run(ids=[i]); at("07:30", day=13); swept(); assert len(outs("new")) == 2, "one a person, whatever comes after"
+
+@t
+def no_ping_while_a_pick_is_on_its_way():
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(); pick(i, K2); at("07:04:59", day=13); swept(); assert news() == [], "one picked, one still to come"
+        at("07:05", day=13); swept(); assert [x[2] for x in news()] == [NEW_EVE] * 2, "five minutes on: the open one waits for the team too"
+    with school(EVE, TEAM, LEE, limits=dict(fat_per_day=3, other_per_day=None, never=[SAM, MAYA, RUTH, BUSY, HUGO, LEE, TEAM, ROSA, OFFIE])):
+        at("07:00", day=13); i = absent(); FL.run(ids=[i]); swept(); assert news() == []
+        at("07:05", day=13); swept(); assert len(news()) == 2, "nobody free: the team must choose"
+
+@t
+def one_ping_an_absence_never_a_lesson_never_a_backup():
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); ids = [absent(), absent(teacher=SAM, by=HUGO), absent(teacher=RUTH, by=HUGO)]
+        j = absent(teacher=BUSY, by=HUGO); change_record(j, lambda r: r.update(exams=dict(source="made-up")))
+        FL.run(); swept(); assert sorted(k.split(":")[1] for k, n, x in news()) == sorted(ids * 2), "planned by a head too; a backup never"
+        swept(); FL.run(); swept(); assert len(news()) == 6
+
+@t
+def only_today_only_since_connected_never_to_who_sent_it():
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(by=TEAM); FL.run(ids=[i]); swept(); assert [n for k, n, x in news()] == [LEE], "not to who planned it"
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); absent(by=HUGO); FL.run(); assert sorted(x["name"] for x in dues(told={}, team=(EVE, TEAM, LEE)) if x["kind"] == "new") == sorted([LEE, TEAM]), "never to the absent teacher"
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(dates=("2026-10-14",)); FL.run(ids=[i]); swept(); assert news() == [], "another day"
+    with school(EVE, TEAM, LEE):
+        at("20:00", day=12); i = absent(); FL.run(ids=[i]); swept(); at("07:00", day=13); swept(); assert news() == [], "sent the evening before"
+    with school(EVE, TEAM, LEE, since="2026-10-13T08:00:00+08:00"):
+        at("07:00", day=13); i = absent(); FL.run(ids=[i]); at("08:01", day=13); swept(); assert news() == [], "before the bot was connected"
+
+@t
+def a_ping_no_longer_true_is_dropped_and_not_made_again():
+    def approve_all(i):
+        for k in (K2, K5): CV.approve(i, k, covered(i, k)[2]["relief"], TEAM, SCHOOL, rs())
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(); FL.run(ids=[i]); TE.sweep(); approve_all(i); send()
+        assert [state(f"new:{i}:{n}") for n in (LEE, TEAM)] == ["dropped"] * 2; TE.sweep(); assert [state(f"new:{i}:{n}") for n in (LEE, TEAM)] == ["dropped"] * 2, "claimed once"
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(); FL.run(ids=[i]); TE.sweep(); absences.cancel(i, "Better", EVE); send(); assert state(f"new:{i}:{TEAM}") == "dropped"
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(dates=("2026-10-13", "2026-10-14")); FL.run(ids=[i]); TE.sweep(); at("07:00", day=14); send(); assert state(f"new:{i}:{TEAM}") == "dropped", "the day is past"
+    with school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(); FL.run(ids=[i]); TE.sweep()
+        with record(LEE, extras=dict(relief=False, exams=None, admin=False)): send()
+        assert (state(f"new:{i}:{LEE}"), state(f"new:{i}:{TEAM}")) == ("dropped", "sent"), "off the team by then"
+        TE.sweep(); assert state(f"new:{i}:{LEE}") == "dropped", "claimed once: on the team again and still true, never made again"
+
+@t
+def no_ping_of_lessons_an_exam_stops():
+    with exam_school(EVE, TEAM, LEE):
+        e = exam("1A", "1B", "1C"); at("07:00", day=13); absent(); at("07:05", day=13); swept(); assert news() == [], "nothing of it waits for the team"
+        withdraw(e); swept(); assert [x[2] for x in news()] == [NEW_EVE] * 2, "they stand again"
+    with exam_school(EVE, TEAM, LEE):
+        at("07:00", day=13); i = absent(); at("07:05", day=13); TE.sweep(); exam("1A", "1B", "1C"); send(); assert state(f"new:{i}:{TEAM}") == "dropped", "stopped by the time it goes"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
