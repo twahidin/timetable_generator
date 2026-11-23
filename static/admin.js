@@ -263,7 +263,7 @@
   function openMenu(kind, mgmt) {
     if (S.menu && S.menu.kind === kind && !mgmt) { S.menu = null; drawBar(); return; }
     const first = ticks().map(person).filter(Boolean)[0], r = first && String(first.role || "").trim().toLowerCase();
-    S.menu = { kind, extra: "timetable", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt };
+    S.menu = { kind, extra: "relief", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt };
     drawBar(); previewMenu();
   }
 

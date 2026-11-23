@@ -326,4 +326,12 @@ def a_removed_name_reads_with_its_sign_out_number():
     assert P._fill({"people": {}, "removed": {"X": 4}})["removed"] == {"X": 4}
     assert P.record(None, "X")["n"] == 0
 
+@t
+def the_first_admin_beside_unusable_old_shape_admins():
+    d = {"people": {"Mr Old Nopw": {"group": "committee", "username": "old.nopw", "extras": {"admin": True}},          # no password
+                    "Ms Old Off": {"group": "committee", "username": "old.off", "pw": PW.hash_pw(secrets.token_hex(8)),
+                                   "off": True, "extras": {"admin": True}}}, "removed": {}}                          # switched off
+    assert P.usable_admins(d) == [], P.usable_admins(d)       # so the first admin is offered
+    assert P.admins(d) == ["Mr Old Nopw"], P.admins(d)
+
 print(f"{COUNT} accounts tests passed")

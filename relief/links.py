@@ -182,7 +182,9 @@ def _accounts_now():
 
 
 def _stand_in(name, data):
-    """app.py's _stand_in: a person while nothing is published, from their record"""
+    """app.py's _stand_in: a person while nothing is published, from their record; None for a name removed on the admin page
+    that has no record since"""
+    if name in data["removed"] and not isinstance(data["people"].get(name), dict): return None
     r = _accounts.record(data, name)
     return dict(name=name, short=name, depts=list(r["depts"]), role="", teaches=False, staff_only=False, group=r["group"] or "teacher",
                 extras=r["extras"], username=r["username"], off=r["off"], has_password=bool(r["pw"]), last=max(r["signins"], default=None),
@@ -195,9 +197,7 @@ def _there(name):
     if data is None: return None
     pub = store.published()
     p = _accounts.find(name, pub, data)
-    if p is None and not pub:
-        if name in data["removed"] and not isinstance(data["people"].get(name), dict): return None   # removed on the admin page: nobody
-        p = _stand_in(name, data)
+    if p is None and not pub: p = _stand_in(name, data)
     if p is None or p["off"]: return None
     p.pop("pw", None)
     return p

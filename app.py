@@ -392,12 +392,14 @@ def account_password():
     if new != again: return _change_page(p, NOT_SAME), 400
     h = passwords.hash_pw(new)
     def change(d):
-        n = people.record(d, p["name"])["n"] + 1   # read before a record is made, so a first one starts from their sign-out number
-        x = d["people"].setdefault(p["name"], {})
-        x.update(pw=h, must_change=False, n=n)
-        return n
+        x = d["people"].get(p["name"])
+        if not isinstance(x, dict): return None   # removed meanwhile (a username is on a record): no record comes back
+        x.update(pw=h, must_change=False, n=people.record(d, p["name"])["n"] + 1)
+        return x["n"]
     try: n = people.update(change)
     except people.Unreadable: return _change_page(p, people.UNREADABLE), 503
+    if n is None:
+        session.clear(); return redirect("/login")   # as for a session that no longer holds
     session["n"] = n   # this session stays; every other one of this person's ends (its number is old)
     _record_account("password", p["name"], "Changed their password")
     return redirect("/home")

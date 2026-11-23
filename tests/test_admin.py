@@ -874,6 +874,41 @@ def an_old_committee_group_entry_is_not_put_back():
     mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == m["id"]][0]
     assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
 
+@t
+def put_back_of_the_committee_given_also_takes_an_admin_given_later():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True))[0] == 200; given = accounts()[0]
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(admin=True))[0] == 200
+    assert back(c, given["id"]) == (200, {"done": True, "text": "Put back."})                 # the later Admin does not block it: it goes with the tick
+    assert rec(NUR)["extras"]["timetable"] is False and rec(NUR)["extras"]["admin"] is False, rec(NUR)["extras"]
+    got = {(x["name"], x["field"], x["was"], x["now"]) for x in accounts()[0]["changes"]}
+    assert accounts()[0]["what"] == "putback" and got == {(NUR, "timetable", True, False), (NUR, "admin", True, False)}, accounts()[0]["changes"]
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=True))[0] == 200; given = accounts()[0]
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(admin=True))[0] == 200
+    others = [n for n in P.usable_admins(P.load()) if n != LEE]                              # the other admins: off for this part
+    P.update(lambda d: [d["people"][n].update(off=True) for n in others])
+    try:
+        assert P.usable_admins(P.load()) == [LEE]
+        lc = signed_in(LEE); before, n = raw(), len(accounts())
+        assert back(lc, given["id"]) == (409, {"error": last_admin(LEE)})                     # the last-admin rule still holds
+        assert raw() == before and len(accounts()) == n and rec(LEE)["extras"]["admin"] is True
+    finally: P.update(lambda d: [d["people"][n].update(off=False) for n in others])
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=False))[0] == 200     # undone for the tests after
+    assert rec(LEE)["extras"]["timetable"] is False and rec(LEE)["extras"]["admin"] is False
+
+@t
+def old_code_entries_on_an_old_shape_person_are_put_back():
+    c = admin(); OLD = "Mr Old Shape"
+    P.update(lambda d: d["people"].__setitem__(OLD, dict(added=True, group="committee", extras=dict(NOBODY_EXTRAS, admin=True, relief=True))))
+    try:
+        assert rec(OLD)["extras"]["timetable"] is True
+        for field in ("admin", "relief"):                                                    # one-change entries as the old code wrote them
+            e = H.add({"kind": "account", "what": field, "where": "Admin", "people": [OLD], "text": f"{OLD}: {field} given",
+                       "changes": [dict(name=OLD, field=field, was=False, now=True)], **H.by_of(ALICIA, "password")})
+            assert back(c, e["id"]) == (200, {"done": True, "text": "Put back."}), field
+            r = rec(OLD); assert r["extras"][field] is False and r["extras"]["timetable"] is True, (field, r)
+    finally: P.update(lambda d: d["people"].pop(OLD, None))
+
 import access  # noqa: E402
 import relief.links as RL  # noqa: E402
 
@@ -1043,9 +1078,14 @@ def a_removed_person_cannot_link_telegram_with_nothing_published():
         os.rename(away, store.PUB); store._cache.update(stamp=None, value=None); RL.forget(IDA)
     P.update(lambda d: d["removed"].update({"Ms Hand Built": 3}))                                # a hand-built removal, nothing published
     os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
-    try: assert RL._there("Ms Hand Built") is None and RL._there("Ms Never Here") is not None   # only a removed name is refused
+    with RL.tgdb.db() as k: k.executemany("INSERT INTO links(name, chat) VALUES (?, ?)", [("Ms Hand Built", 902), ("Ms Never Here", 903)])
+    try:
+        assert RL._there("Ms Hand Built") is None and RL._there("Ms Never Here") is not None   # only a removed name is refused
+        got = RL.reachable(None)
+        assert "Ms Hand Built" not in got and got.get("Ms Never Here") == 903, got           # reachable asks the same as _there
     finally:
         os.rename(away, store.PUB); store._cache.update(stamp=None, value=None)
+        with RL.tgdb.db() as k: k.execute("DELETE FROM links WHERE chat IN (902, 903)")
         P.update(lambda d: d["removed"].pop("Ms Hand Built"))
 
 @t
@@ -1059,6 +1099,51 @@ def a_tick_for_someone_just_removed_says_so():           # Review Focus 5
     A._note_signin(BO)                                                                          # a code sign-in that read the records before the removal
     assert BO not in P.load()["people"] and rec(BO)["n"] == P.load()["removed"][BO]
     assert raw() == before
+
+def removed_since(n): return f"Can't put back: {n} was removed since. Make the change on the admin page."
+
+@t
+def no_put_back_across_a_removal():
+    c = admin(); UMA = "Ms Uma Added"
+    assert post(c, "/api/admin/person", name=UMA, added=True)[0] == 200
+    assert post(c, "/api/admin/person", name=UMA, extras=dict(timetable=True, admin=True))[0] == 200
+    assert post(c, "/api/admin/person", name=UMA, extras=dict(timetable=False))[0] == 200
+    taken = accounts()[0]; assert {x["field"] for x in taken["changes"]} == {"timetable", "admin"}, taken["changes"]
+    wei = rec(WEI)["extras"]["exams"]
+    assert post(c, "/api/admin/bulk", names=[WEI, UMA], action="give", extra="exams", until=UNTIL, preview=False)[0] == 200
+    bulk = accounts()[0]; assert [x["name"] for x in bulk["changes"]] == [WEI, UMA], bulk["changes"]
+    assert post(c, "/api/admin/remove", name=UMA)[0] == 200
+    assert post(c, "/api/admin/person", name=UMA, added=True)[0] == 200                      # the same name added again
+    for e in (taken, bulk):
+        before, n = raw(), len(accounts())
+        assert back(c, e["id"]) == (409, {"error": removed_since(UMA)}), e["text"]          # refused whole, naming the removed person
+        assert raw() == before and len(accounts()) == n
+        mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+        assert mine["back"]["ok"] is False and mine["back"]["why"] == removed_since(UMA), mine.get("back")
+    assert rec(UMA)["extras"] == dict(timetable=False, relief=False, exams=None, admin=False), rec(UMA)["extras"]
+    assert rec(WEI)["extras"]["exams"] == UNTIL
+    assert post(c, "/api/admin/person", name=UMA, extras=dict(relief=True))[0] == 200          # a change after the adding again
+    later = accounts()[0]
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == later["id"]][0]
+    assert mine["back"]["ok"] is True, mine.get("back")
+    assert back(c, later["id"]) == (200, {"done": True, "text": "Put back."}) and rec(UMA)["extras"]["relief"] is False
+    assert post(c, "/api/admin/person", name=WEI, extras=dict(exams=wei))[0] == 200            # undone for the tests after
+    assert post(c, "/api/admin/remove", name=UMA)[0] == 200
+
+@t
+def a_password_change_for_someone_just_removed_writes_nothing():
+    c = admin(); PIA = "Ms Pia Added"
+    pp, _ = added_with_password(c, PIA, "pia.added"); once = SECRETS[-1]; new = secret()
+    real, seen = A.passwords.hash_pw, {}
+    def removed_meanwhile(pw):                                                                  # the removal lands between the route's checks and its write
+        def gone(d): d["removed"][PIA] = P.record(d, PIA)["n"] + 1; d["people"].pop(PIA)
+        P.update(gone); seen["before"] = raw(); return real(pw)
+    A.passwords.hash_pw = removed_meanwhile
+    try: r = pp.post("/account/password", data=dict(current=once, new=new, again=new))
+    finally: A.passwords.hash_pw = real
+    assert "before" in seen and went(r, "/login"), r.status_code
+    assert PIA not in P.load()["people"] and raw() == seen["before"]                             # no record comes back
+    assert pp.get("/api/day").status_code == 401
 
 
 print(f"{COUNT} admin tests passed")
