@@ -1,11 +1,16 @@
 """The words for a lesson, its periods and times, and the dates of an absence, as the pages, the history and the messages on
-Telegram say them. Pure: reads no files."""
+Telegram say them, and the labels of the kinds of message (KINDS: Relief settings lists what could not be sent by them, and the
+blocked-bot alert names what was refused by them). Pure: reads no files."""
 import datetime
 
 from exams.days import bounds, hhmm
 from relief import absences as _absences
 
 ENTIRE = "Entire Class"
+KINDS = dict(planned="Relief planned", remind="Reminder to acknowledge", officer="To the reporting officer", ask="Request to change", askpick="New pick for a request to change",
+             kept="Relief kept", cancelled="Absence cancelled", gone="No longer needed", moved="Relief moved", stopped="Not happening", again="On again", weekly="Weekly summary",
+             late="Late request for today", morning="Morning message", repeat="Reminder of a relief", needed="Relief needed again", covered="Who covers you",
+             unlinked="Bot blocked alert", work="Please set work")       # a relief, a report and an all clear have none (relief/tgweb.py's UNSENT_LEFT_OUT)
 
 
 def class_group(x):

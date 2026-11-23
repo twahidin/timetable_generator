@@ -3,9 +3,14 @@ team, acknowledged by the relief teacher, asked to change), and a lesson split a
 
 A cover is the lesson itself or, once the lesson is split, one of its "parts" (dicts with p and n). Its fields are read with
 .get, since stage 2's records have none: relief (a name or None), relief_by, pick (None or dict(who, by, reason, at), by
-"planner" | "ai" | "app" | "team"), approved (None or dict(by, at)), ack (None or dict(at)), change (None or dict(why, at,
-pick), pick None while being picked) and history (dict(what, who, by, at, why) for every pick ever made and every step).
-Every change is load, modify, save under absences._LOCK; nothing here calls the model.
+"planner" | "ai" | "app" | "team"; a head's own choice when planning is approved and sent out by them at once, chose),
+approved (None or dict(by, at)), sent_out (None or dict(by, at, approved_at): the relief
+team released this approval to its teacher; written None with each approval, so a new approval needs a new Send out; a cover
+approved before there was Send out has no such key and counts as sent out at its approval, see sent_out), ack (None or
+dict(at)), change (None or dict(why, at, pick), pick None while being picked) and history (dict(what, who, by, at, why) for
+every pick ever made and every step).
+An approved relief whose teacher is away then goes back to open by itself (back_to_open, from relief.fill's runs), and
+was_away says so until it is approved again. Every change is load, modify, save under absences._LOCK; nothing here calls the model.
 
 links (exams.relief_links.Links, or None) says what approved exams and events do to a date. A lesson they stop is not picked
 for, approved, given to anyone, split, joined, kept, acknowledged or asked to change (NOT_HAPPENING) and takes nobody's time; nothing of it is written, so a lesson that happens
@@ -13,7 +18,9 @@ again (the exam withdrawn) has the cover it had. Someone on an exam duty or at a
 import datetime
 
 from relief import absences as _absences       # absences and free import this module too: no name of theirs is read at import
+from relief import fill as _fill               # fill imports this module too: no name of theirs is read at import
 from relief import free as _free
+from relief import hours as _hours             # hours imports fill, which imports this module: no name of theirs is read at import
 from relief import lessons as _lessons
 
 NOT_FREE = "{name} is no longer free then. Choose someone else."
@@ -30,8 +37,13 @@ ASKED_ALREADY = "You asked to change this relief already."
 NO_CHANGE_ASKED = "Nobody has asked to change this relief."
 NOT_HAPPENING = "This lesson is not happening: {why}."
 PICK_CHANGED = "The pick has changed since you looked: look again before approving."
+NOT_TO_SEND = "This relief is not approved yet."
+SENT_ALREADY = "This relief is sent out already."
+NOT_FREE_OUT = "{name} is no longer free then: change it"
+AWAY = "{name} was to cover it and is away then"
 BY = ("planner", "ai", "app", "team")
-OPEN = dict(relief=None, relief_by=None, pick=None, approved=None, ack=None, change=None)
+OPEN = dict(relief=None, relief_by=None, pick=None, approved=None, sent_out=None, ack=None, change=None)
+APPROVED = ("approved", "acknowledged", "change")      # the states in which a relief is approved to its teacher
 
 
 def stopped(links, x):
@@ -208,6 +220,34 @@ def drop(id, ckey, why, who=None, *, into="pick"):
     return r
 
 
+def back_to_open(id, ckey, who, links=None):
+    """an approved relief (approved, acknowledged, asked to change) whose teacher who is away then (free._absent_then: an
+    absence of their own over its periods, or a backup's needed lesson) goes back to open, to be picked again: under the lock,
+    only while its relief is still who and they are away then, else the record is returned as it is and nothing saved. Nothing
+    of the old approval stays (approved, sent_out, ack, change: OPEN); the history keeps it, with "dropped" by "app" and why
+    AWAY (was_away reads it), and a request's new pick dropped too. A cover of a past date is refused (_past)"""
+    with _absences._LOCK:
+        r, x, c = _open(id, ckey)
+        if state(r, x, c) not in APPROVED or c.get("relief") != who: return r
+        if not _free._absent_then(_absences.all_records(), who, x["date"], int(c["p"]), int(c.get("n") or 1), links=links): return r
+        _settle(r, c)
+        now = _absences._now()
+        for gone in booked(c):                  # the relief, and a request's new pick: neither is wanted now
+            _log(c, "dropped", gone, "app", now, AWAY.format(name=who) if gone == who else None)
+        c.update(OPEN)
+        _absences._save(r)
+    return r
+
+
+def was_away(c):
+    """dict(who, at) of the last time the cover went back to open because its relief teacher was away then (back_to_open), while
+    it has not been approved or changed since; else None"""
+    for h in reversed(c.get("history") or []):
+        if h.get("what") in ("approved", "changed"): return None
+        if h.get("what") == "dropped" and h.get("by") == "app" and h.get("who") and h.get("why") == AWAY.format(name=h["who"]): return dict(who=h["who"], at=h.get("at"))
+    return None
+
+
 def _approve(r, x, c, who, by, pub, settings, records, now, waiting_only=False, links=None):
     """in memory: a waiting cover approved, or a change request's new pick made the relief, only while that pick is still
     who (the name the team member was shown), else PICK_CHANGED (also when it has been dropped since and not picked
@@ -222,7 +262,7 @@ def _approve(r, x, c, who, by, pub, settings, records, now, waiting_only=False, 
     if not still_free(pub, settings, records, r, x, c, pick["who"], links=links): raise ValueError(NOT_FREE.format(name=pick["who"]))
     _settle(r, c)
     if s == "change": c.update(relief=pick["who"], relief_by=None)
-    c.update(pick=pick, approved=dict(by=by, at=now), ack=None, change=None)
+    c.update(pick=pick, approved=dict(by=by, at=now), sent_out=None, ack=None, change=None)
     _log(c, "approved", pick["who"], by, now)
 
 
@@ -240,14 +280,15 @@ def approve(id, ckey, who, by, pub, settings, links=None):
 
 
 def _shown(rows):
-    """the covers Approve all was sent, [dict(id, ckey, who)] -> [(id, ckey, who)]: None (a page that did not send what it
-    showed) is PICK_CHANGED, anything else not such a list WRONG; a row without a name is kept, to be skipped"""
+    """the covers Approve all or Send out all was sent, [dict(id, ckey, who, approved_at)] -> [(id, ckey, who, approved_at)]
+    (approved_at None when not sent): None (a page that did not send what it showed) is PICK_CHANGED, anything else not such
+    a list WRONG; a row without a name is kept, to be skipped"""
     if rows is None: raise ValueError(PICK_CHANGED)
     if not isinstance(rows, list): raise ValueError(_absences.WRONG)
     out = []
     for v in rows:
         if not isinstance(v, dict) or not all(isinstance(v.get(k), str) and v[k] for k in ("id", "ckey")): raise ValueError(_absences.WRONG)
-        out.append((v["id"], v["ckey"], v.get("who")))
+        out.append((v["id"], v["ckey"], v.get("who"), v.get("approved_at")))
     return out
 
 
@@ -262,7 +303,7 @@ def approve_all(date, shown, by, pub, settings, links=None):
     with _absences._LOCK:
         records, now, rows, skipped = _absences.all_records(), _absences._now(), [], []
         by_id = {r["id"]: r for r in records}
-        for id, ckey, who in shown:
+        for id, ckey, who, _ in shown:
             try:
                 r = by_id.get(id)
                 if r is None: raise ValueError(_absences.WRONG)
@@ -298,11 +339,128 @@ def change(id, ckey, who, by, pub, settings, links=None):
         for gone in booked(c):                  # the relief and a request's new pick it replaces end here
             if gone != who: _log(c, "dropped", gone, by, now)
         pick = dict(who=who, by="team", reason=CHOSEN.format(by=by, date=_day(now)), at=now)
-        c.update(relief=who, relief_by=by, pick=pick, approved=dict(by=by, at=now), ack=None, change=None)
+        c.update(relief=who, relief_by=by, pick=pick, approved=dict(by=by, at=now), sent_out=None, ack=None, change=None)
         _log(c, "pick", who, "team", now, pick["reason"])
         _log(c, "changed", who, by, now)
         _absences._save(r)
     return r
+
+
+def chose(r, x, c, who, by, now):
+    """in memory: a head's own choice when planning (relief.plan, absences.new and choose; the caller checked who is free then
+    and that it may choose): who relieves the cover, approved and sent out by the head at once, so it reaches its teacher at
+    the first moment of school hours (goes_at). A relief other than who it replaces gets its pick written down first (_settle),
+    and every name it took the time of that is not who (booked) is written down as dropped; the pick is logged here, once"""
+    if c.get("relief") and c["relief"] != who: _settle(r, c)
+    for gone in booked(c):
+        if gone != who: _log(c, "dropped", gone, by, now)
+    pick = dict(who=who, by="planner", reason=PLANNED.format(by=by, date=_day(now)), at=now)
+    c.update(relief=who, relief_by=by, pick=pick, approved=dict(by=by, at=now), ack=None, change=None, sent_out=dict(by=by, at=now, approved_at=now))
+    _log(c, "pick", who, "planner", now, pick["reason"])
+    _log(c, "approved", who, by, now)
+    _log(c, "sent out", who, by, now)
+
+
+def planned_by(c):
+    """the head whose own choice the cover's relief still is (chose: a planner's pick, approved and sent out by its planner),
+    else None: once the relief team has changed it, or approved a choice that waited for them, it is theirs"""
+    p, a, s = c.get("pick"), c.get("approved"), sent_out(c)
+    if not c.get("relief") or not isinstance(p, dict) or not isinstance(a, dict) or s is None: return None
+    ok = p.get("by") == "planner" and p.get("who") == c["relief"] and a.get("by") == c.get("relief_by") == s.get("by")
+    return c["relief_by"] if ok and c.get("relief_by") else None
+
+
+def _dt(v):
+    """an ISO date-time (as records hold it) or a date-time, as a date-time in school time (one kept without its offset is in
+    school time); None for anything else"""
+    try: return _fill._when(v) if isinstance(v, (str, datetime.datetime)) else None
+    except ValueError: return None
+
+
+def sent_out(c):
+    """how the cover's approval was sent out to its teacher, dict(by, at, approved_at), while that is its approval now; a cover
+    approved before there was Send out (no sent_out key at all) counts as sent out at its approval, legacy=True; else None"""
+    a = c.get("approved")
+    if not isinstance(a, dict): return None
+    if "sent_out" not in c: return dict(by=a.get("by"), at=a.get("at"), approved_at=a.get("at"), legacy=True)
+    s = c.get("sent_out")
+    return s if isinstance(s, dict) and s.get("approved_at") == a.get("at") else None
+
+
+def goes_at(c, x, settings, pub):
+    """when the cover's relief reaches (or reached) its teacher, a date-time: a legacy approval at its approval; else at the
+    first moment of school hours from its Send out on (hours.reaches_at); None when it is not sent out (or that is not known)"""
+    s = sent_out(c)
+    if s is None: return None
+    if s.get("legacy"): return _dt(s.get("at"))
+    return _hours.reaches_at(s["at"], settings, pub, x.get("date"))
+
+
+def reached(r, x, c, now, settings, pub):
+    """the cover's relief has reached its teacher by now (a date-time or an ISO text): approved to them (approved,
+    acknowledged, asked to change), sent out, and its time has come"""
+    if state(r, x, c) not in APPROVED: return False
+    at, now = goes_at(c, x, settings, pub), _dt(now)
+    return at is not None and now is not None and now >= at
+
+
+def _send_out(r, x, c, who, by, pub, settings, records, now, approved_at=None, links=None):
+    """in memory: the cover's approval sent out, only while it is approved to who (and approved at approved_at, when given:
+    the approval the team member was shown), not stopped and who still free"""
+    if sent_out(c) is not None and state(r, x, c) in APPROVED: raise ValueError(SENT_ALREADY)
+    if state(r, x, c) != "approved": raise ValueError(NOT_TO_SEND)
+    if c.get("relief") != who or approved_at not in (None, c["approved"].get("at")): raise ValueError(PICK_CHANGED)
+    _happens(links, x)
+    if not still_free(pub, settings, records, r, x, c, who, links=links): raise ValueError(NOT_FREE_OUT.format(name=who))
+    c["sent_out"] = dict(by=by, at=now, approved_at=c["approved"]["at"])
+    _log(c, "sent out", who, by, now)
+
+
+def send_out(id, ckey, who, by, pub, settings, links=None, approved_at=None):
+    """a person on the relief team sends an approved relief out to its teacher, who: the relief teacher the page showed,
+    approved_at: the approval it showed (None: any). Refused with SENT_ALREADY once this approval is sent out, NOT_TO_SEND
+    when it is not approved, PICK_CHANGED when it is approved to someone else or again since (also when who is not a name),
+    NOT_HAPPENING, or NOT_FREE_OUT when who is no longer free then. It reaches them at once in school hours, else at the next
+    earliest send-out time (goes_at)"""
+    if not isinstance(who, str) or not who: raise ValueError(PICK_CHANGED)
+    pub = _absences._pub(pub)
+    with _absences._LOCK:
+        r, x, c = _open(id, ckey)
+        _send_out(r, x, c, who, by, pub, settings, _absences.all_records(), _absences._now(), approved_at, links=links)
+        _absences._save(r)
+    return r
+
+
+def send_out_all(date, shown, by, pub, settings, links=None):
+    """send out the approved covers the team member was shown on date (a date or an ISO string), shown=[dict(id, ckey, who,
+    approved_at)], in time order, each as send_out checks it; a cover not on date, or gone, is skipped too. -> dict(sent=[(id,
+    ckey, who)], skipped=[dict(id, ckey, name, why)]), name the person shown; each record saved once"""
+    pub, iso = _absences._pub(pub), _free._iso(date)
+    if datetime.date.fromisoformat(iso) < _lessons.today(): raise ValueError(_absences.PAST_LESSON)
+    shown = _shown(shown)
+    with _absences._LOCK:
+        records, now, rows, skipped = _absences.all_records(), _absences._now(), [], []
+        by_id = {r["id"]: r for r in records}
+        for id, ckey, who, approved_at in shown:
+            try:
+                r = by_id.get(id)
+                if r is None: raise ValueError(_absences.WRONG)
+                if r.get("cancelled"): raise ValueError(_absences.CANCELLED)
+                x, c = find(r, ckey)
+                if x.get("date") != iso: raise ValueError(_absences.WRONG)
+                if not isinstance(who, str) or not who: raise ValueError(PICK_CHANGED)
+            except ValueError as e:
+                skipped.append(dict(id=id, ckey=ckey, name=who, why=str(e))); continue
+            rows.append((int(c["p"]), r["teacher"], ckey, id, who, approved_at, r, x, c))
+        rows.sort(key=lambda t: t[:4])
+        done, saved = [], {}
+        for _, _, ckey, id, who, approved_at, r, x, c in rows:
+            try: _send_out(r, x, c, who, by, pub, settings, records, now, approved_at, links=links)
+            except ValueError as e:
+                skipped.append(dict(id=id, ckey=ckey, name=who, why=str(e))); continue
+            done.append((id, ckey, who)); saved[id] = r
+        for r in saved.values(): _absences._save(r)
+    return dict(sent=done, skipped=skipped)
 
 
 def split(id, key, at, by, links=None):
@@ -375,16 +533,19 @@ def keep(id, ckey, by, links=None):
     return r
 
 
-def _mine(r, x, c, me):
-    if state(r, x, c) not in ("approved", "acknowledged", "change") or c.get("relief") != me: raise ValueError(NOT_YOURS_COVER)
+def _mine(r, x, c, me, reached=None):
+    """the cover is approved to me (approved, acknowledged, asked to change) and, when reached is given (a callable (r, x, c) ->
+    bool: web._reached), has reached me; else NOT_YOURS_COVER"""
+    if state(r, x, c) not in APPROVED or c.get("relief") != me or (reached is not None and not reached(r, x, c)): raise ValueError(NOT_YOURS_COVER)
 
 
-def acknowledge_once(id, ckey, me, links=None):
+def acknowledge_once(id, ckey, me, links=None, reached=None):
     """the approved relief teacher acknowledges (once; after asking to change, it takes the relief after all) -> (the record,
-    whether this call did it: False when it was acknowledged already, on the page or on Telegram, and nothing was saved)"""
+    whether this call did it: False when it was acknowledged already, on the page or on Telegram, and nothing was saved);
+    reached: as _mine, asked under the lock"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
-        _mine(r, x, c, me)
+        _mine(r, x, c, me, reached)
         _happens(links, x)
         if state(r, x, c) == "acknowledged": return r, False
         now = _absences._now()
@@ -396,16 +557,17 @@ def acknowledge_once(id, ckey, me, links=None):
     return r, True
 
 
-def acknowledge(id, ckey, me, links=None):
+def acknowledge(id, ckey, me, links=None, reached=None):
     """as acknowledge_once -> the record"""
-    return acknowledge_once(id, ckey, me, links=links)[0]
+    return acknowledge_once(id, ckey, me, links=links, reached=reached)[0]
 
 
-def ask_change(id, ckey, why, me, links=None):
-    """the approved relief teacher asks to change, saying why in a line; the relief stays with them until the team acts"""
+def ask_change(id, ckey, why, me, links=None, reached=None):
+    """the approved relief teacher asks to change, saying why in a line; the relief stays with them until the team acts;
+    reached: as _mine, asked under the lock"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
-        _mine(r, x, c, me)
+        _mine(r, x, c, me, reached)
         _happens(links, x)
         if state(r, x, c) == "change": raise ValueError(ASKED_ALREADY)
         why = why.strip() if isinstance(why, str) else ""

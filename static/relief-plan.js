@@ -37,8 +37,8 @@
     painted: paintPlanned,
   });
 
-  /* a lesson gone from the timetable, stopped by an exam or event, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's */
-  const mayChoose = x => !x.changed && !x.stopped && x.date >= RF.today() && !R.approvedOf(x).length && (x.covers || []).length < 2;
+  /* a lesson gone from the timetable, stopped by an exam or event, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's, unless it is still this head's own choice; the server's may_choose (also false once the lesson has started) decides when it is sent */
+  const mayChoose = x => !x.changed && !x.stopped && x.date >= RF.today() && (typeof x.may_choose === "boolean" ? x.may_choose : !R.approvedOf(x).length) && (x.covers || []).length < 2;
   const plainSide = x => R.reliefLines(x);
 
   /* ---------------------------------------------------------------- the "free then" list */

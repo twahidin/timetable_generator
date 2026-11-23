@@ -20,8 +20,9 @@
   const R = window.Relief = { me: null, cur: null, tab, linkCard, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural, reliefLines, approvedOf, sentSays };
 
   /* The relief line of a lesson to cover, read cover by cover (x.covers, in time order, never x.parts[i]): the relief teacher
-     once approved (approved, acknowledged or asked to change), the planner's own choice still waiting ("Planned: name,
-     waiting for the relief team"), else "The relief team will assign". The app's own pick is never shown as a relief. */
+     once approved (approved, acknowledged or asked to change) and the name is sent ("Being arranged" while it is not: the absent
+     teacher sees it once that teacher has acknowledged), the planner's own choice still waiting ("Planned: name, waiting for the
+     relief team"), else "The relief team will assign". The app's own pick is never shown as a relief. */
   const SENT = ["approved", "acknowledged", "change"];
   function approvedOf(x) { return (x.covers || []).filter(c => SENT.includes(c.state) && c.relief); }
   function reliefLines(x) {
@@ -30,6 +31,7 @@
     return covers.map(c => {
       const at = split ? `<span class="muted">P${Number(c.p) + 1}${Number(c.n) > 1 ? `–P${Number(c.p) + Number(c.n)}` : ""}</span> ` : "";
       if (SENT.includes(c.state) && c.relief) return `<div>${at}Relief: <b>${esc(c.relief)}</b></div>`;
+      if (SENT.includes(c.state)) return `<div>${at}<span class="muted">Being arranged</span></div>`;
       if (c.planned) return `<div>${at}Planned: <b>${esc(c.planned)}</b>, waiting for the relief team</div>`;
       return `<div>${at}<span class="muted">The relief team will assign</span></div>`;
     }).join("");

@@ -2,23 +2,33 @@
 /* Today (/relief#today), for the relief team (me.can_team). Every lesson that needs relief on a date (today until another
    is chosen), from /api/relief/today, one row a cover (each part of a split lesson its own row), in time order: the
    periods and times, the class and subject, the room, the absent teacher and whether work is set, the relief teacher with
-   who picked them and why, and the state in plain words. Buttons: Approve; Choose or Change, which opens the "free then"
-   list (Relief.freeList, drawn as Plan relief's) and approves the one chosen at once; Split (a cover of two periods or
+   who picked them and why, and the state in plain words. Buttons: Approve; Send out (an approved relief not sent out yet:
+   nothing reaches its teacher until it is, and one sent out outside school hours goes at the earliest send-out time; a head's
+   own choice, planned_by, is approved and sent out when it is planned, and its line reads "Planned by {head} · "); Choose
+   or Change, which opens the "free then" list (Relief.freeList, drawn as Plan relief's) and approves the one chosen at once; Split (a cover of two periods or
    more that is not approved: the person chooses after which period); Join again (a split lesson none of whose parts is
-   approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting
-   and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
+   approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting,
+   Send out all approved and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
    this tab is on screen. After every action the day is read again; a refusal shows the server's sentence beside its row.
-   Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each): the server
+   The page opens on the day the server says (no date asked: today, or the next school day once today's cut-off has come), and its
+   second day button is the next school day (hours.next_day; "Tomorrow" when it is). An approved row says "Approved · not sent out",
+   "Will be sent at 06:45" (held) or what its teacher was sent; a waiting row asked after the cut-off says so; above the rows, a
+   line for the reliefs held and, on the next school day past the cut-off, one for what sending out now does and one for how many
+   of today's lessons still to come are open, waiting or not sent out (hours.today_left: "Today still has 1 to arrange: open Today.",
+   whose "open Today" shows today; nobody is pinged for them after the cut-off).
+   Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each); Send out and Send
+   out all the same, with the approval shown ({id, ckey, who, approved_at}): the server
    refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
    re-read shows the new one. A lesson an approved exam or event stops is shown as "Not happening", with why, out of the
    counts and with no buttons; the teacher of a backup is in school, so the row says which duty they are on. A row is known by its absence id and cover key together (two absent co-teachers of one
    lesson share a cover key).
    While the bot is connected (telegram in the answer; nothing of this shows while it is not): an approved row says what was sent
-   on Telegram (told) or that its teacher is not there (linked); Remind on a row, for whoever can be reached, and Remind all not
+   on Telegram (told) or that its teacher is not there (linked); Remind on a row, for whoever can be reached once the relief has
+   reached them (sentOut: a row's out, or "sent" for an approved row of an answer without it), and Remind all not
    acknowledged, first of the buttons at the top (its place is kept when it is not there, so that no other button moves under the
    pointer), which answers above the rows (both only while the day they were pressed on is shown). While a row says
-   "Being sent…" the day is read again every 3 seconds, 5 times at most, only on screen; so it is for a row a step was taken on here,
-   until its teacher is told (a message is made after the step that asks for it). What came of it is said in a live line of its own
+   "Being sent…" the day is read again every 3 seconds, 5 times at most, only on screen; so it is for a row sent out or reminded here
+   (not one only approved), until its teacher is told (a message is made after the step that asks for it). What came of it is said in a live line of its own
    too (tdSaid, not seen). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
@@ -29,8 +39,9 @@
      a step on its way; all: Approve all, Fill now or Remind all on its way; open: the row whose "free then" list is open, free: each
      list's answer; split: the row whose split choice is open; bot: a bot was connected when the day was last read; follow: the rows a
      step was taken on whose teacher is not told yet; reads: how often the day was read again for what is being sent; said: what came
-     of that; lines, acts: the lines above the rows and the buttons at the top as drawn */
-  const T = { pane: null, date: "", data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
+     of that; lines, acts: the lines above the rows and the buttons at the top as drawn; date: the day shown, empty until the first
+     answer (the page asks for none: the server says which day it opens on); hours: the times of the last answer (its hours) */
+  const T = { pane: null, date: "", hours: null, data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
               busy: new Set(), all: false, open: null, free: new Map(), split: null, bot: false, follow: new Set(), reads: 0, said: "", lines: "", acts: "" };
 
   const rid = r => r.id + "\n" + r.ckey;
@@ -38,7 +49,7 @@
   const findRow = k => rows().find(r => rid(r) === k) || null;
   const keyOf = el => { const row = el && el.closest(".td-row"); return row ? row.dataset.id + "\n" + row.dataset.ckey : null; };
   const rowEl = k => [...T.pane.querySelectorAll(".td-row[data-ckey]")].find(el => keyOf(el) === k) || null;
-  const past = () => T.date < RF.today();
+  const past = () => !!T.date && T.date < RF.today();
   const onScreen = () => R.cur === "today" && document.visibilityState !== "hidden";
   const lessonName = r => `${RF.title(r)} ${RF.periods(r)}`;
 
@@ -48,12 +59,22 @@
     return d === RF.today() ? t : `${day(d)}, ${t}`;
   }
 
+  const sameDay = d => d === T.date;
+  function goes(r) {   /* "06:45" on the day shown, else "Tue 13 Oct, 06:45"; "" when the time is not known */
+    const s = String(r.goes_at || ""), d = s.slice(0, 10), t = s.slice(11, 16);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{2}:\d{2}$/.test(t)) return "";
+    return sameDay(d) ? t : `${day(d)}, ${t}`;
+  }
+  const heldRows = () => rows().filter(r => r.state === "approved" && sentOut(r) === "held" && goes(r));
+
   /* ---------------------------------------------------------------- Telegram */
   const bot = () => !!T.data && T.data.telegram === true;
-  const toRemind = () => (bot() ? rows().filter(r => r.state === "approved" && r.linked) : []);   /* approved, not acknowledged, and can be reached */
+  /* "unsent" | "held" | "sent" (it has reached its teacher) for an approved row, null for the others; a row of an answer without out: as before, "sent" */
+  const sentOut = r => (typeof r.out === "string" ? r.out : r.out === null ? null : SENT.includes(r.state) ? "sent" : null);
+  const toRemind = () => (bot() ? rows().filter(r => r.state === "approved" && r.linked && sentOut(r) === "sent") : []);   /* approved, reached them, not acknowledged, and can be reached */
   const isWrong = r => r.linked && !!r.told && (r.told.state === "unsure" || r.told.state === "failed");
   const untold = r => !r.told || r.told.state === "dropped";
-  const isComing = r => r.state === "approved" && r.linked && (untold(r) ? T.follow.has(rid(r)) : r.told.state === "queued");   /* being sent, or about to be */
+  const isComing = r => r.state === "approved" && r.linked && sentOut(r) === "sent" && (untold(r) ? T.follow.has(rid(r)) : r.told.state === "queued");   /* being sent, or about to be */
   const again = () => !!T.data && (T.data.filling || (bot() && T.reads < READS && rows().some(isComing)));   /* the day is to be read again by itself */
 
   function told(r) {   /* an approved row's line: what its teacher was sent */
@@ -72,7 +93,12 @@
     return `<div class="why">${tag ? `<span class="td-by">${esc(tag)}</span> ` : ""}${esc(reason)}</div>`;
   }
 
-  function relief(r) {
+  function relief(r) {   /* who relieves the cover; an approved relief teacher who is away then (away) is named above an open or waiting one */
+    const away = r.away && (r.state === "open" || r.state === "waiting") ? `<div class="small muted td-away">${esc(`${r.away} was to cover it and is away then`)}</div>` : "";
+    return away + pickLines(r);
+  }
+
+  function pickLines(r) {
     const filling = !!(T.data && T.data.filling), warn = r.warn ? `<div class="td-warn">${esc(r.warn)}</div>` : "";
     const picking = `<span class="td-busy">Being picked…</span>`;
     if (r.state === "cancelled" || r.state === "stopped") return `<span class="muted">${r.pick ? esc(r.pick.who) : "—"}</span>`;
@@ -89,13 +115,18 @@
     return `<div><b>${esc(p.who)}</b>${r.over_now ? ` <span class="mark">over a limit</span>` : ""}</div>${byLine(p)}${warn}`;
   }
 
+  const planned = r => (r.planned_by ? `Planned by ${r.planned_by} · ` : "");   /* a head's own choice, approved and sent out when it was planned */
+  const by = r => (r.approved && r.approved.by ? `<div class="small muted">by ${esc(r.approved.by)}${clock(r.approved.at) ? `, ${esc(clock(r.approved.at))}` : ""}</div>` : "");
+
   function chip(r) {
     const c = (text, tone) => `<span class="chip td-chip${tone ? " " + tone : ""}">${esc(text)}</span>`;
     switch (r.state) {
       case "open": return c("No relief teacher yet", "");
-      case "waiting": return c("Waiting for you", "st-amber");
-      case "approved": return (bot() ? c("Approved", "st-sent") + `<div class="${isWrong(r) ? "td-warn" : "small muted"}">${esc(told(r))}</div>` : c("Approved: they see it in Reliefs I'm covering", "st-sent"))
-        + (r.approved && r.approved.by ? `<div class="small muted">by ${esc(r.approved.by)}${clock(r.approved.at) ? `, ${esc(clock(r.approved.at))}` : ""}</div>` : "");
+      case "waiting": return c("Waiting for you", "st-amber") + (r.asked_after ? `<div class="small muted">${esc(`Asked at ${r.asked_after}, after the cut-off: nobody was pinged`)}</div>` : "");
+      case "approved": if (sentOut(r) !== "sent") return c("Approved", "st-sent") + `<div class="small muted">${esc(planned(r) + (sentOut(r) === "held" && goes(r) ? `Will be sent at ${goes(r)}` : "Approved · not sent out"))}</div>` + by(r);
+        return (bot() ? c("Approved", "st-sent") + `<div class="${isWrong(r) ? "td-warn" : "small muted"}">${esc(planned(r) + told(r))}</div>`
+          : c("Approved: they see it in Reliefs I'm covering", "st-sent") + (r.planned_by ? `<div class="small muted">${esc(`Planned by ${r.planned_by}`)}</div>` : ""))
+        + by(r);
       case "acknowledged": return c(`✓ Acknowledged${r.ack && clock(r.ack.at) ? ` ${clock(r.ack.at)}` : ""}`, "st-ok");
       case "change": return c(`Asked to change${r.change && clock(r.change.at) ? ` ${clock(r.change.at)}` : ""}`, "st-blue");
       case "cancelled": return c("The absence is cancelled", "st-off");
@@ -109,10 +140,11 @@
     const k = rid(r), off = T.busy.has(k) || T.all ? " disabled" : "", out = [];
     const b = (act, label, cls, more) => `<button type="button" class="small${cls ? " " + cls : ""}" data-td="${act}"${more || ""}${off}>${esc(label)}</button>`;
     if (r.state === "waiting" && !r.stale) out.push(b("approve", "Approve", "primary"));
+    if (r.state === "approved" && sentOut(r) === "unsent" && !r.stale) out.push(b("send-out", "Send out", "primary"));
     if (r.state === "change" && r.change && r.change.pick && !r.change.stale) out.push(b("approve", "Approve the new pick", "primary"));
     const listOpen = T.open === k;
     out.push(b(listOpen ? "close" : "free", listOpen ? "Close the list" : r.state === "open" ? "Choose" : "Change", "", ` aria-expanded="${listOpen ? "true" : "false"}"`));
-    if (bot() && r.state === "approved" && r.linked) out.push(b("remind", "Remind"));   /* after Change, where the focus goes when Approve is gone */
+    if (bot() && r.state === "approved" && r.linked && sentOut(r) === "sent") out.push(b("remind", "Remind"));   /* after Change, where the focus goes when Approve is gone */
     if (r.state === "change" && r.pick) out.push(b("keep", `Keep ${r.pick.who}`));
     if (Number(r.n) >= 2 && (r.state === "open" || r.state === "waiting")) {
       const on = T.split === k;
@@ -155,32 +187,34 @@
 
   /* ---------------------------------------------------------------- the page */
   function paintDay() {
-    const t = RF.today(), tm = RF.addDays(t, 1);
-    const seg = (v, d, label) => `<button type="button" data-td="day" data-v="${v}" class="${T.date === d ? "on" : ""}" aria-pressed="${T.date === d ? "true" : "false"}">${esc(label)}</button>`;
-    $("#tdSeg", T.pane).innerHTML = seg("today", t, "Today") + seg("tomorrow", tm, "Tomorrow");
+    const t = RF.today(), h = T.hours, tm = RF.addDays(t, 1), next = h ? h.next_day : tm;   /* no hours (an old answer): tomorrow */
+    const seg = (d, label) => `<button type="button" data-td="day" data-v="${esc(d)}" class="${T.date === d ? "on" : ""}" aria-pressed="${T.date === d ? "true" : "false"}">${esc(label)}</button>`;
+    $("#tdSeg", T.pane).innerHTML = seg(t, "Today") + (next ? seg(next, next === tm ? "Tomorrow" : day(next)) : "");
     const input = $("#tdDate", T.pane);
     if (input && input.value !== T.date && document.activeElement !== input) input.value = T.date;
   }
 
   function paintHead() {
     const t = RF.today(), d = T.date, live = rows().filter(r => r.state !== "cancelled" && r.state !== "stopped"), away = new Set(live.map(r => r.absent)).size;
-    $("#tdTitle", T.pane).textContent = d === t ? "Relief today" : `Relief on ${day(d)}`;
-    const when = d === t ? `Today, ${day(d)}` : d === RF.addDays(t, 1) ? `Tomorrow, ${day(d)}` : day(d);
-    $("#tdSub", T.pane).textContent = [when, T.data ? `${R.plural(away, "teacher")} away` : "", past() ? "past: shown as it was" : ""].filter(Boolean).join(" · ");
+    $("#tdTitle", T.pane).textContent = !d || d === t ? "Relief today" : `Relief on ${day(d)}`;
+    const when = !d ? "" : d === t ? `Today, ${day(d)}` : d === RF.addDays(t, 1) ? `Tomorrow, ${day(d)}` : day(d), h = T.hours;
+    $("#tdSub", T.pane).textContent = [when, T.data ? `${R.plural(away, "teacher")} away` : "", past() ? "past: shown as it was" : "", h && h.past_cut_off ? `After ${h.cut_off} the page opens on the next school day` : ""].filter(Boolean).join(" · ");
     const c = T.data && T.data.counts;
     const counter = (label, n, tone) => `<div class="counter${tone ? " " + tone : ""}"><span class="small muted">${esc(label)}</span><b>${esc(Number(n) || 0)}</b></div>`;
     $("#tdCounts", T.pane).innerHTML = !c ? "" : [counter("Lessons to cover", c.need), counter("Waiting for you", c.waiting, "amber"),
-      counter("Approved, not acknowledged", c.approved), counter("Acknowledged", c.acknowledged, "ok"), counter("Asked to change", c.change, "blue"),
+      counter("Approved, not sent out", c.unsent), counter("Approved, not acknowledged", c.approved), counter("Acknowledged", c.acknowledged, "ok"), counter("Asked to change", c.change, "blue"),
       counter("No relief teacher yet", c.open), Number(c.nobody) ? counter("Nobody free then", c.nobody, "bad") : ""].join("");
   }
 
   function paintActs() {
-    const c = (T.data && T.data.counts) || {}, w = Number(c.waiting) || 0, off = !T.data || past() || T.all;
+    const c = (T.data && T.data.counts) || {}, w = Number(c.waiting) || 0, u = Number(c.unsent) || 0, off = !T.data || past() || T.all;
     const all = "Remind all not acknowledged";
     const first = toRemind().length ? `<button type="button" data-td="remind-all"${off || T.busy.size ? " disabled" : ""}>${all}</button> ` : T.bot ? `<span class="td-gap" aria-hidden="true">${all}</span> ` : "";
     const html = `${first}<button type="button" class="primary" data-td="all"${off || !w ? " disabled" : ""}>${esc(w ? `Approve all ${w} waiting` : "Approve all waiting")}</button>
+      <button type="button" class="primary" data-td="send-all"${off || !u ? " disabled" : ""}>${esc(u ? `Send out ${u} approved` : "Send out approved")}</button>
       <button type="button" data-td="fill"${off ? " disabled" : ""}>Fill now</button>
       <button type="button" class="small" data-td="reload"${T.loading ? " disabled" : ""}>${T.loading ? "Reading…" : "Refresh"}</button>`;
+    $("#tdActs", T.pane).classList.toggle("tg", !!T.bot);   /* room under the buttons only while a bot is connected: Remind all keeps its place */
     if (html === T.acts) return;
     const box = $("#tdActs", T.pane), a = document.activeElement, had = a && box.contains(a) ? a.dataset.td : "";
     box.innerHTML = T.acts = html;
@@ -193,7 +227,16 @@
   }
 
   function paintTop() {
-    const lines = T.top.map(m => `<p class="td-top">${say(m)}</p>`);
+    const h = T.hours, held = heldRows(), lines = [];
+    if (h && h.past_cut_off && T.date && T.date === h.next_day) lines.push({ text: `Past the cut-off (${h.cut_off}). Nobody on the team is pinged until the morning message at ${h.morning}. What you send out now is sent at ${h.send_from} on ${day(T.date)}.` });
+    const left = h ? Number(h.today_left) || 0 : 0;   /* past the cut-off, on a later day: today's lessons still to come that are open, waiting or not sent out */
+    if (left > 0 && h.today && T.date && T.date !== h.today) lines.push({ text: `Today still has ${left} to arrange:`, today: h.today });
+    if (held.length) {
+      const first = held.map(r => String(r.goes_at)).sort()[0], at = first.slice(11, 16), d = first.slice(0, 10), one = held.length === 1;
+      lines.push({ text: `${one ? "1 relief sent out: it" : `${held.length} reliefs sent out: they`} will be sent at ${at} on ${day(d)}. You can still change ${one ? "it" : "them"} until then.` });
+    }
+    lines.push(...T.top);
+    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">open Today</button>.` : ""}</p>`; });
     if (T.data && T.data.filling) lines.push(`<p class="td-top small td-busy">Being picked… The page reads the day again every 3 seconds.</p>`);
     if (T.err && T.data) lines.push(`<p class="td-top">${say(T.err)} <button type="button" class="small" data-td="reload">Try again</button></p>`);
     if (lines.join("") !== T.lines) $("#tdTop", T.pane).innerHTML = T.lines = lines.join("");   /* a live region: what is there already is not said again */
@@ -249,32 +292,34 @@
     T.loading = !(quiet && bot());
     T.reads = quiet && !(T.data && T.data.filling) ? T.reads + 1 : 0;
     if (!quiet) paintActs();
-    const res = await R.api(`/api/relief/today?date=${enc(date)}`);
+    const res = await R.api(`/api/relief/today?${date ? `date=${enc(date)}` : ""}`);
     if (seq !== T.seq) return;
     T.loading = false;
     if (!res.ok) { T.err = { text: res.error, bad: true, status: res.status }; paint(); return; }   /* no more fetches until Try again */
     const same = quiet && !T.err && T.data && JSON.stringify(T.data) === JSON.stringify(res.data);
     const was = new Set(rows().filter(isComing).map(rid));
     T.err = null; T.data = res.data; T.bot = bot();
+    if (res.data && res.data.hours && typeof res.data.hours === "object") T.hours = res.data.hours;
+    if (!T.date) { T.date = /^\d{4}-\d{2}-\d{2}$/.test(String(res.data && res.data.date)) ? res.data.date : RF.today(); paintDay(); }   /* the day the server opened on */
     T.said = !bot() ? "" : rows().filter(r => was.has(rid(r)) && r.state === "approved" && !isComing(r)).map(r => `${r.pick ? `${r.pick.who}, ` : ""}${lessonName(r)}: ${told(r)}`).join(". ");
-    for (const k of [...T.follow]) { const r = findRow(k); if (!r || r.state !== "approved" || !untold(r)) T.follow.delete(k); }
+    for (const k of [...T.follow]) { const r = findRow(k); if (!r || r.state !== "approved" || sentOut(r) !== "sent" || !untold(r)) T.follow.delete(k); }   /* held: it goes later, nothing to wait for */
     for (const [k, m] of [...T.msg]) if (!findRow(k)) { T.msg.delete(k); T.top.push(m); }   /* its row is gone (split, joined): said above the rows */
     const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
     if (T.open && !live(T.open)) T.open = null;
     if (T.split && !live(T.split)) T.split = null;
     if (!T.data.filling) T.top = T.top.filter(m => !m.fill);
-    if (same) { paintActs(); paintSaid(); } else paint();
+    if (same) { paintActs(); paintSaid(); } else { paintDay(); paint(); }
     schedule();
   }
 
-  async function act(k, method, url, body, done, here) {   /* one step on one row; then the day is read again. done(answer): what is said, or {text, bad}; here: said only while the day it was asked on is shown */
+  async function act(k, method, url, body, done, here, follow = true) {   /* one step on one row; then the day is read again. done(answer): what is said, or {text, bad}; here: said only while the day it was asked on is shown; follow: its teacher is to be told now (not after Approve or Change) */
     const f = focusNow(), date = T.date;
     T.busy.add(k); T.msg.delete(k); if (bot()) paintActs(); paintRows();
     const res = await R.api(url, R.json(method, body));
     T.busy.delete(k);
     if (here && T.date !== date) { paint(); return; }
     if (!res.ok) T.msg.set(k, { text: res.error, bad: true, status: res.status });
-    else { const m = done ? done(res.data) : ""; if (m) T.msg.set(k, typeof m === "string" ? { text: m, bad: false } : m); T.follow.add(k); }
+    else { const m = done ? done(res.data) : ""; if (m) T.msg.set(k, typeof m === "string" ? { text: m, bad: false } : m); if (follow) T.follow.add(k); }
     await load();
     if (f && !focusNow()) refocus(f, true);
   }
@@ -305,8 +350,8 @@
     if (s) s.busy = true;
     await act(k, "PUT", `/api/relief/absences/${enc(r.id)}/covers/${enc(r.ckey)}/relief`, { relief: name }, () => {
       T.open = null; T.free.delete(k);
-      return `${name} chosen and approved: they see it in Reliefs I'm covering.`;
-    });
+      return `${name} chosen and approved: press Send out to tell them.`;
+    }, false, false);
     if (s) s.busy = false;
   }
 
@@ -319,13 +364,33 @@
     if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
     else {
       const got = res.data || {}, skipped = Array.isArray(got.skipped) ? got.skipped : [];
-      covers.forEach(o => T.follow.add(rid(o)));
       T.top = [{ text: `Approved ${R.plural(Number(got.approved) || 0, "relief")}.${skipped.length ? ` Not approved: ${skipped.length}.` : ""}`, bad: false }];
-      for (const s of skipped) {   /* a skipped one is matched by its absence id and cover key */
-        const r = before.find(o => o.id === s.id && o.ckey === s.ckey);
-        T.top.push({ text: `${r ? `${lessonName(r)}, ${s.name}` : s.name}: ${s.why}`, bad: true });
-        if (r) T.msg.set(rid(r), { text: s.why, bad: true });
-      }
+      saySkipped(before, skipped);
+    }
+    await load();
+  }
+
+  function saySkipped(before, skipped) {   /* a line above the rows for each skipped one, and its sentence beside its row: matched by its absence id and cover key */
+    for (const s of skipped) {
+      const r = before.find(o => o.id === s.id && o.ckey === s.ckey);
+      T.top.push({ text: `${r ? `${lessonName(r)}, ${s.name}` : s.name}: ${s.why}`, bad: true });
+      if (r) T.msg.set(rid(r), { text: s.why, bad: true });
+    }
+  }
+
+  async function sendAll() {   /* Send out all approved: the approved rows not sent out that the page shows, as it shows them */
+    if (T.all || !T.data) return;
+    const before = rows(), date = T.date, list = before.filter(o => o.state === "approved" && sentOut(o) === "unsent" && o.pick && o.pick.who);
+    const covers = list.map(o => ({ id: o.id, ckey: o.ckey, who: o.pick.who, approved_at: (o.approved && o.approved.at) || null }));
+    T.all = true; T.top = []; paint();
+    const res = await R.api("/api/relief/today/send-out", R.json("POST", { date, covers }));
+    T.all = false;
+    if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
+    else {
+      const got = res.data || {}, skipped = Array.isArray(got.skipped) ? got.skipped : [], at = String(got.at || "").slice(11, 16);
+      covers.forEach(o => T.follow.add(rid(o)));
+      T.top = [{ text: `Sent out ${R.plural(Number(got.sent) || 0, "relief")} for ${day(date)}.${/^\d{2}:\d{2}$/.test(at) ? ` They will be sent at ${at}.` : ""}`, bad: false }];
+      saySkipped(before, skipped);
     }
     await load();
   }
@@ -383,9 +448,10 @@
     if (!b || b.disabled || !T.pane.contains(b)) return;
     const a = b.dataset.td || "pl-" + b.dataset.pl;
     switch (a) {
-      case "day": setDate(b.dataset.v === "tomorrow" ? RF.addDays(RF.today(), 1) : RF.today()); return;
+      case "day": setDate(b.dataset.v); return;
       case "reload": T.err = null; load(); return;
       case "all": approveAll(); return;
+      case "send-all": sendAll(); return;
       case "fill": fillNow(); return;
       case "remind-all": remindAll(); return;
     }
@@ -395,9 +461,12 @@
     switch (a) {
       case "approve": {
         const who = (r.state === "change" ? r.change && r.change.pick && r.change.pick.who : r.pick && r.pick.who) || "";
-        act(k, "POST", `${cover}/approve`, { who }, () => `${who} approved: they see it in Reliefs I'm covering.`);   /* the name shown: refused if it changed */
+        act(k, "POST", `${cover}/approve`, { who }, () => `${who} approved: press Send out to tell them.`, false, false);   /* the name shown: refused if it changed */
         return;
       }
+      case "send-out":   /* the relief and the approval shown: refused if either changed */
+        act(k, "POST", `${cover}/send-out`, { who: (r.pick && r.pick.who) || "", approved_at: (r.approved && r.approved.at) || null }, () => "Sent out.");
+        return;
       case "free": openFree(k); return;
       case "close": case "pl-close": closeFree(k); return;
       case "pl-choose": choose(k, b.dataset.name || ""); return;
@@ -433,15 +502,15 @@
   R.tab("today", {
     init(pane) {
       T.pane = pane;
-      T.date = RF.today();
+      T.date = "";
       pane.innerHTML = `<div class="card td">
         <div class="ab-top"><div><h2 id="tdTitle">Relief today</h2><div class="small muted" id="tdSub"></div></div><div class="row td-acts" id="tdActs"></div></div>
         <div class="line td-day"><div class="seg" role="group" aria-label="Which day" id="tdSeg"></div>
-          <label class="small muted" for="tdDate">or a date</label><input type="date" id="tdDate" value="${esc(T.date)}"></div>
+          <label class="small muted" for="tdDate">or a date</label><input type="date" id="tdDate" value=""></div>
         <div class="td-counts" id="tdCounts"></div>
         <div id="tdTop" aria-live="polite"></div>
         <div id="tdRows"></div>
-        <div class="note">Nothing reaches a relief teacher until someone on the relief team approves it.</div></div>`;
+        <div class="note">Nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning.</div></div>`;
       pane.addEventListener("click", onClick);
       pane.addEventListener("change", onChange);
       pane.addEventListener("keydown", onKey);

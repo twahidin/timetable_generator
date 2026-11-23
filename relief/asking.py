@@ -67,8 +67,8 @@ SAME, LATER, LATER_ALL, NEXT = "Same as before", "Later, in the app", "Later for
 LINK_REPLACED = "One link a lesson: this one is in place of the one before."
 PRESS_ONE, SEND_ONE = "Please press one of the buttons.", "Send text, a file or a photo."
 SEND, START_AGAIN = "Send", "Start again"
-SENT = "✅ Sent to the relief team: {n}, {work}. {officer}"
-TOLD, NOT_TOLD = "{officer} will be told.", tell.NOT_TOLD
+SENT = "✅ Sent to the relief team: {n}, {work}.{officer}"            # officer: " " and NOT_TOLD when they are not on Telegram, else nothing
+NOT_TOLD = tell.NOT_TOLD
 NOT_ATTACHED = "{name} could not be attached: add it in the app."
 NOT_TAKEN = "That was not attached to any lesson: add it in the app."
 NOT_SENT = "Your request for relief was not sent. Send /relief to start again."
@@ -673,8 +673,8 @@ def _sent(chat, d, r, pub):
     exams = bot._exams(pub)
     mine = [x for x in r["lessons"] if x["needed"] and not _cover.stopped(exams, x)]
     n, m = len(mine), sum(1 for x in mine if _has(x["work"]))
-    told = TOLD if _tried(lambda: d["officer"] in links.reachable(pub), False) else NOT_TOLD
-    bot.reply(chat, SENT.format(n="1 lesson" if n == 1 else f"{n} lessons", work=f"work set for {m}" if m else "no work set yet", officer=told.format(officer=d["officer"])), buttons=_app())
+    told = "" if _tried(lambda: d["officer"] in links.reachable(pub), False) else " " + NOT_TOLD.format(officer=d["officer"])
+    bot.reply(chat, SENT.format(n="1 lesson" if n == 1 else f"{n} lessons", work=f"work set for {m}" if m else "no work set yet", officer=told), buttons=_app())
 
 
 def _app():

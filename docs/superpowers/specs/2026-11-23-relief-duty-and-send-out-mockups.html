@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relief duty and send-out mockups</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2433;--muted:#5d6678;--line:#e3e7ee;--navy:#1f4e78;--accent:#2563eb;--warn:#b42318;--warn-bg:#fdecec;--ok:#067647;--ok-bg:#e7f6ee;--chip:#eef2f8;--amber:#9a5b00;--amber-bg:#fff4e0;--fat:#6b3fa0;--fat-bg:#f1eafb;--s2:#0e7490;--s2-bg:#e0f5f9}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.4}
+header.top{background:var(--navy);color:#fff;padding:14px 20px}
+header.top h1{margin:0;font-size:18px}
+header.top p{margin:2px 0 0;opacity:.8;font-size:13px}
+nav.tabs{display:flex;flex-wrap:wrap;gap:6px;padding:10px 20px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+nav.tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}
+nav.tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+nav.tabs .sep{align-self:center;font-size:12px;color:var(--muted);font-weight:600;margin:0 4px 0 8px}
+main{padding:18px 20px 60px;max-width:1280px;margin:0 auto}
+section.screen{display:none}
+section.screen.on{display:block}
+.about{background:#fff;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:16px}
+.about b{color:var(--navy)}
+.about .who{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.stage{display:inline-block;border-radius:4px;padding:1px 7px;font-size:12px;font-weight:700;margin-right:6px;white-space:nowrap}
+.stage.one{background:#e6efff;color:#1d4ed8}
+.stage.two{background:var(--s2-bg);color:var(--s2)}
+.prop{background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:0 5px;font-size:12px;font-weight:600;white-space:nowrap}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.spread{justify-content:space-between}
+h2{margin:0;font-size:22px}
+h3{margin:0 0 8px;font-size:15px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;cursor:default;white-space:nowrap;display:inline-block}
+.btn.primary{background:#111827;color:#fff;border-color:#111827}
+.btn.blue{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn.off{opacity:.45}
+.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:2px 9px;font-size:12px;white-space:nowrap}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.amber{background:var(--amber-bg);color:var(--amber)}
+.chip.blue{background:#e6efff;color:#1d4ed8}
+.chip.off{background:#f3f4f6;color:#6b7280}
+.chip.s2{background:var(--s2-bg);color:var(--s2)}
+.fat{display:inline-block;background:var(--fat-bg);color:var(--fat);border-radius:4px;padding:0 6px;font-size:11px;font-weight:600;white-space:nowrap}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;font-weight:600;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tr.new td{background:#fffbeb}
+td.act{white-space:nowrap;text-align:right}
+td.act .btn{margin:0 0 4px 4px}
+.input{border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fffdf3;font-size:13px;display:inline-block;min-width:70px}
+.counter{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:120px}
+.counter b{font-size:20px;display:block}
+.counter.amber b{color:var(--amber)}
+.counter.ok b{color:var(--ok)}
+.counter.blue b{color:#1d4ed8}
+.counter.new{border-color:#e08a00;box-shadow:0 0 0 2px var(--amber-bg)}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg span{flex:1;text-align:center;padding:6px 10px;font-size:12px;border-right:1px solid var(--line);white-space:nowrap}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--navy);color:#fff}
+.setting{display:grid;grid-template-columns:240px 1fr;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.setting:last-child{border-bottom:0}
+.setting .k{font-weight:600}
+.setting.new{background:#fffbeb;margin:0 -16px;padding:12px 16px}
+.note{font-size:12.5px;color:var(--muted);margin-top:8px}
+.banner{border-radius:10px;padding:10px 14px;margin:12px 0;font-size:13px}
+.banner.held{background:var(--amber-bg);color:var(--amber)}
+.banner.ok{background:var(--ok-bg);color:var(--ok)}
+.banner.quiet{background:#eef2f8;color:#334155}
+.banner.off{background:#f3f4f6;color:#374151}
+.clock{display:inline-block;background:#111827;color:#fff;border-radius:6px;padding:2px 8px;font-weight:700;font-size:13px;margin-right:6px}
+/* telegram */
+.grid-phones{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.phone{width:330px;max-width:100%;border:10px solid #1f2430;border-radius:34px;background:#fff;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.phone .bar{background:#1f2430;color:#fff;font-size:11px;text-align:center;padding:2px 0 6px}
+.tg-head{background:#517da2;color:#fff;padding:9px 12px;display:flex;gap:10px;align-items:center}
+.tg-head .av{width:32px;height:32px;border-radius:50%;background:#7fb2dc;display:flex;align-items:center;justify-content:center;font-weight:700}
+.tg-head small{display:block;opacity:.8;font-size:11px}
+.tg-body{background:#dfe8d6;padding:10px;display:flex;flex-direction:column;gap:6px;min-height:200px}
+.b{max-width:88%;padding:7px 9px;border-radius:10px;font-size:13px;white-space:pre-line;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.b.bot{align-self:flex-start;background:#fff;border-top-left-radius:3px}
+.b .t{display:block;text-align:right;font-size:10px;color:#8a9aa9;margin-top:2px}
+.kb{align-self:flex-start;display:grid;gap:4px;width:88%}
+.kb.two{grid-template-columns:1fr 1fr}
+.kb span{background:rgba(82,120,150,.75);color:#fff;text-align:center;border-radius:8px;padding:6px 4px;font-size:12px}
+.cap{font-size:12px;color:var(--muted);margin:8px 2px 0;max-width:330px}
+/* roster */
+.rline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px}
+.rline.offline{background:#f3f4f6}
+.rline.oneday{background:#fffbeb;border-color:#f3d9a4}
+.week{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.day{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px}
+.day h4{margin:0 0 6px;font-size:13px}
+.day .who{font-size:12.5px}
+.day.offday{background:#f3f4f6;color:#4b5563}
+.day.changed{border-color:#e08a00;box-shadow:0 0 0 2px var(--amber-bg)}
+.today-tag{display:inline-block;background:#e5e7eb;color:#374151;border-radius:4px;padding:1px 7px;font-size:12px;font-weight:700;margin-right:6px}
+.twoup{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px;align-items:start}
+.field{margin:12px 0}
+.flabel{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px}
+.seg.inline{display:inline-flex}
+.rl{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.box{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;background:#fff;margin-top:4px;color:var(--ink)}
+.box.ph{color:#9aa1ad}
+.b.user{align-self:flex-end;background:#effdde;border-top-right-radius:3px}
+.b .line{display:block;margin-top:6px;font-weight:600}
+.changes{margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px}
+.changes li{margin:3px 0}
+@media (max-width:900px){.twoup{grid-template-columns:1fr}}
+.day.today{border-color:var(--navy);box-shadow:0 0 0 2px #dbe7f3}
+@media (max-width:900px){.setting{grid-template-columns:1fr}.week{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){main{padding:14px 16px 40px}.week{grid-template-columns:1fr}.counter{min-width:0;flex:1 1 40%}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Relief duty and the send-out: mockups for discussion</h1>
+  <p>Every name, class and number here is made up. Nothing is built. <span class="stage one">Stage 1</span> is the send-out flow; <span class="stage two">Stage 2</span> is the duty roster. Marks like <span class="prop">my proposal</span> are mine for you to correct.</p>
+</header>
+<nav class="tabs" id="tabs">
+  <span class="sep">As it is today</span>
+  <button data-s="s0">0 · Asking for relief: the app and the bot</button>
+  <span class="sep">Stage 1</span>
+  <button data-s="s1" class="on">1 · Relief settings: the times</button>
+  <button data-s="s2">2 · Today, the evening before</button>
+  <button data-s="s3">3 · Today, 06:50</button>
+  <button data-s="s4">4 · Today, a late request 09:10</button>
+  <button data-s="s5">5 · Today, after the cut-off</button>
+  <button data-s="s6">6 · The messages on Telegram</button>
+  <span class="sep">Stage 2</span>
+  <button data-s="s7">7 · Duty roster and This week</button>
+</nav>
+<main>
+
+<!-- ============================================================ 0 asking -->
+<section class="screen" id="s0">
+  <div class="about"><div class="who"><span class="today-tag">As it is today</span>Who sees this: any teacher who is away</div>The two ways to ask for relief, as the app does it now (the code at head). Mr Benjamin Yap is away tomorrow, Tue 13 Oct, the whole day, and has two lessons to cover and one shared with a colleague. Nothing here is new except the lines under each, marked <span class="prop">this design</span>.</div>
+  <div class="twoup">
+    <div>
+      <h3>In the app: Relief, the tab "Ask for relief"</h3>
+      <div class="panel">
+        <h2 style="font-size:18px">Ask for relief</h2>
+        <div class="field"><div class="flabel">Which day?</div><div class="seg inline"><span>Today</span><span class="on">Tomorrow</span><span>Pick dates</span></div></div>
+        <div class="field"><div class="flabel">Away for</div><div class="seg inline"><span class="on">Whole day</span><span>Some periods</span></div></div>
+        <div class="field"><div class="flabel">Reason</div><div class="seg inline"><span class="on">Medical</span><span>Child sick</span><span>Course</span><span>Other</span></div></div>
+        <div class="field"><div class="flabel">Your lessons then, and work for each</div>
+          <div class="rl"><div><b>3B Maths</b> <span class="muted">· P3–P4 · 09:20–10:00 · 2-14</span></div>
+            <div class="small muted" style="margin-top:6px">Work for this lesson</div>
+            <div class="box">Worksheet 4, questions 1 to 10. Collect at the end.</div>
+            <div class="box ph">A link, if any (SLS, Google Drive): https://…</div>
+            <div class="row" style="margin-top:6px"><span class="chip">worksheet-4.pdf <span class="muted">220 KB</span> ✕</span><span class="btn sm">Add a file</span></div></div>
+          <div class="rl"><div><b>2A Maths</b> <span class="muted">· P5–P6 · 10:20–11:00 · 2-08</span></div>
+            <div class="small muted" style="margin-top:6px">Work for this lesson</div>
+            <div class="box ph">e.g. Textbook p. 112, Q1–10. Collect at the end.</div>
+            <div class="box ph">A link, if any (SLS, Google Drive): https://…</div>
+            <div class="row" style="margin-top:6px"><span class="btn sm">Add a file</span></div></div>
+          <div class="rl"><div><b>4E Maths (G2)</b> <span class="muted">· P9–P10 · 12:20–13:00 · 4-01</span></div>
+            <div class="row" style="margin-top:6px"><span class="muted">Ms Esther Chan is there: no relief needed</span><span class="btn sm">Ask for cover anyway</span></div></div>
+        </div>
+        <div class="field"><div class="flabel">Reporting officer</div><div class="row"><span class="chip">Mrs Helen Lim</span><span class="btn sm">Change</span></div><div class="small muted" style="margin-top:4px">Change opens a search box: "Type a name or a department".</div></div>
+        <div class="row"><span class="btn primary">Send to the relief team</span></div>
+        <div class="row" style="margin-top:10px"><span class="chip ok">Sent. The relief team can see it.</span><span class="btn sm">Open My absences</span></div>
+        <div class="small muted" style="margin-top:4px">When the reporting officer is not on Telegram, the line goes on: "Mrs Helen Lim is not on Telegram: please tell them yourself."</div>
+      </div>
+      <div class="changes"><b>What this design changes here</b> <span class="prop">this design</span><ul>
+        <li>Nothing on the form. 2A Maths has no work: Mr Yap gets "✏️ Please set work" at 18:00 today and 07:00 tomorrow until he sets it in My absences.</li>
+        <li>The "not on Telegram" sentence stays unless you answer question 3 otherwise.</li>
+        <li>After Send: the AI picks at once; nobody on the relief team is pinged in the evening.</li></ul></div>
+    </div>
+    <div>
+      <h3>On Telegram: /relief</h3>
+      <div class="phone"><div class="bar">Mon 12 Oct · 16:20</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b user">/relief<span class="t">16:20</span></div>
+          <div class="b bot">Hi Mr Benjamin Yap. Which day are you away?<span class="line">Tomorrow, Tue 13 Oct</span><span class="t">16:20</span></div>
+          <div class="cap" style="margin:0">Its buttons were: Today, Mon 12 Oct · Tomorrow, Tue 13 Oct · Several days · Another day. A press takes them off and adds the choice.</div>
+          <div class="b bot">Whole day, or some periods?<span class="line">Whole day</span><span class="t">16:20</span></div>
+          <div class="b bot">Reason?<span class="line">Medical</span><span class="t">16:20</span></div>
+          <div class="cap" style="margin:0">Buttons: Medical · Child sick · Course · Other.</div>
+          <div class="b bot">Your reporting officer is Mrs Helen Lim. Right?<span class="line">Yes</span><span class="t">16:21</span></div>
+          <div class="b bot">Work for 3B Maths P3–P4 on Tue 13 Oct (09:20)? Type it, send a file or a photo, or tap Later.<span class="t">16:21</span></div>
+          <div class="cap" style="margin:0">Its buttons were: Later, in the app · Later for all the rest. They go when a message comes.</div>
+          <div class="b user">Worksheet 4, questions 1 to 10. Collect at the end.<span class="t">16:22</span></div>
+          <div class="b bot">Work for 3B Maths P3–P4 on Tue 13 Oct (09:20): work set (text). Send more, or press Next.<span class="t">16:22</span></div>
+          <div class="b user">📷 Photo<span class="t">16:22</span></div>
+          <div class="b bot">Work for 3B Maths P3–P4 on Tue 13 Oct (09:20): work set (text, 1 file). Send more, or press Next.<span class="line">Next</span><span class="t">16:22</span></div>
+          <div class="cap" style="margin:0">Its buttons were: Next · Later for all the rest.</div>
+          <div class="b bot">Work for 2A Maths P5–P6 on Tue 13 Oct (10:20)? Type it, send a file or a photo, or tap Later.<span class="line">Same as before</span><span class="t">16:23</span></div>
+          <div class="cap" style="margin:0">Its buttons were: Same as before · Later, in the app (no "Later for all the rest": one lesson left).</div>
+          <div class="b bot">Relief for Tue 13 Oct · whole day
+Reason: Medical
+Reporting officer: Mrs Helen Lim
+• 3B Maths P3–P4 on Tue 13 Oct: work set (text, 1 file)
+• 2A Maths P5–P6 on Tue 13 Oct: work set (text, 1 file)<span class="line">Send</span><span class="t">16:23</span></div>
+          <div class="cap" style="margin:0">Its buttons were: Send · Start again.</div>
+          <div class="b bot">✅ Sent to the relief team: 2 lessons, work set for 2. Mrs Helen Lim will be told.<span class="t">16:23</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap">4E Maths (G2) is not asked about: Ms Esther Chan is there, so it needs no relief. "Same as before" copies the work of the last lesson with work, the photo too.</p>
+      <div class="changes"><b>What this design changes here</b> <span class="prop">this design</span><ul>
+        <li>Nothing in the conversation. "Mrs Helen Lim will be told." stays unless you answer question 3 otherwise.</li>
+        <li>Had he pressed "Later, in the app": "✏️ Please set work" at 18:00 and 07:00 (work is set in the app; /relief cannot add it later).</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 1 settings -->
+<section class="screen on" id="s1">
+  <div class="about"><div class="who"><span class="stage one">Stage 1</span>Who sees this: the timetable committee and the relief team</div>Relief settings, the <b>Times</b> card. The three new times (shaded) replace "Fill open lessons at": the AI now picks as soon as a request is in. The other times stay as they are.</div>
+  <div class="panel">
+    <h3>Times</h3>
+    <div class="setting new"><div class="k">Morning message to the relief team at</div><div><span class="input">06:30</span> <span class="prop">my proposal</span><div class="small muted">One message on Telegram with everything waiting for today. Not on weekends, holidays or days with no relief duty.</div></div></div>
+    <div class="setting new"><div class="k">Earliest send-out to relief teachers</div><div><span class="input">06:45</span> <span class="prop">my proposal</span><div class="small muted">Nothing reaches a relief teacher before this time of a school day, whenever Send out was pressed. School hours for relief teachers run from here to the cut-off.</div></div></div>
+    <div class="setting new"><div class="k">Cut-off for the day's relief</div><div><span class="input">14:00</span> <span class="prop">my proposal</span><div class="small muted">After it, nobody on the team is pinged about today, and the team works on the next school day. Until the next morning message, the team is not disturbed.</div></div></div>
+    <div class="setting"><div class="k">Absent teacher</div><div>Remind the absent teacher to acknowledge and set work at <span class="input">15:00</span> the school day before (a planned absence, as today)</div></div>
+    <div class="setting new"><div class="k">Remind the absent teacher to set work at</div><div><span class="input">18:00</span> the evening before, and <span class="input">07:00</span> on the day <span class="prop">my proposal</span><div class="small muted">Only while a lesson of that day has no work. The lead's times; any absence, asked or planned.</div></div></div>
+    <div class="setting"><div class="k">Reports</div><div>Report "not yet acknowledged" every <span class="input" style="min-width:50px">15</span> minutes · Weekly summary on <span class="input">Friday</span> at <span class="input">15:00</span></div></div>
+    <p class="note">Saving checks: the morning message at or before the earliest send-out, and both before the cut-off. "Fill open lessons at" is gone from this card.</p>
+  </div>
+</section>
+
+<!-- ============================================================ 2 evening -->
+<section class="screen" id="s2">
+  <div class="about"><div class="who"><span class="stage one">Stage 1</span>Who sees this: the relief team · Mon 12 Oct, 21:00</div>The evening before. Ms Rachel Koh looks at tomorrow from home. The AI picked as each request came in. She approves two and presses <b>Send out 2 approved</b>: nothing goes yet. Nobody on the team was pinged tonight.</div>
+  <div class="row spread" style="margin-bottom:10px">
+    <div><h2>Relief on Tue 13 Oct</h2><div class="muted">After 14:00 the page opens on the next school day</div></div>
+    <div class="seg" style="width:230px"><span>Today</span><span class="on">Tue 13 Oct</span></div>
+  </div>
+  <div class="banner held"><span class="clock">21:00</span>2 reliefs sent out: <b>they will be sent at 06:45 on Tue 13 Oct</b>. You can still change them until then.</div>
+  <div class="row" style="margin-bottom:12px">
+    <div class="counter"><span class="small muted">Lessons to cover</span><b>5</b></div>
+    <div class="counter amber"><span class="small muted">Waiting for you</span><b>2</b></div>
+    <div class="counter new"><span class="small muted">Approved, not sent out</span><b>0</b></div>
+    <div class="counter"><span class="small muted">Approved, not acknowledged</span><b>0</b></div>
+    <div class="counter ok"><span class="small muted">Acknowledged</span><b>0</b></div>
+    <div class="counter"><span class="small muted">No relief teacher yet</span><b>1</b></div>
+  </div>
+  <div class="row" style="margin-bottom:12px"><span class="btn primary">Approve all 2 waiting</span><span class="btn blue off">Send out 0 approved</span><span class="btn">Fill now</span><span class="btn sm">Refresh</span></div>
+  <div class="panel tablewrap" style="padding:6px 10px">
+    <table>
+      <tr><th>Time</th><th>Lesson</th><th>Away</th><th>Work</th><th>Relief teacher and why</th><th>Status</th><th></th></tr>
+      <tr><td>07:40–08:20<br><span class="small muted">P1–P2</span></td><td>2C English</td><td>Mr Arjun Nair</td><td><span class="chip ok">set</span></td><td><b>Ms Irene Chua</b> <span class="fat">Flexi Adjunct</span><div class="small muted">Rule 2: Flexi Adjunct, teaches English, 1 relief period this week.</div></td><td><span class="chip blue">Approved</span><div class="small muted">Will be sent at 06:45</div></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td>09:20–10:00<br><span class="small muted">P3–P4</span></td><td>3B Maths</td><td>Mr Arjun Nair</td><td><span class="chip ok">set</span></td><td><b>Mr Daniel Tan</b><div class="small muted">Rule 3: lightest week in Mathematics (14 periods).</div></td><td><span class="chip blue">Approved</span><div class="small muted">Will be sent at 06:45</div></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td>10:20–11:00<br><span class="small muted">P5–P6</span></td><td>1A Science</td><td>Ms Chloe Ong</td><td><span class="chip amber">not yet</span></td><td><b>Ms Priya Menon</b><div class="small muted">Rule 3: same department, lightest week.</div></td><td><span class="chip amber">Waiting for you</span></td><td class="act"><span class="btn sm ok">Approve</span><span class="btn sm">Change</span></td></tr>
+      <tr><td>11:00–11:40<br><span class="small muted">P7–P8</span></td><td>1A Science</td><td>Ms Chloe Ong</td><td><span class="chip amber">not yet</span></td><td><b>Mr Leonard Teo</b> <span class="fat">Flexi Adjunct</span><div class="small muted">Rule 2: Flexi Adjunct under the limit.</div></td><td><span class="chip amber">Waiting for you</span></td><td class="act"><span class="btn sm ok">Approve</span><span class="btn sm">Change</span></td></tr>
+      <tr><td>12:20–13:00<br><span class="small muted">P9–P10</span></td><td>4A Chemistry</td><td>Mdm Siti Rahman</td><td><span class="chip ok">set</span></td><td class="muted">Nobody free then</td><td><span class="chip warn">No relief teacher yet</span></td><td class="act"><span class="btn sm">Choose</span></td></tr>
+    </table>
+  </div>
+  <p class="note">"Will be sent at 06:45": the relief message is made at 06:45 from the record as it is then, so a change, new work or a cancel before then is what goes (or nothing goes). <span class="prop">my proposal</span></p>
+</section>
+
+<!-- ============================================================ 3 06:50 -->
+<section class="screen" id="s3">
+  <div class="about"><div class="who"><span class="stage one">Stage 1</span>Who sees this: the relief team · Tue 13 Oct, 06:50</div>The morning message came at 06:30. Mr Marcus Goh approved the last two picks, chose Mr Farhan Ismail for 4A Chemistry, and pressed <b>Send out 3 approved</b>. The two held from last night went at 06:45; the three new ones went at once. The shaded row is a head's own choice: Mrs Helen Lim planned Mr Victor Lau's course yesterday and chose Ms Wen Hui Tan, so it was approved and sent out at once, with no Approve from the team.</div>
+  <div class="row spread" style="margin-bottom:10px">
+    <div><h2>Relief today</h2><div class="muted">Tue 13 Oct</div></div>
+    <div class="seg" style="width:230px"><span class="on">Today</span><span>Tomorrow</span></div>
+  </div>
+  <div class="banner ok"><span class="clock">06:50</span>Sent out 3 reliefs for Tue 13 Oct.</div>
+  <div class="row" style="margin-bottom:12px">
+    <div class="counter"><span class="small muted">Lessons to cover</span><b>6</b></div>
+    <div class="counter amber"><span class="small muted">Waiting for you</span><b>0</b></div>
+    <div class="counter new"><span class="small muted">Approved, not sent out</span><b>0</b></div>
+    <div class="counter"><span class="small muted">Approved, not acknowledged</span><b>3</b></div>
+    <div class="counter ok"><span class="small muted">Acknowledged</span><b>3</b></div>
+    <div class="counter"><span class="small muted">No relief teacher yet</span><b>0</b></div>
+  </div>
+  <div class="row" style="margin-bottom:12px"><span class="btn">Remind all not acknowledged</span><span class="btn primary off">Approve all waiting</span><span class="btn blue off">Send out 0 approved</span><span class="btn">Fill now</span><span class="btn sm">Refresh</span></div>
+  <div class="panel tablewrap" style="padding:6px 10px">
+    <table>
+      <tr><th>Time</th><th>Lesson</th><th>Away</th><th>Relief teacher</th><th>Status</th><th></th></tr>
+      <tr class="new"><td>07:40–08:20</td><td>3E Literature</td><td>Mr Victor Lau</td><td><b>Ms Wen Hui Tan</b><div class="small muted">Planned by Mrs Helen Lim on Mon 12 Oct.</div></td><td><span class="chip ok">Acknowledged Mon 12 Oct, 10:30</span><div class="small muted">Planned by Mrs Helen Lim · Sent Mon 12 Oct, 10:05 · reminded today 06:45</div> <span class="prop">my proposal</span></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td>07:40–08:20</td><td>2C English</td><td>Mr Arjun Nair</td><td><b>Ms Irene Chua</b> <span class="fat">Flexi Adjunct</span></td><td><span class="chip ok">Acknowledged 06:47</span></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td>09:20–10:00</td><td>3B Maths</td><td>Mr Arjun Nair</td><td><b>Mr Daniel Tan</b></td><td><span class="chip ok">Acknowledged 06:52</span></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td>10:20–11:00</td><td>1A Science</td><td>Ms Chloe Ong</td><td><b>Ms Priya Menon</b></td><td><span class="chip blue">Approved</span><div class="small muted">Sent 06:50</div></td><td class="act"><span class="btn sm">Remind</span><span class="btn sm">Change</span></td></tr>
+      <tr><td>11:00–11:40</td><td>1A Science</td><td>Ms Chloe Ong</td><td><b>Mr Leonard Teo</b> <span class="fat">Flexi Adjunct</span></td><td><span class="chip blue">Approved</span><div class="small muted">Not on Telegram: they see it in Reliefs I'm covering</div></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td>12:20–13:00</td><td>4A Chemistry</td><td>Mdm Siti Rahman</td><td><b>Mr Farhan Ismail</b><div class="small muted">Chosen by Mr Marcus Goh on Tue 13 Oct.</div></td><td><span class="chip blue">Approved</span><div class="small muted">Sent 06:50</div></td><td class="act"><span class="btn sm">Remind</span><span class="btn sm">Change</span></td></tr>
+    </table>
+  </div>
+  <p class="note">Mr Arjun Nair was told on Telegram, lesson by lesson, as each was acknowledged (see the messages tab). In the app he sees each relief teacher's name once it is acknowledged; before that, "Being arranged". <span class="prop">my proposal</span></p>
+</section>
+
+<!-- ============================================================ 4 09:10 -->
+<section class="screen" id="s4">
+  <div class="about"><div class="who"><span class="stage one">Stage 1</span>Who sees this: the relief team · Tue 13 Oct, 09:10</div>Ms Grace Wong asks for relief at 09:06 for P7–P9 today. The AI picks at once. At 09:08 the whole team gets the late request on Telegram. Ms Rachel Koh, on standby, opens Today: the new rows are shaded. She may approve and send out; so may anyone on the team.</div>
+  <div class="row spread" style="margin-bottom:10px">
+    <div><h2>Relief today</h2><div class="muted">Tue 13 Oct</div></div>
+    <div class="seg" style="width:230px"><span class="on">Today</span><span>Tomorrow</span></div>
+  </div>
+  <div class="row" style="margin-bottom:12px">
+    <div class="counter"><span class="small muted">Lessons to cover</span><b>7</b></div>
+    <div class="counter amber"><span class="small muted">Waiting for you</span><b>1</b></div>
+    <div class="counter new"><span class="small muted">Approved, not sent out</span><b>1</b></div>
+    <div class="counter"><span class="small muted">Approved, not acknowledged</span><b>1</b></div>
+    <div class="counter ok"><span class="small muted">Acknowledged</span><b>4</b></div>
+    <div class="counter"><span class="small muted">No relief teacher yet</span><b>0</b></div>
+  </div>
+  <div class="row" style="margin-bottom:12px"><span class="btn">Remind all not acknowledged</span><span class="btn primary">Approve all 1 waiting</span><span class="btn blue">Send out 1 approved</span><span class="btn">Fill now</span><span class="btn sm">Refresh</span></div>
+  <div class="panel tablewrap" style="padding:6px 10px">
+    <table>
+      <tr><th>Time</th><th>Lesson</th><th>Away</th><th>Relief teacher</th><th>Status</th><th></th></tr>
+      <tr><td>07:40–08:20</td><td>2C English</td><td>Mr Arjun Nair</td><td><b>Ms Irene Chua</b></td><td><span class="chip ok">Acknowledged 06:47</span></td><td class="act"><span class="btn sm">Change</span></td></tr>
+      <tr><td colspan="6" class="small muted">… three more, acknowledged …</td></tr>
+      <tr><td>12:20–13:00</td><td>4A Chemistry</td><td>Mdm Siti Rahman</td><td><b>Mr Farhan Ismail</b></td><td><span class="chip blue">Approved</span><div class="small muted">Sent 06:50</div></td><td class="act"><span class="btn sm">Remind</span><span class="btn sm">Change</span></td></tr>
+      <tr class="new"><td>11:00–11:40<br><span class="small muted">P7–P8</span></td><td>2A Geography</td><td>Ms Grace Wong</td><td><b>Ms Sabrina Low</b><div class="small muted">Rule 3: same department, lightest week.</div></td><td><span class="chip blue">Approved</span><div class="small muted">Approved · not sent out</div></td><td class="act"><span class="btn sm blue">Send out</span><span class="btn sm">Change</span></td></tr>
+      <tr class="new"><td>12:20–12:40<br><span class="small muted">P9</span></td><td>3D Geography</td><td>Ms Grace Wong</td><td><b>Mr Raymond Yeo</b><div class="small muted">Rule 3: lightest week (16 periods).</div></td><td><span class="chip amber">Waiting for you</span></td><td class="act"><span class="btn sm ok">Approve</span><span class="btn sm">Change</span></td></tr>
+    </table>
+  </div>
+  <p class="note">A row has its own <b>Send out</b>, for one relief alone; the top button sends every approved one of the day. Approve never sends by itself. <span class="prop">my proposal</span></p>
+</section>
+
+<!-- ============================================================ 5 after cut-off -->
+<section class="screen" id="s5">
+  <div class="about"><div class="who"><span class="stage one">Stage 1</span>Who sees this: the relief team · Tue 13 Oct, 14:20</div>After the cut-off. The page opens on the next school day. A request that came at 14:10 for today's last lesson is recorded, picked and shown under Today, with no ping to anyone. Requests for tomorrow wait for tomorrow's 06:30 message.</div>
+  <div class="row spread" style="margin-bottom:10px">
+    <div><h2>Relief on Wed 14 Oct</h2><div class="muted">After 14:00 the page opens on the next school day</div></div>
+    <div class="seg" style="width:230px"><span>Today</span><span class="on">Wed 14 Oct</span></div>
+  </div>
+  <div class="banner quiet"><span class="clock">14:20</span>Past the cut-off (14:00). Nobody on the team is pinged until the morning message at 06:30. What you send out now is sent at 06:45 on Wed 14 Oct.</div>
+  <div class="row" style="margin-bottom:12px">
+    <div class="counter"><span class="small muted">Lessons to cover</span><b>2</b></div>
+    <div class="counter amber"><span class="small muted">Waiting for you</span><b>2</b></div>
+    <div class="counter new"><span class="small muted">Approved, not sent out</span><b>0</b></div>
+    <div class="counter"><span class="small muted">No relief teacher yet</span><b>0</b></div>
+  </div>
+  <div class="panel tablewrap" style="padding:6px 10px">
+    <table>
+      <tr><th>Time</th><th>Lesson</th><th>Away</th><th>Relief teacher</th><th>Status</th><th></th></tr>
+      <tr><td>08:20–09:00</td><td>4B Physics</td><td>Mr Kelvin Ho</td><td><b>Mr Darren Lim</b><div class="small muted">Rule 3: same department, lightest week.</div></td><td><span class="chip amber">Waiting for you</span></td><td class="act"><span class="btn sm ok">Approve</span><span class="btn sm">Change</span></td></tr>
+      <tr><td>10:20–11:00</td><td>4B Physics</td><td>Mr Kelvin Ho</td><td><b>Ms Wen Hui Tan</b><div class="small muted">Rule 3: lightest week.</div></td><td><span class="chip amber">Waiting for you</span></td><td class="act"><span class="btn sm ok">Approve</span><span class="btn sm">Change</span></td></tr>
+    </table>
+  </div>
+  <h3 style="margin-top:18px">Under Today (Tue 13 Oct)</h3>
+  <div class="panel tablewrap" style="padding:6px 10px">
+    <table>
+      <tr><th>Time</th><th>Lesson</th><th>Away</th><th>Relief teacher</th><th>Status</th><th></th></tr>
+      <tr class="new"><td>14:40–15:20</td><td>3A CCE</td><td>Mr Ivan Chia</td><td><b>Ms Irene Chua</b></td><td><span class="chip amber">Waiting for you</span><div class="small muted">Asked at 14:10, after the cut-off: nobody was pinged</div></td><td class="act"><span class="btn sm ok">Approve</span><span class="btn sm">Change</span></td></tr>
+    </table>
+  </div>
+  <p class="note">A team member who sees it may approve and send it out; it goes at once, since 06:45 today has passed. <span class="prop">my call 8</span></p>
+</section>
+
+<!-- ============================================================ 6 telegram -->
+<section class="screen" id="s6">
+  <div class="about"><div class="who"><span class="stage one">Stage 1</span>and one <span class="stage two">Stage 2</span> message · Who gets each is under it</div>The new and changed messages, as they would look on a phone. The wording is my proposal, in the style of the messages that exist.</div>
+  <div class="grid-phones">
+    <div>
+      <div class="phone"><div class="bar">06:30</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">☀️ Relief today · Tue 13 Oct
+4 absences · 6 lessons to cover
+• 2 waiting for your approval
+• 2 sent out: will go at 06:45
+• 1 with nobody free: choose someone in the app
+• 1 sent out already
+Away: Mr Arjun Nair (whole day) · Ms Chloe Ong (P5–P8) · Mdm Siti Rahman (P9–P10) · Mr Victor Lau (P1–P2)<span class="t">06:30</span></div>
+          <div class="kb"><span>Open relief today</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>The morning message.</b> To the whole relief team at 06:30. In stage 2, to the person in charge and the standby only, with a first line "You are in charge today. Standby: Ms Rachel Koh."</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">09:08</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">🆕 Late request for today · Ms Grace Wong
+P7–P9
+2 lessons are waiting for your approval. Approve, then Send out.<span class="t">09:08</span></div>
+          <div class="kb"><span>Open relief today</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>A late request.</b> To the whole team, in both stages, for a request for today after the morning message and before the cut-off, once its picks are in (five minutes at most). Replaces the ping built on 23 Nov.</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">06:45</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">🔔 Relief for you · Tue 13 Oct
+3B Maths · P3–P4 · 09:20–10:00
+Room 2-14
+For Mr Arjun Nair
+Work from Mr Arjun Nair: Worksheet 4, questions 1 to 10. Collect at the end.
+Link: https://example.org/sls/worksheet-4
+Files: 2. Open the app to download them.<span class="t">06:45</span></div>
+          <div class="kb two"><span>✅ Acknowledge</span><span>↩ Request to change</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>The relief message.</b> To the relief teacher, once sent out (or as soon as a head planned it with that teacher), only in school hours. Files are no longer sent after it: the last line and the new button send them to the app.</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">06:52</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">✅ Covered · Tue 13 Oct
+3B Maths · P3–P4 (09:20)
+Mr Daniel Tan has acknowledged. You can reach them if you need to.<span class="t">06:52</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>Who covers you.</b> To the teacher who is away (Mr Arjun Nair), one a lesson, when its relief teacher acknowledges.</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">07:02</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">⚠️ Ms Priya Menon has blocked the bot and is now unlinked.
+They did not get: Relief for you · 1A Science P5–P6 on Tue 13 Oct.
+Please tell them yourself.<span class="t">07:02</span></div>
+          <div class="kb"><span>Open relief today</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>A teacher blocked the bot.</b> To the whole team, in both stages, when a message to that teacher is refused. Found in the evening, it waits for the morning time. Also a History line by "The app".</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">Mon 12 Oct · 10:05</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">🔔 Relief for you · Thu 15 Oct
+3E Literature · P1–P2 · 07:40–08:20
+Room 3-02
+For Mr Kenneth Wee
+Work from Mr Kenneth Wee: Read chapter 6 and answer the three questions.<span class="t">10:05</span></div>
+          <div class="kb two"><span>✅ Acknowledge</span><span>↩ Request to change</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>A head's own choice, told at once.</b> Mrs Helen Lim planned Mr Kenneth Wee's course at 10:05 and chose Ms Wen Hui Tan: approved and sent out at planning (the lead's rule). Planned in the evening, it would go at 06:45 the next school day.</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">Wed 14 Oct · 07:40</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">⏰ Reminder · your relief on Thu 15 Oct
+3E Literature · P1–P2 · 07:40–08:20 · Room 3-02
+For Mr Kenneth Wee. The work is in the app.<span class="t">07:40</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>24 hours before</b> <span class="prop">my proposal</span> The lead's "24 hours before". Acknowledged already, so a short line; not acknowledged, the relief message again with its buttons. Outside school hours it moves earlier, to the last 14:00 cut-off (Friday 14:00 for a Monday lesson).</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">Thu 15 Oct · 06:45</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">⏰ Reminder · your relief today, Thu 15 Oct
+3E Literature · P1–P2 · 07:40–08:20 · Room 3-02
+For Mr Kenneth Wee. The work is in the app.<span class="t">06:45</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>On the morning itself</b> <span class="prop">my proposal</span> At the earliest send-out time. Skipped if the teacher was told of this relief less than 12 hours before. The same two repeats go for any relief the team sent out before its day.</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">Thu 15 Oct · 06:30</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">🔁 Relief needed again · Mon 19 Oct
+2B Science · P3–P4 · for Ms Chloe Ong
+Mr Daniel Tan was to cover it and is away then. A new pick is waiting for your approval. Approve, then Send out.<span class="t">06:30</span></div>
+          <div class="kb"><span>Open relief today</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>The relief teacher is away.</b> <span class="prop">my proposal</span> Mr Daniel Tan reported sick at 21:30 on Wed 14 Oct for Mon 19 Oct: his approved relief went back to open and the AI picked again. To the whole team, in the day's hours; found in the evening, at the next morning time. He gets the existing "No longer needed".</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">Mon 12 Oct · 18:00</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">✏️ Please set work · Tue 13 Oct
+1 lesson has no work yet: 2A Maths P5–P6.
+Set it in the app, in My absences. Your relief teacher sees it there.<span class="t">18:00</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap"><span class="stage one">Stage 1</span><b>Please set work.</b> <span class="prop">my proposal</span> To the absent teacher at 18:00 the evening before and 07:00 on the day (the lead's times), while a lesson has no work. In the evening on purpose: the quiet rule is for the team and relief teachers.</p>
+    </div>
+    <div>
+      <div class="phone"><div class="bar">10:15</div><div class="tg-head"><div class="av">R</div><div>CTSS Relief<small>bot</small></div></div>
+        <div class="tg-body">
+          <div class="b bot">ℹ️ FYI · Mr Arjun Nair is away on Fri 16 Oct (whole day).
+It is a no relief duty day (HBL), so nothing is arranged.<span class="t">10:15</span></div>
+          <div class="kb"><span>Open in the app</span></div>
+        </div></div>
+      <p class="cap"><span class="stage two">Stage 2</span><b>A request on a day with no relief duty.</b> To the whole team, between the morning time and the cut-off (else at the next morning time). The AI does not pick; the team may still choose someone by hand.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 7 roster -->
+<section class="screen" id="s7">
+  <div class="about"><div class="who"><span class="stage two">Stage 2</span>Who sees this: the timetable committee and the relief team (whoever may save Relief settings)</div>A new card in Relief settings. Weekly lines say who is in charge and who is on standby on each weekday, from when to when. A "No relief duty" line switches relief off (Friday HBL). A one-day change wins over its weekday. A day with no line works as stage 1: the whole team is told and anyone approves. Anyone on the relief team can still approve and send out on any day.</div>
+  <div class="panel">
+    <h3>This week · Mon 12 to Fri 16 Oct</h3>
+    <div class="week">
+      <div class="day"><h4>Mon 12 Oct</h4><div class="who"><b>In charge</b> Mr Marcus Goh</div><div class="who"><b>Standby</b> Ms Rachel Koh</div></div>
+      <div class="day today changed"><h4>Tue 13 Oct · today</h4><div class="who"><b>In charge</b> Mr Marcus Goh</div><div class="who"><b>Standby</b> Mdm Farah Aziz</div><div class="small" style="color:var(--amber);margin-top:4px">One day only</div></div>
+      <div class="day"><h4>Wed 14 Oct</h4><div class="who"><b>In charge</b> Ms Rachel Koh</div><div class="who"><b>Standby</b> Mr Marcus Goh</div></div>
+      <div class="day"><h4>Thu 15 Oct</h4><div class="who"><b>In charge</b> Mdm Farah Aziz</div><div class="who"><b>Standby</b> Ms Rachel Koh</div></div>
+      <div class="day offday"><h4>Fri 16 Oct</h4><div class="who">No relief duty (HBL)</div><div class="small muted" style="margin-top:4px">No picks, no morning message; requests go to the team as an FYI</div></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:14px">
+    <div class="row spread"><h3>Duty roster</h3><span class="btn sm">+ Add a line</span></div>
+    <div class="rline"><b>Every Monday</b> · in charge <span class="input">Mr Marcus Goh ▾</span> · standby <span class="input">Ms Rachel Koh ▾</span> · from <span class="input">Mon 7 Sep</span> to <span class="input">Fri 20 Nov</span><span class="btn sm">✕</span></div>
+    <div class="rline"><b>Every Tuesday</b> · in charge <span class="input">Mr Marcus Goh ▾</span> · standby <span class="input">Ms Rachel Koh ▾</span> · from <span class="input">Mon 7 Sep</span> to <span class="input">Fri 20 Nov</span><span class="btn sm">✕</span></div>
+    <div class="rline"><b>Every Wednesday</b> · in charge <span class="input">Ms Rachel Koh ▾</span> · standby <span class="input">Mr Marcus Goh ▾</span> · from <span class="input">Mon 7 Sep</span> to <span class="input">Fri 20 Nov</span><span class="btn sm">✕</span></div>
+    <div class="rline"><b>Every Thursday</b> · in charge <span class="input">Mdm Farah Aziz ▾</span> · standby <span class="input">Ms Rachel Koh ▾</span> · from <span class="input">Mon 7 Sep</span> to <span class="input">Fri 20 Nov</span><span class="btn sm">✕</span></div>
+    <div class="rline offline"><b>Every Friday</b> · <span class="chip off">No relief duty</span> · name <span class="input">HBL</span> · from <span class="input">Mon 7 Sep</span> to <span class="input">Fri 20 Nov</span><span class="btn sm">✕</span></div>
+    <h3 style="margin-top:14px">One day only</h3>
+    <div class="rline oneday"><b>Tue 13 Oct</b> · in charge <span class="input">Mr Marcus Goh ▾</span> · standby <span class="input">Mdm Farah Aziz ▾</span> <span class="small muted">(Ms Rachel Koh is on a course)</span><span class="btn sm">✕</span></div>
+    <div class="row" style="margin-top:6px"><span class="btn sm">+ One day only</span><span class="small muted">a date with its own two names, or "No relief duty"</span></div>
+    <p class="note">Names are picked from the relief team. Two lines for one weekday may not overlap in dates. On a day with a line, the morning message, the not-acknowledged reports and the all clear go to these two alone; late requests, requests to change, the blocked-bot alert and the weekly summary go to the whole team. <span class="prop">my proposal</span></p>
+  </div>
+</section>
+
+</main>
+<script>
+document.querySelectorAll('#tabs button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('#tabs button').forEach(function(x){x.classList.toggle('on',x===b)});
+    document.querySelectorAll('section.screen').forEach(function(s){s.classList.toggle('on',s.id===b.dataset.s)});
+    window.scrollTo(0,0);
+  });
+});
+</script>
+</body>
+</html>

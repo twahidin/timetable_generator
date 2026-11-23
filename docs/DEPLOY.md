@@ -73,7 +73,7 @@ manager's generator.
 | `ANTHROPIC_API_KEY` | no | With it set, the Fix card on step 8 has a box to type a request in your own words. The committee adds it in Railway themselves; the app never shows it. Only the words typed in the box (at most 300 characters) and a fixed instruction go to Anthropic: no list of teachers, classes, students or lessons. A name the lead types is part of their words. The same key and model also make the relief picks (see What leaves the server). A server that still holds `AI_PROVIDER=anthropic` and `AI_API_KEY` from an earlier version has the box too: that key is used when `ANTHROPIC_API_KEY` is not set. | none: leave it out and the box is not there; the Fix card works as before. |
 | `TYPED_REQUEST_MODEL` | no | The model that reads the words in the box. `mock` turns on a practice reader that needs no key and understands two sentence shapes, for trying the box locally. When the key in use is the earlier `AI_API_KEY`, `AI_MODEL` names the model unless this is set. | `claude-opus-5-5` |
 | `TELEGRAM_BOT_TOKEN` | no | With it set, the school's own Telegram bot can be connected in **Relief settings**: people are told of their relief on Telegram and answer there. [Section 6](#6-telegram-for-relief) has the steps. The app never shows it. It is a password: whoever has it can write as the bot and read what people send it. **On one service only**: the one the school uses. The word `practice` in place of a token tries everything with nothing sent. | none: leave it out and there is no Telegram; relief works in the app as before. |
-| `RELIEF_JOBS` | no | `on` starts a one-minute background timer that makes relief picks when they are due: at once for today, and at the fill time (15:00 by default) on the school day before. With `TELEGRAM_BOT_TOKEN` set and the bot connected, it also sends the Telegram messages, the reports and the weekly summary. The Dockerfile sets it. | off outside the container: a local run picks only on **Fill now**, and no relief message goes out at all (**Today** stays at "Being sent…") |
+| `RELIEF_JOBS` | no | `on` starts a one-minute background timer that makes relief picks: every lesson still open is picked as soon as it is there, for any date (there is no fill time any more). With `TELEGRAM_BOT_TOKEN` set and the bot connected, it also sends the Telegram messages, the morning message, the reports and the weekly summary, each at its time (section 6, "When messages go"). The Dockerfile sets it. | off outside the container: a local run picks only on **Fill now**, and no relief message goes out at all (**Today** stays at "Being sent…") |
 | `SCHOOL_NAME` | no | Shown on the sign-in page until a timetable is published (then the published school name is shown), and used to name a blank setup. | `School timetable` on the sign-in page |
 | `DATA_DIR` | no | Where the data goes, if not the volume. Do not set it on Railway. | the volume's mount path, else `data/` in the app folder |
 
@@ -157,9 +157,11 @@ and BotFather gives a new one. ("When something changes", below, has the order o
 
 Connecting tells Telegram to pass on what people send the bot to this copy of the app, and gives the bot its menu
 (`/relief`, `/stop`, `/help`). The address is the one Railway gives the service, or the one you opened when Railway
-gives none. Nobody gets anything yet: each person links first. Reliefs approved before then are sent too, as long as
-their lessons are still to come; so are a request to change that still waits for the team, and a reminder still to come.
-An absence planned, asked for or cancelled before the bot was connected is not told afterwards.
+gives none. Nobody gets anything yet: each person links first. Reliefs sent out before then are sent too, in school
+hours, as long as their lessons are still to come; so are a request to change that still waits for the team, and a
+reminder still to come. An absence planned, asked for or cancelled before the bot was connected is not told afterwards,
+and neither is a reminder to set work whose time came before it. An acknowledgement made before then is not told to the
+teacher who is away; one made after it is, even for a relief sent out earlier.
 
 | If it says | Do this |
 |---|---|
@@ -196,9 +198,83 @@ bot's @name). The code works once and runs out in 15 minutes; **Get a new code**
   stays on it.
 - Somebody who blocks the bot is unlinked by the next message that cannot reach them. Their **Telegram** card in My
   absences then says why ("Your Telegram was unlinked on {day}: the bot was blocked there. Unblock it in Telegram, then
-  link again."), until they link again.
+  link again."), until they link again. The relief team is told on Telegram as well (the blocked-bot alert, below), and
+  the **History** has the line "Telegram unlinked for {name}: the bot was blocked", by "The app".
 - The relief team sees on **Today** who is not on Telegram. Those people see their relief in the app, in **Reliefs I'm
   covering**.
+
+### When messages go
+
+These times in **Relief settings**, under **Times**, decide it. Each is a setting; the defaults are:
+
+| Setting | Default | What it does |
+|---|---|---|
+| Morning message to the relief team at | 06:30 | One message to each of the relief team on Telegram with everything waiting for today. Not on weekends or holidays. |
+| Earliest send-out to relief teachers | 06:45 | Nothing reaches a relief teacher before this time of a school day. |
+| Cut-off for the day's relief | 14:00 | After it nobody on the team is pinged about today, and Today opens on the next school day. |
+| Remind the absent teacher to set work at | 18:00 the evening before, and 07:00 on the day | Only while a lesson of that day has no work. The evening one is not sent after 22:00 of that evening. |
+
+Saving checks the order: "The morning message comes at or before the earliest send-out, and both before the cut-off."
+The old time "Fill open lessons at" is gone: every open lesson is picked at once. Its value stays in the settings file,
+unread.
+
+- **Approve, then Send out.** Approve no longer tells the relief teacher. **Send out** (on a row of **Today**, **Send
+  out {n} approved** at the top, or **📤 Send out to {name}** on Telegram after **Approve**) does. In school hours it goes
+  at once; outside them it is held, and Today says "Will be sent at 06:45". The message is made when it goes, from the
+  record as it is then: a change or a cancel before then is what goes, or nothing goes. A head who chooses the relief
+  teacher in **Plan relief for a colleague** needs no Approve or Send out: the choice is approved and sent out at once.
+- **School hours for relief teachers** are from the earliest send-out time to the cut-off of a school day. After the
+  cut-off, only a message about a lesson of that same day still to come goes. Anything to a relief teacher (the relief,
+  its reminders, moved, kept, no longer needed, not happening, on again) that falls due outside them waits for the next
+  start of school hours, and is not sent if it is no longer true by then. **Remind** outside them sends nothing and says
+  "Not sent outside school hours: remind them from {at}."
+- **A relief told before its day** is told again 24 hours before its lesson (moved earlier to the last cut-off when that
+  falls outside school hours: Friday 14:00 for a Monday lesson) and on the morning itself at the earliest send-out
+  time, unless the relief was told less than 12 hours before.
+- **The relief team** is not pinged between the cut-off and the next school day's morning message. The morning message
+  takes the place of everything asked for in the evening, the night or at a weekend. A request for today that comes
+  after the morning message time and before the cut-off is the late request, once its picks are in. A request to change,
+  and the "not yet acknowledged" report, still reach the team after the cut-off for a lesson of today until it starts.
+  The team's copy of "Cancelled" and the blocked-bot alert wait for the next morning time.
+- **The "not yet acknowledged" report** also lists, under "Approved, not sent out ({n}):", each relief of today that is
+  approved and not sent out and whose lesson has not started: nobody has told that teacher yet. A morning with only such
+  a relief still gets its report, and no all clear goes while one is left. A relief sent out and held is not listed: it
+  goes by itself. **Remind them again** reminds only those not acknowledged.
+- **After the cut-off**, when Today shows the next school day and today still has lessons to come that are open,
+  waiting for approval, or approved and not sent out, the page says "Today still has {n} to arrange: open Today." above
+  the rows. Nobody is pinged for them.
+- **The teacher who is away** is told at once, as before: "Relief planned for you", "Who covers you" when a relief
+  teacher acknowledges (at whatever hour that is), and the two reminders to set work at 18:00 and 07:00, on purpose. The
+  evening one is made only until 22:00 (until midnight when its time is set at or after 22:00): after an outage it is not
+  sent in the night, and the 07:00 one goes.
+- **Files are no longer sent on Telegram.** The relief message says how many there are and has **Open in the app**; they
+  are downloaded in **Reliefs I'm covering**. A message queued with files before this version still sends them.
+
+**At the deploy of this version (relief send-out, stage 1), nothing is to be done.** No variable, no step, no change to
+the volume. What is already in the data:
+- A relief approved before the deploy counts as sent out at its approval: a relief teacher already told of it is not
+  told again, it stays in Reliefs I'm covering, and no 24-hours-before or morning reminder is made of it. One approved
+  and never told, because no bot was connected then, goes at the first school hours after connecting.
+- A relief planned by a head before the deploy, still waiting for the team, keeps waiting for the team's Approve and
+  Send out.
+- A ping of the kind before ("Relief asked for today") still waiting to go is dropped. If such a ping went on the day of
+  the deploy, the same absence can be pinged once more as a late request.
+- If the bot is already connected, the first minute after the deploy sends "Covered" to the teacher who is away for each
+  lesson acknowledged since the bot was connected and not yet over, and "Please set work" for each reminder to set work
+  whose time it is then (a deploy between 18:00 and 22:00 sends tomorrow's evening ones at once).
+- The settings keep their values; the three new times and the two work times start at their defaults.
+
+**Rolling back** to the version before. Worked out from the older code, not tried. The older version tells every
+approved relief at once, at any hour, and does not read the sent-out mark: sending out or changing first stops nothing.
+So roll back between the earliest send-out time (06:45) and the cut-off (14:00) of a school day, because every approved
+relief, sent out or not, is then told at once. Messages of the new kinds still queued (the morning message, a late
+request, a reminder of a relief, Relief needed again, Who covers you, the alert, Please set work) go when they are
+sent. A Relief settings save made while rolled back drops the new times; forward again, they are at their defaults.
+Going forward again: a relief the older version told reads "Approved · not sent out" on Today, and is not in that
+teacher's Reliefs I'm covering, until someone presses **Send out**; that press sends no second message. A takeover done
+by the older version (a teacher's own absence taking over the lesson of an exam's or event's backup) drops the mark, so a cover it moved counts as
+sent out. A relief on an absence asked for while rolled back has no mark at all: it too counts as sent out at its
+approval, as any relief from before this version.
 
 ### Turning it off
 
@@ -226,7 +302,11 @@ it again.
 **When Telegram is down** (or refuses the token), nothing is given up and no try is counted: the app asks Telegram every 20
 seconds whether it is back, and what waits goes within half a minute of that, oldest first. What is no longer true by then
 (a relief moved meanwhile, a lesson that is over) is not sent. A report or an all clear more than 30 minutes late is not
-sent. If the outage began while a message was on its way and no answer came, that one message shows as "May not have been sent"
+sent. A message to a relief teacher held up past the end of their school hours waits for the next school hours, and goes
+then if it is still true; so does the team's copy of "Cancelled". The morning message goes when the app or Telegram is
+back, until the cut-off. A late request and Relief needed again are made only inside the team's window, and the
+blocked-bot alert only in the first team window after the block was found: one the app was down for is not made later.
+If the outage began while a message was on its way and no answer came, that one message shows as "May not have been sent"
 (press **Remind**); the rest wait as above. The log has one line when it begins ("network", or "unsure" in that case) and
 "Telegram answers again" once when it ends. A message that fails by
 itself, again and again while others go, is tried six times over about 43 minutes and then shows as "Could not be sent".
@@ -261,18 +341,18 @@ afterwards, press **Connect the bot** once more.
 Nothing, unless you set `ANTHROPIC_API_KEY` (or the server still holds `AI_PROVIDER=anthropic` with `AI_API_KEY` from an earlier version, which counts as the same thing) or `TELEGRAM_BOT_TOKEN`. The app has no AI inside, and these two are the only places outside the server it calls: Anthropic's API and Telegram's. With `ANTHROPIC_API_KEY` set, two things go to Anthropic's API at its usual address (do not set `ANTHROPIC_BASE_URL` on the service, which would send them to another address):
 
 - **The box on the Fix card** sends the words the lead types in it (at most 300 characters) and a fixed instruction, and nothing else: no list of teachers, classes, students or lessons, and no part of the timetable. A name the lead types is part of their words. Nothing typed is stored.
-- **Relief picks** (relief stage 3) send, for each lesson to cover, the teachers who are free as labels ("Teacher 4"), their departments, subjects, teaching and relief period counts, and the school's relief rules text with names replaced by labels. They never send staff names, absence reasons, work or remarks. Write people in the rules by their full name, so the app can replace them. The model is the same `ANTHROPIC_API_KEY` and `TYPED_REQUEST_MODEL` as the typed requests. With no key, every pick uses the app's own order. The app makes at most 60 AI picks in any 10 minutes for the whole server; past that it uses its own order and says so.
+- **Relief picks** (relief stage 3) send, for each lesson to cover, the teachers who are free as labels ("Teacher 4"), their departments, subjects, teaching and relief period counts, and the school's relief rules text with names replaced by labels. They never send staff names, absence reasons, work or remarks. Write people in the rules by their full name, so the app can replace them. The model is the same `ANTHROPIC_API_KEY` and `TYPED_REQUEST_MODEL` as the typed requests. With no key, every pick uses the app's own order. Every open lesson is picked as soon as it is there, for any date, the nearest first. The app makes at most 60 AI picks in any 10 minutes for the whole server; past that, a lesson of today is picked by the app's own order at once, and a lesson of a later date waits for the next runs, minute by minute.
 
 With `TELEGRAM_BOT_TOKEN` set and the bot connected, **Telegram** gets these messages, each for one person who has linked their own Telegram. Somebody not linked who writes to the bot is told that their Telegram is not linked, or that their code is not right; somebody whose link moved, or who sends `/stop`, is told so; somebody linked who writes what the bot does not read is told that it cannot read messages there.
 
 | For | What the message holds |
 |---|---|
-| the relief teacher, once the relief team has approved the relief | the absent teacher's name, the day, the lesson (classes, subject, group), its periods, times and room, the work text and the link the absent teacher left, and the work files, sent after it. Later, when that changes: that the relief was moved, kept, is no longer needed, or that the lesson is not happening (with the name of the exam or event and the class) or is on again. A reminder from the team is the relief message once more, with its files |
-| the absent teacher, for relief somebody else planned | the dates, whole day or which periods, who planned it, how many lessons will be covered, and one reminder to acknowledge it |
+| the relief teacher, once the relief team has approved the relief and sent it out (or a head chose them when planning), in school hours alone | the absent teacher's name, the day, the lesson (classes, subject, group), its periods, times and room, the work text and the link the absent teacher left, and how many work files there are ("Files: {n}. Open the app to download them."): no file is sent on Telegram, and the button **Open in the app** opens Reliefs I'm covering. For a relief told before its day, a reminder 24 hours before and one on the morning itself: the relief message again while it is not acknowledged, else a short line with the lesson, its times and room, and "For {absent}. The work is in the app.". Later, when that changes: that the relief was moved, kept, is no longer needed, or that the lesson is not happening (with the name of the exam or event and the class) or is on again. A reminder from the team is the relief message once more |
+| the absent teacher | for relief somebody else planned: the dates, whole day or which periods, who planned it, how many lessons will be covered, and one reminder to acknowledge it. **Who covers you**, once a relief teacher acknowledges one of their lessons: the lesson, its start, and that relief teacher's name (never for an exam's or event's backup). **Please set work**, at 18:00 the evening before and 07:00 on the day while a lesson of that day has no work: the lessons without work (class, subject, periods), with **Open in the app** (never for a backup) |
 | the reporting officer | who is away, on which dates, whole day or which periods, and the kind of reason (Medical, Child sick, Course or Other). This is the only message to somebody else that says anything of why a person is away |
-| the relief team | that relief was asked for today: whose absence, whole day or which periods, and how many lessons wait for approval (once, when its picks are in or five minutes after it was sent, but never before the report's start, an hour before the first period, so one asked in the night is sent then; not to who sent it or the absent teacher); a request to change: who asks, the lesson, the line they typed, the new pick's name and the reason for it; who has not acknowledged which lesson and when they were told; that all have; whose absence was cancelled, for which dates and by whom (not of an exam's or event's backup that the app ended itself, when a schedule is withdrawn or a duty changes); and once a week the numbers of the week, with the three teachers who took most relief and the departments |
+| the relief team | **the morning message**, at the morning time of a school day when a lesson of today is to cover: the day, how many absences and lessons, how many wait for approval, are approved and not sent out, are sent out and held (with when they go), have nobody free, or are sent out already, and who is away with whole day or which periods (the first eight, then how many more); **the late request**, for an absence for today sent between the morning time and the cut-off, once its picks are in or five minutes after it was sent: whose absence, whole day or which periods, and how many lessons wait for approval (not to who sent it or the absent teacher, never for a backup); **Relief needed again**, when an approved relief's teacher is away then: the day, the lesson, whose absence, who was to cover it, and whether a new pick waits; **the blocked-bot alert**: who blocked the bot and which message they did not get (a relief by its lesson, any other by its kind), one a person a day, not to that person; a request to change: who asks, the lesson, the line they typed, the new pick's name and the reason for it; who has not acknowledged which lesson and when they were told; that all have; whose absence was cancelled, for which dates and by whom (not of an exam's or event's backup that the app ended itself, when a schedule is withdrawn or a duty changes); and once a week the numbers of the week, with the three teachers who took most relief and the departments. Between the cut-off and the morning time the team gets only a request to change and the report for a lesson of today still to come, and the weekly summary at its own time |
 | whoever was told of an absence, and whoever planned it (for an event's backup, its teacher in charge at that moment) | whose absence was cancelled, for which dates and by whom. A backup the app ended itself is told only to the person on duty and the reporting officer, if they were told of it, and to its relief teachers (as no longer needed) |
-| anyone asking for relief with `/relief` | the questions and their buttons: their own name, dates, periods, the kinds of reason, the names of staff who match what they type for a reporting officer, their lessons (a lesson takes several messages, each followed by its question again saying what is set, until **Next**), and a list of what was chosen before **Send**; after it, how many lessons were sent, the reporting officer's name and whether they are on Telegram, and the names of files that could not be attached |
+| anyone asking for relief with `/relief` | the questions and their buttons: their own name, dates, periods, the kinds of reason, the names of staff who match what they type for a reporting officer, their lessons (a lesson takes several messages, each followed by its question again saying what is set, until **Next**), and a list of what was chosen before **Send**; after it, how many lessons were sent, the reporting officer's name when they are not on Telegram (so the teacher tells them), and the names of files that could not be attached |
 
 Telegram also gets everything people type or send to the bot: the line for **Other**, why they ask to change (which goes on to the relief team) or cancel (which is shown back to them before they confirm), the work they type for a lesson, and the files and photos they send as work (the app fetches those from Telegram after **Send**). Of what Telegram knows about a person, the app keeps the number of their chat and their @name. Connecting sends Telegram the app's address, the password made from SECRET_KEY (section 6, Give the token to the app) and the bot's menu, and the buttons that open the app hold its address.
 
@@ -280,7 +360,7 @@ The app never sends Telegram the typed line of an absence's reason, the remarks 
 
 Chats with a bot are not end-to-end encrypted: Telegram, the company, can read them, and what was sent stays in the chat and on Telegram's servers after somebody unlinks. Work for a lesson and reasons typed to the bot should hold nothing that must not leave the school. A personal code sent to the bot by mistake is deleted from the chat when Telegram allows it (section 6), but has passed through Telegram by then. One typed while the bot waits for an answer is not deleted: it is the answer, and goes to the relief teacher (work) or the relief team (why).
 
-**The relief timer.** `RELIEF_JOBS=on` (the Dockerfile sets it) starts a background timer that makes picks when due and, with `TELEGRAM_BOT_TOKEN`, sends the Telegram messages. The unused second Railway copy builds from the same Dockerfile, so it runs its own timer on its own data. Without the token it sends nothing on Telegram: do not add it there. Importing `app` in the container (for example running `tests/smoke.py` in a Railway shell) starts a timer too. Picks for the first school day of a term fall due on the last school day of the term before, as the design says.
+**The relief timer.** `RELIEF_JOBS=on` (the Dockerfile sets it) starts a background timer that makes picks when due and, with `TELEGRAM_BOT_TOKEN`, sends the Telegram messages. The unused second Railway copy builds from the same Dockerfile, so it runs its own timer on its own data. Without the token it sends nothing on Telegram: do not add it there. Importing `app` in the container (for example running `tests/smoke.py` in a Railway shell) starts a timer too. Picks are made as soon as a lesson is open, for any date; the times in Relief settings decide only when people are told.
 
 Who sees what inside the app: a head's browser receives the whole setup, because the editor works on all of it, including
 the student list once students are added, although the Students, Download, Upload and edit and Publish steps are hidden from heads and

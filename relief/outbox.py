@@ -15,7 +15,9 @@ when either raises, it waits for its next try (WAITS, below). An item that canno
 once, and the rest go on; only the store failing (sqlite3.OperationalError: locked, the disk) ends the run. Then what tg.call
 answers: "network" (nothing went out) begins a doubt (below) and ends the run; its try is counted, and it waits WAITS[tries], all
 five of them, so that it is failed at the sixth, only while it is the message itself (Telegram answers getMe at once);
-"slow" puts it back until the pause ends, no try counted; "blocked" unlinks the person, only while that chat is still theirs (and says so on their card: links.note_blocked), and
+"slow" puts it back until the pause ends, no try counted; "blocked" unlinks the person, only while that chat is still theirs (and says so on their card: links.note_blocked;
+notes the relief team's alert of what was refused, links.note_alert with WHAT(item), which relief/tell.py makes later in the team's
+window: nothing more is sent from here; and calls each of UNLINKED with the name: app.py's History line), each step in its own try, and
 removes the item, so that its key may be queued once they link again (the bot disconnected meanwhile: it is put back, nobody
 unlinked); "unsure" is unsure and ends the run; anything else failed.
 
@@ -32,10 +34,11 @@ could not be written, or another copy stopped) is unsure too, at each run.
 The text is plain (no parse_mode) and cut at a line end when longer than LIMIT. A button's token is made for the first try
 and kept with the item, so every try carries the same ones; its row in buttons is written with the item's sending and is good
 for BUTTON_DAYS from when the message was queued. A button that opens an address is left out unless it is https (Telegram
-refuses others).
+refuses others). keep_buttons does the same for buttons put on a message already sent.
 
-Files follow the message once it is sent, each by sendDocument, to the same chat while it is still that person's. files_failed
-counts those that have not gone: all of them when the message goes, one less as each goes, so a restart in between leaves the
+Files follow the message once it is sent, each by sendDocument, to the same chat while it is still that person's (only a
+message queued with files has any: the relief message is queued with none, its files are downloaded in the app, relief/tell.py;
+one queued before that still has them). files_failed counts those that have not gone: all of them when the message goes, one less as each goes, so a restart in between leaves the
 truth. A file "slow" (a pause of FILE_SLOW seconds at most, waited for at once) or "network" is tried FILE_TRIES times in all;
 after one that is "unsure", or a longer pause, the rest of that message's files are not tried. The message stays sent.
 
@@ -59,6 +62,8 @@ BUTTON_DAYS, KEEP_DAYS = 30, 400
 FILE_TRIES, FILE_WAIT, FILE_SLOW, FILE_TIMEOUT = 3, 2, 20, 60
 ME_TIMEOUT, ME_EVERY = 5, 20                    # seconds getMe may take, and between two of them while it is not answered
 VALID = lambda item: True                       # item: the stored message as a dict (key, name, kind, ref, text, ...)
+WHAT = lambda item: "Message"                   # what a refused item was, in plain words (relief/tell.py sets it: tell.refused)
+UNLINKED = []                                   # called with the name of a person unlinked because the bot was blocked (app.py)
 _busy = threading.Lock()                        # one run at a time
 _doubt = threading.Event()                      # whether Telegram is there is not known: nothing goes until it answers getMe
 _asked = [0.0]                                  # when that was asked last, in this doubt (epoch seconds; 0: not yet)
@@ -216,6 +221,19 @@ def _claim(item, chat, now):
     return True
 
 
+def keep_buttons(name, rows):
+    """buttons for name to put on a message already sent (relief/bot.py, when it changes the message a press was on): rows as queue
+    takes them -> Telegram's inline keyboard, each action button's token made and its row in buttons written, good for BUTTON_DAYS
+    from now, as _claim does; ValueError as queue's"""
+    rows = [[_button(b) for b in (row if isinstance(row, (list, tuple)) else (row,))] for row in rows or ()]
+    keys = _keyboard(rows)
+    until = datetime.datetime.fromisoformat(_absences._now()).timestamp() + BUTTON_DAYS * 86400
+    with tgdb.db() as c:
+        c.executemany("INSERT OR REPLACE INTO buttons(token, name, what, id, ckey, who, extra, until) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      [(b["token"], name, b.get("what"), b.get("id"), b.get("ckey"), b.get("who"), json.dumps(b.get("extra")), until) for row in rows for b in row if "token" in b])
+    return keys
+
+
 def _retry(c, item, now, state):
     """nothing of item (in state) went out: it waits for its next try, or is failed at the sixth -> its state"""
     if item["tries"] < len(WAITS):
@@ -233,13 +251,19 @@ def _bad(key, e):
 
 
 def _blocked(item, chat):
-    """the person blocked the bot: unlinked, and the item removed; put back when the bot is not connected any more (somebody
-    else's says the same to everybody). Whatever fails here, the item does not stay sending"""
-    ours = False
+    """the person blocked the bot: unlinked (then noted on their card, noted for the team's alert, and UNLINKED told), and the
+    item removed; put back when the bot is not connected any more (somebody else's says the same to everybody). Whatever fails
+    here, the item does not stay sending"""
+    ours = gone = False
     try:
         ours = links.connected() is not None
-        if ours and links.unlink(item["name"], chat) is not None: links.note_blocked(item["name"])
+        gone = ours and links.unlink(item["name"], chat) is not None
     except Exception as e: _log.warning("a chat could not be unlinked (%s)", type(e).__name__)
+    if gone:                                                         # their card, the team's alert (made by the sweep), the History: none stops the rest
+        name = item["name"]
+        for f in (lambda: links.note_blocked(name), lambda: links.note_alert(name, WHAT(item)), *[(lambda h=h: h(name)) for h in list(UNLINKED)]):
+            try: f()
+            except Exception as e: _log.warning("an unlinked chat could not be noted (%s)", type(e).__name__)
     with tgdb.db() as c:
         if ours: c.execute("DELETE FROM outbox WHERE key=? AND state IN ('sending', 'unsure')", (item["key"],))
         else: c.execute("UPDATE outbox SET state='queued', sent_at=NULL WHERE key=? AND state='sending'", (item["key"],))

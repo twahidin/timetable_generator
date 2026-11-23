@@ -1,6 +1,7 @@
 """Relief settings: the rules, the limits, the times, the school calendar. One JSON file under DATA/relief. The lists of who is
 on management, on the relief team and on the extra staff moved into the accounts: what the file still holds of them is kept
-as it was, for the record, and never read."""
+as it was, for the record, and never read; so is the old fill time (times.fill_at). What the times mean for school hours is
+relief/hours.py's."""
 import datetime, os, re, threading
 
 import store
@@ -15,10 +16,14 @@ DEFAULT_RULES = [
     "Then Flexi Adjunct Teachers: no more than 3 relief periods a day each; match the subject where possible; spread their relief over the week.",
     "Then other teachers, lightest week first (teaching periods plus relief periods this week); if tied, whoever has had less relief this term; spread over the week.",
 ]
-_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_TIME = re.compile(r"\A([01]\d|2[0-3]):[0-5]\d\Z")
 UNREAD = "The settings could not be read. Reload the page and try again."
 NAMELESS = "Give each term and holiday a name."
 FORMULA = ("=", "+", "-", "@", "\t", "\r")     # what a spreadsheet reads as the start of a formula
+ORDER = "The morning message comes at or before the earliest send-out, and both before the cut-off."
+TIMES = (("remind_at", "Remind the absent teacher at"), ("weekly_at", "Weekly summary at"), ("morning_at", "Morning message to the relief team at"),
+         ("send_from", "Earliest send-out to relief teachers"), ("cut_off", "Cut-off for the day's relief"),
+         ("work_eve", "Remind the absent teacher to set work at"), ("work_day", "Remind the absent teacher to set work at"))   # the times a save checks, and their labels
 
 
 def _fat_role(pub):
@@ -38,7 +43,8 @@ def role_names(pub) -> list:
 def defaults(pub) -> dict:
     return dict(fat_role=_fat_role(pub), rules=list(DEFAULT_RULES),
                 limits=dict(fat_per_day=3, other_per_day=None, never=[]),
-                times=dict(fill_at="15:00", remind_at="15:00", report_every=15, weekly_day="Fri", weekly_at="15:00"),
+                times=dict(remind_at="15:00", report_every=15, weekly_day="Fri", weekly_at="15:00",
+                           morning_at="06:30", send_from="06:45", cut_off="14:00", work_eve="18:00", work_day="07:00"),
                 calendar=dict(terms=[], holidays=[]), saved_at=None, saved_by=None)
 
 
@@ -52,11 +58,14 @@ def _merged(pub, saved) -> dict:
 
 
 KEPT = ("management", "team", "extra_staff")      # the old lists: stored untouched, never read
+KEPT_TIMES = ("fill_at",)                         # old times: kept in the file by save, never read
 
 
 def load(pub) -> dict:
     d = _merged(pub, store.read_json(PATH, {}))
     for k in KEPT: d.pop(k, None)
+    for k in KEPT_TIMES:
+        if isinstance(d["times"], dict): d["times"].pop(k, None)     # times of the wrong shape stay as they are, as before
     known = {p["name"] for p in _accounts.staff(pub)}
     missing = []
     def keep(names):
@@ -114,9 +123,10 @@ def _check(new, pub):
     for k in ("fat_per_day", "other_per_day"):
         if lim[k] is not None and not _int_in(lim[k], 1, 20): raise ValueError("A daily limit is a whole number from 1 to 20, or empty.")
     times = dict(base["times"]); times.update(_of(new, "times", dict, {}))
-    for k, label in (("fill_at", "Fill open lessons at"), ("remind_at", "Remind the absent teacher at"), ("weekly_at", "Weekly summary at")):
+    for k, label in TIMES:
         if times[k] is None or str(times[k]).strip() == "": raise ValueError(f"Give a time for {label}.")
         if not _TIME.match(str(times[k])): raise ValueError(f"{times[k]} is not a time like 15:00.")
+    if not times["morning_at"] <= times["send_from"] < times["cut_off"]: raise ValueError(ORDER)
     if not _int_in(times["report_every"], 5, 60): raise ValueError("Report every 5 to 60 minutes.")
     if times["weekly_day"] not in ("Mon", "Tue", "Wed", "Thu", "Fri"): raise ValueError("The weekly summary goes out on a weekday.")
     cal = _of(new, "calendar", dict, {})
@@ -146,7 +156,7 @@ def _check(new, pub):
         holidays.append(dict(start=a.isoformat(), end=b.isoformat(), name=name))
     return dict(fat_role=role, rules=rules,
                 limits=dict(fat_per_day=lim["fat_per_day"], other_per_day=lim["other_per_day"], never=never),
-                times=dict(fill_at=times["fill_at"], remind_at=times["remind_at"], report_every=times["report_every"], weekly_day=times["weekly_day"], weekly_at=times["weekly_at"]),
+                times={k: times[k] for k in base["times"]},
                 calendar=dict(terms=clean_terms, holidays=holidays))
 
 
@@ -158,6 +168,8 @@ def save(new, pub, by):
         if isinstance(old, dict):
             for k in KEPT:
                 if k in old: clean[k] = old[k]
+            was = old.get("times") if isinstance(old.get("times"), dict) else {}
+            clean["times"].update({k: was[k] for k in KEPT_TIMES if k in was})
         os.makedirs(os.path.dirname(PATH), exist_ok=True)
         store.write_json(PATH, clean)
     return load(pub)

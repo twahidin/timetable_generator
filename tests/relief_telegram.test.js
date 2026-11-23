@@ -387,4 +387,16 @@ t("unlinked because the bot was blocked: said until they link again", async () =
   const r = await opened({ "GET ": ok(Object.assign({}, FREE, { blocked: null })) }); has(r, LINE);
 });
 
+/* ---- Send-out, Task 4 ---- */
+t("My absences: an approved relief reads Being arranged until its teacher acknowledges, then the name", async () => {
+  const lesson = (key, p, cover) => ({ key, date: "2026-10-13", p, n: 2, classes: ["1A"], subject: "Science", group: "", room: "2-05", start: "08:00", end: "09:00", needed: true, stopped: "", work: { text: "", link: "", files: [] }, covers: [Object.assign({ ckey: key, p, n: 2, start: "08:00", end: "09:00" }, cover)] });
+  const mine = { absences: [{ id: "a1b2c3d4e5f6", teacher: "Mr Sam Tan", by: "Mr Sam Tan", how: "asked", dates: ["2026-10-13"], periods: null, reason: "Medical", reason_text: "", lessons: [
+    lesson("k1", 0, { state: "approved", relief: null }), lesson("k2", 2, { state: "change", relief: null }), lesson("k3", 4, { state: "acknowledged", relief: "Ms Maya Lee" })] }] };
+  const p = open("relief.html", { now: NOW, server: c => c.url === URL ? ok(OFF) : c.url === "/api/relief/me" ? ok({ name: "Mr Sam Tan", depts: ["Science"], published: true, today: "2026-10-13", can_team: false, can_plan: false, can_settings: false })
+    : c.url === "/api/relief/absences/mine" ? ok(mine) : ok(c.url === "/api/relief/people" ? [] : { lessons: [], periods: [], covers: [] }) });
+  p.run("relief-form.js", "relief.js", "relief-telegram.js"); await p.settle();
+  const sides = p.all("#mineList .rf-side").map(x => p.text(x));
+  assert.deepStrictEqual(sides, ["Being arranged", "Being arranged", "Relief: Ms Maya Lee"]);
+});
+
 run(all);

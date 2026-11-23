@@ -347,6 +347,7 @@ def planning_for_a_colleague_with_a_chosen_relief_teacher():
     r = AB.new(d, APUB, GRACE, "planned", may_choose=True)
     a = r["lessons"][0]
     assert r["by"] == GRACE and r["how"] == "planned" and a["relief"] == SAM and a["relief_by"] == GRACE
+    assert a["approved"] == dict(by=GRACE, at=r["at"]) and a["sent_out"] == dict(by=GRACE, at=r["at"], approved_at=r["at"]), "a head's own choice: approved and sent out at once"
     assert a["work"]["text"] == "Chapter 3" and a["work"]["link"] == "https://x.test/a"
     assert AB.planned_by(GRACE)[0]["id"] == r["id"] and AB.planned_by(EVE) == []
     refuses("Only Ms Evelyn Koh can acknowledge this.", lambda: AB.acknowledge(r["id"], GRACE))
@@ -435,7 +436,7 @@ def work_choosing_and_cancelling():
     refuses(AB.CHANGED, lambda: AB.set_work(i, "nokey", wk("x"), EVE))
     AB.choose(i, k, SAM, TEAMER, APUB)
     a = AB.load(i)["lessons"][0]
-    assert a["relief"] == SAM and a["relief_by"] == TEAMER
+    assert a["relief"] == SAM and a["relief_by"] == TEAMER and a["approved"]["by"] == TEAMER and a["sent_out"]["by"] == TEAMER
     refuses(f"{BUSY} is not free for 1A Science then.", lambda: AB.choose(i, k, BUSY, TEAMER, APUB))
     AB.choose(i, k, None, TEAMER, APUB)
     assert AB.load(i)["lessons"][0]["relief"] is None
@@ -695,7 +696,8 @@ def planning_needs_the_right():
         assert r["how"] == "planned" and r["by"] == GRACE and r["teacher"] == EVE, r
         assert r["lessons"][0]["relief"] == SAM and r["lessons"][0]["relief_by"] == GRACE and r["lessons"][0]["changed"] is False
         i = r["id"]
-        assert ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=None)))["lessons"][0]["relief"] is None
+        no(team.put(lesson_url(i, K5, "relief"), json=dict(relief=FLEX)), 400, AB.APPROVED_ALREADY)   # Grace's own choice, approved: not another head's to change
+        assert ok(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=None)))["lessons"][0]["relief"] is None
         got = ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=FLEX)))["lessons"][0]
         assert got["relief"] == FLEX and got["relief_by"] == TEAMER
         no(team.put(lesson_url(i, K5, "relief"), json=dict(relief=BUSY)), 400, f"{BUSY} is not free for 1A Science then.")
@@ -850,7 +852,7 @@ def planned_csv_has_no_reason_and_no_formulas():
         assert text.startswith("﻿")
         rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
         assert rows[0] == ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"], rows[0]
-        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", "Waiting for the relief team", "'=HYPERLINK(\"http://x.test\")", GRACE],
+        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", SAM, "'=HYPERLINK(\"http://x.test\")", GRACE],     # Grace's own choice: approved at once
                             ["2026-10-13", EVE, "5A Art", "P9", "12:00–12:30", "Not chosen yet", "'=HYPERLINK(\"http://x.test\")", GRACE],
                             ["2026-10-27", EVE, "1A Science", "P6–P7", "10:30–11:30", "Not chosen yet", "", EVE]], rows[1:]
         assert all(r[3] != "P9" for r in rows[1:] if r[0] == "2026-10-27"), "the cancelled one and the shared lesson nobody asked to cover are left out"
@@ -1168,8 +1170,8 @@ def every_relief_save_is_one_history_entry_without_the_reason():
         i = ok(ask(grace, reason="Other", reason_text="A private matter", reporting_officer="", lessons=[dict(key=K5, relief=SAM)]))["id"]
         ok(eve.post(f"/api/relief/absences/{i}/acknowledge"))
         ok(eve.put(lesson_url(i, K5, "work"), json=wk("Read p.5")))
-        ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=None)))
-        ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=FLEX)))
+        ok(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=None)))      # Grace's own choice (approved and sent out with the plan) taken off
+        ok(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=FLEX)))
         ok(eve.post(lesson_url(i, K8, "needed")))
         ok(eve.post(lesson_url(i, K8, "not-needed"), json=dict(why="Covered by Mr Busy Chan")))
         no(eve.post(f"/api/relief/absences/{i}/cancel", json=dict(why=" ")), 400, "Say why in a line.")
@@ -1178,9 +1180,10 @@ def every_relief_save_is_one_history_entry_without_the_reason():
     head = f"Relief for {EVE} on Tue 13 Oct: "
     five, eight = "1A Science on Tue 13 Oct", "5A Art on Tue 13 Oct"
     want = [("planned", GRACE, "planned"), ("acknowledged", EVE, "acknowledged"), ("work", EVE, f"work set for {five}"),
-            ("relief", TEAMER, f"no relief teacher chosen for {five}"), ("relief", TEAMER, f"{FLEX} chosen for {five}"),
+            ("relief", GRACE, f"no relief teacher chosen for {five}"), ("relief", GRACE, f"{FLEX} chosen for {five}"),
             ("needed", EVE, f"{eight} needed again"), ("not-needed", EVE, f"{eight} not needed"), ("cancelled", TEAMER, "cancelled")]
     assert [(e["what"], e["who"], e["text"]) for e in got] == [(w, who, head + x) for w, who, x in want], [(e["what"], e["who"], e["text"]) for e in got]
+    assert [h["what"] for h in AB._lesson(AB.load(i), K5)["history"]][:3] == ["pick", "approved", "sent out"], "approved and sent out with the plan: one entry"
     assert all(e["kind"] == "relief" and e["link"] == "/relief" and e["absence"] == i and e["via"] == "code" and e["as"] == e["who"] for e in got), got
     seen = json.dumps(got)
     assert "A private matter" not in seen and "Other" not in seen and "Covered by" not in seen and "Better now" not in seen, "never the reason, nor a why"

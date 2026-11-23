@@ -6,7 +6,7 @@
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const DAYS = [["Mon", "Monday"], ["Tue", "Tuesday"], ["Wed", "Wednesday"], ["Thu", "Thursday"], ["Fri", "Friday"]];
-  const FIXED = "Always true, whatever the rules say: only teachers free at that time · never someone away that day · the relief team approves before anything is sent.";
+  const FIXED = "Always true, whatever the rules say: only teachers free at that time · never someone away that day · nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning.";
   const NAMES = "Write people by their full name. The app replaces names with labels before the rules go to the AI.";
   const S = { data: null, f: null, dirty: false, busy: false, msg: "", bad: false, open: null, q: "" };
 
@@ -84,9 +84,13 @@
   }
 
   function times() {
-    const T = S.f.times, t = k => `<input type="time" data-t="${k}" value="${esc(T[k])}" aria-label="${k === "fill_at" ? "Fill open lessons at" : k === "remind_at" ? "Remind the absent teacher at" : "Weekly summary at"}">`;
-    return `<div class="line">Fill open lessons at ${t("fill_at")} the school day before</div>
+    const T = S.f.times, t = (k, label) => `<input type="time" data-t="${k}" value="${esc(T[k])}" aria-label="${esc(label || (k === "remind_at" ? "Remind the absent teacher at" : "Weekly summary at"))}">`;
+    const own = (k, label, help) => `<div class="line">${esc(label)} ${t(k, label)}<div class="small muted" style="flex-basis:100%">${esc(help)}</div></div>`, WORK = "Remind the absent teacher to set work at";
+    return `${own("morning_at", "Morning message to the relief team at", "One message on Telegram with everything waiting for today. Not on weekends or holidays.")}
+      ${own("send_from", "Earliest send-out to relief teachers", "Nothing reaches a relief teacher before this time of a school day, whenever Send out was pressed. School hours for relief teachers run from here to the cut-off.")}
+      ${own("cut_off", "Cut-off for the day's relief", "After it, nobody on the team is pinged about today, and the team works on the next school day. Until the next morning message, the team is not disturbed.")}
       <div class="line">Remind the absent teacher to acknowledge and set work at ${t("remind_at")} the school day before</div>
+      <div class="line">${WORK} ${t("work_eve", WORK + ", the evening before")} the evening before, and ${t("work_day", WORK + ", on the day")} on the day<div class="small muted" style="flex-basis:100%">Only while a lesson of that day has no work. Any absence, asked or planned.</div></div>
       <div class="line">Report "not yet acknowledged" every <input type="number" min="5" max="60" step="1" data-t="report_every" value="${T.report_every == null ? "" : esc(T.report_every)}" aria-label="Report every how many minutes"> minutes</div>
       <div class="line">Weekly summary on <select data-t="weekly_day" aria-label="Weekly summary day">${DAYS.map(([v, l]) => opt(v, T.weekly_day, l)).join("")}</select> at ${t("weekly_at")}</div>`;
   }
