@@ -208,6 +208,7 @@ GUARDS = {
     "events_fill": ('committee', 'timetable'),
     "events_get": ('committee', 'timetable'),
     "events_handled": ('committee', 'timetable'),
+    "events_in_charge": ('committee', 'timetable'),
     "events_list": ('committee', 'timetable'),
     "events_one_page": ('committee', 'timetable'),
     "events_put": ('committee', 'timetable'),
@@ -391,7 +392,8 @@ EXAMS_SITE = (("exams_day", ("timetable",)), ("exams_published_list", ("timetabl
 # heads', teacher and student codes are sent to their own page / refused inside the route; the exams committee's extra adds nothing
 EVENTS_ENDPOINTS = ("events_one_page", "events_list", "events_create", "events_get", "events_put", "events_delete", "events_view",
                     "events_fill", "events_review_get", "events_send", "events_approve", "events_send_back", "events_withdraw",
-                    "events_away", "events_who", "events_handled")   # exams stage 3: Handled ourselves on a backup
+                    "events_away", "events_who", "events_handled",   # exams stage 3: Handled ourselves on a backup
+                    "events_in_charge")   # the timetable committee's alone, inside the route (_exams_can_approve)
 
 # every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
 # admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)

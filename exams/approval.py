@@ -344,6 +344,24 @@ def replace(sched, key, room, away, name, by, now) -> str:
     return detail
 
 
+def set_in_charge(sched, name, by, now) -> str:
+    """the event's teacher in charge becomes name, in both copies at once: the timetable committee, which approves events, is the
+    one changing it, so it waits for no approval, and a sent event stays as it was sent. Who is going, and the duties, stay as
+    they are. The route checks name"""
+    old = sched.get("in_charge") or ""
+    if name == old:
+        raise ValueError("%s is in charge already." % name)
+    was_sent = sched.get("sent_fp") is not None and sched["sent_fp"] == fp(sched)
+    sched["in_charge"] = name
+    if sched.get("approved"):
+        sched["approved"]["in_charge"] = name
+    if was_sent:
+        sched["sent_fp"] = fp(sched)
+    detail = "%s → %s" % (old or "nobody", name)
+    log(sched, by, "in charge", detail, now)
+    return detail
+
+
 def replace_going(sched, away, name, by, now) -> str:
     """someone going with an approved event is away: name takes over in both copies at once (as every duty's who) and it is
     noted. The route checks name is free. The working copy changes only when it holds the person away."""
