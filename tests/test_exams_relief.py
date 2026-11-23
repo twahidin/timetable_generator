@@ -628,6 +628,7 @@ def sync_is_idempotent_and_keeps_the_chosen_relief():
         by = {x["subject"]: x for x in now[0]["lessons"]}
         assert set(by) == {"PE", "Assembly"}, by
         assert by["PE"]["relief"] == BEN and by["PE"]["relief_by"] == GRACE and by["PE"]["work"]["text"] == "Run the fitness test", by["PE"]
+        assert by["PE"]["approved"]["by"] == GRACE and by["PE"]["sent_out"]["by"] == GRACE, "the head's own choice keeps its approval and its send out"
         assert by["Assembly"]["relief"] is None and by["Assembly"]["needed"] is True
         assert now[0]["acknowledged"] is None and now[0]["periods"] == [4, 12], "a lesson came in: the person must look again"
         assert RL.sync(SC.load(id), PUB, CAL, SOON) == dict(sent=0, cancelled=0)
@@ -1208,6 +1209,14 @@ def _plan(teacher, key=None, relief=None, links=None, periods=None):
     return AB.new(dict(teacher=teacher, dates=[ISO], periods=periods, reason="Other", reason_text="A course", lessons=lessons), PUB, GRACE, "planned",
                   may_choose=True, links=links)
 
+def waiting_choice(i, key, who, by):
+    """a planner's choice waiting for the relief team, as a record from before a head's own choice was approved at once holds it
+    (stage 2's shape: relief and relief_by, no pick, no approval): for tests about something else"""
+    r = AB.load(i); x = next(x for x in r["lessons"] if x["key"] == key)
+    for k in ("pick", "approved", "sent_out", "ack", "change"): x.pop(k, None)
+    x.update(relief=who, relief_by=by); AB._save(r)
+    return r
+
 def _cov(id, key):
     r = AB.load(id)
     x, c = CV.find(r, key)
@@ -1246,7 +1255,7 @@ def a_stopped_lesson_is_not_picked_or_approved():
     _fresh()
     with published(PUB):
         i = _plan(CHLOE)["id"]
-        j = _plan(AISHA, RL.key_of(M, 0, MON, "Odd Mon"), HAFIZ)["id"]
+        j = _plan(AISHA)["id"]; waiting_choice(j, RL.key_of(M, 0, MON, "Odd Mon"), HAFIZ, GRACE)
         e = _exam(duty_names=(BEN, HAFIZ))
         L = _links()
         assert L.busy(HAFIZ, MON, 0, 2) and CV.stale(PUB, ST, AB.all_records(), *_cov(j, RL.key_of(M, 0, MON, "Odd Mon")), links=L) is False
@@ -1371,12 +1380,13 @@ def own_absence_takes_over_a_split_lesson_and_a_planners_pick():
         id = _made_exam([_duty([DANIEL])])["id"]
         _send_approve(committee(), id)
         b = _backups(id)[0]["id"]
-        AB.choose(b, DKEY, CHLOE, GRACE, PUB, links=_links())       # a planner's pick, still waiting
-        r = _plan(DANIEL, DKEY, BEN, links=_links())                # another planner's choice on the new absence replaces it
+        waiting_choice(b, DKEY, CHLOE, GRACE)                       # a planner's pick from before, still waiting
+        r = _plan(DANIEL, DKEY, BEN, links=_links())                # another planner's choice on the new absence replaces it: approved and sent out
         c = _cov(r["id"], DKEY)[2]
-        assert c["relief"] == BEN and CV.state(*_cov(r["id"], DKEY)) == "waiting" and CV.pick_of(rec, c)["who"] == BEN
-        assert _hist(c) == [("pick", CHLOE, "planner"), ("dropped", CHLOE, GRACE)], c["history"]
-        for who, want in ((None, [("pick", CHLOE, "planner")]), (CHLOE, [("pick", CHLOE, "planner")]), (BEN, [("pick", CHLOE, "planner"), ("dropped", CHLOE, GRACE)])):
+        assert c["relief"] == BEN and CV.state(*_cov(r["id"], DKEY)) == "approved" and c["pick"]["who"] == BEN and CV.planned_by(c) == GRACE
+        assert _hist(c) == [("pick", CHLOE, "planner"), ("dropped", CHLOE, GRACE), ("pick", BEN, "planner"), ("approved", BEN, GRACE), ("sent out", BEN, GRACE)], c["history"]
+        mine = lambda who: [("pick", who, "planner"), ("approved", who, GRACE), ("sent out", who, GRACE)]     # the new absence's own choice
+        for who, want in ((None, [("pick", CHLOE, "planner")]), (CHLOE, [("pick", CHLOE, "planner")] + mine(CHLOE)), (BEN, [("pick", CHLOE, "planner"), ("dropped", CHLOE, GRACE)] + mine(BEN))):
             _fresh()
             id = _made_exam([_duty([DANIEL])])["id"]
             _send_approve(committee(), id)

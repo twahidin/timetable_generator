@@ -3,7 +3,8 @@ team, acknowledged by the relief teacher, asked to change), and a lesson split a
 
 A cover is the lesson itself or, once the lesson is split, one of its "parts" (dicts with p and n). Its fields are read with
 .get, since stage 2's records have none: relief (a name or None), relief_by, pick (None or dict(who, by, reason, at), by
-"planner" | "ai" | "app" | "team"), approved (None or dict(by, at)), sent_out (None or dict(by, at, approved_at): the relief
+"planner" | "ai" | "app" | "team"; a head's own choice when planning is approved and sent out by them at once, chose),
+approved (None or dict(by, at)), sent_out (None or dict(by, at, approved_at): the relief
 team released this approval to its teacher; written None with each approval, so a new approval needs a new Send out; a cover
 approved before there was Send out has no such key and counts as sent out at its approval, see sent_out), ack (None or
 dict(at)), change (None or dict(why, at, pick), pick None while being picked) and history (dict(what, who, by, at, why) for
@@ -313,6 +314,30 @@ def change(id, ckey, who, by, pub, settings, links=None):
         _log(c, "changed", who, by, now)
         _absences._save(r)
     return r
+
+
+def chose(r, x, c, who, by, now):
+    """in memory: a head's own choice when planning (relief.plan, absences.new and choose; the caller checked who is free then
+    and that it may choose): who relieves the cover, approved and sent out by the head at once, so it reaches its teacher at
+    the first moment of school hours (goes_at). A relief other than who it replaces gets its pick written down first (_settle),
+    and every name it took the time of that is not who (booked) is written down as dropped; the pick is logged here, once"""
+    if c.get("relief") and c["relief"] != who: _settle(r, c)
+    for gone in booked(c):
+        if gone != who: _log(c, "dropped", gone, by, now)
+    pick = dict(who=who, by="planner", reason=PLANNED.format(by=by, date=_day(now)), at=now)
+    c.update(relief=who, relief_by=by, pick=pick, approved=dict(by=by, at=now), ack=None, change=None, sent_out=dict(by=by, at=now, approved_at=now))
+    _log(c, "pick", who, "planner", now, pick["reason"])
+    _log(c, "approved", who, by, now)
+    _log(c, "sent out", who, by, now)
+
+
+def planned_by(c):
+    """the head whose own choice the cover's relief still is (chose: a planner's pick, approved and sent out by its planner),
+    else None: once the relief team has changed it, or approved a choice that waited for them, it is theirs"""
+    p, a, s = c.get("pick"), c.get("approved"), sent_out(c)
+    if not c.get("relief") or not isinstance(p, dict) or not isinstance(a, dict) or s is None: return None
+    ok = p.get("by") == "planner" and p.get("who") == c["relief"] and a.get("by") == c.get("relief_by") == s.get("by")
+    return c["relief_by"] if ok and c.get("relief_by") else None
 
 
 def _dt(v):

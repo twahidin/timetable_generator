@@ -218,7 +218,8 @@ def _out(r, pub, me, cal=None, links=None):
     for everyone. The absent teacher who may not open every absence (not relief.plan, not
     relief.team) sees a relief teacher's name only once that teacher has acknowledged it (relief and relief_by None before), and no pick,
     request to change or history, on the lesson and on each part (Decision 4). Everyone else sees the relief as it is, and
-    planned: the planner's own choice still waiting for the relief team (None otherwise)."""
+    planned: the planner's own choice, waiting for the relief team or still their own approved choice (_planned, None
+    otherwise), and may_choose: whether me may choose again for the lesson on the Plan page (absences.may_choose_again)."""
     cal = cal if cal is not None else _cal(pub)
     v = _absences.matches_now(r, pub, cal)
     v.pop("gone", None)
@@ -231,12 +232,14 @@ def _out(r, pub, me, cal=None, links=None):
         v["lessons"] = [dict(x, stopped="") for x in v["lessons"]]
     if me == r.get("teacher") and me != r.get("by") and not _sees_all(): v.pop("remarks", None)
     hide = me == r.get("teacher") and not _sees_all()
-    v["lessons"] = [_lesson_out(r, x, pub, hide) for x in v["lessons"]]
+    v["lessons"] = [_lesson_out(r, x, pub, hide, me) for x in v["lessons"]]
     return v
 
 
 def _planned(r, c, s):
-    """the planner's own choice for cover c while it waits for the relief team, else None"""
+    """the planner's own choice for cover c: while it waits for the relief team (one from before a head's choice was approved
+    at once), or while it is still the planner's own approved choice (cover.planned_by); else None"""
+    if s in APPROVED: return c["relief"] if _cover.planned_by(c) else None
     p = _cover.pick_of(r, c) if s == "waiting" else None
     return c["relief"] if p and p.get("by") == "planner" else None
 
@@ -249,7 +252,7 @@ def _hidden(c, s):
     return out
 
 
-def _lesson_out(r, x, pub, hide):
+def _lesson_out(r, x, pub, hide, me=None):
     covers = []
     for i, c in enumerate(_cover.covers(x)):
         s = _cover.state(r, x, c)
@@ -264,7 +267,7 @@ def _lesson_out(r, x, pub, hide):
     parts = sorted(({**(_hidden(c, _cover.state(r, x, c)) if hide else c), "ckey": _cover.cover_key(x, i)} for i, c in enumerate(x.get("parts") or [])),
                    key=lambda c: int(c["p"]))
     if not hide:
-        out = dict(x, covers=covers)
+        out = dict(x, covers=covers, may_choose=_absences.may_choose_again(r, x, me, pub))
         if parts: out["parts"] = parts
         else: out["planned"] = covers[0]["planned"]
         return out
@@ -806,7 +809,7 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
                approved=c.get("approved") or None, ack=c.get("ack") or None,
                change=dict(why=ch.get("why"), at=ch.get("at"), pick=brief(new), stale=False) if ch else None,
                stale=False, over_now=False, nobody=False, warn=None, stopped="", duty=(r.get("reason_text") or "") if r.get("exams") else "",
-               told=None, linked=False, out=out, goes_at=goes, sent_out=so)
+               told=None, linked=False, out=out, goes_at=goes, sent_out=so, planned_by=_cover.planned_by(c) if s in APPROVED else None)
     if s == "cancelled": return row
     why = _cover.stopped(links, x)
     if why: return dict(row, state="stopped", stopped=why, out=None, goes_at=None, sent_out=None)

@@ -542,4 +542,16 @@ t("the page opens on the server's date, and Refresh keeps the date shown", async
   assert.strictEqual(p.calls.filter(c => c.method === "GET" && c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=2026-10-14`);
 });
 
+/* ---- Send-out, Task 8 ---- */
+t("a head's own choice: Planned by them before its line, and no Send out", async () => {
+  const p = await today(day([row({ planned_by: TEAM })]));
+  assert.strictEqual(p.state(), `Approved Planned by ${TEAM} · Sent 07:20 ${BY} Change Remind`); assert.strictEqual(p.btn("Send out"), null);
+  const h = await today(day([row({ planned_by: TEAM, out: "held", goes_at: "2026-10-13T06:45:00+08:00", told: null })], { hours: HOURS }));
+  assert.strictEqual(h.state(), `Approved Planned by ${TEAM} · Will be sent at 06:45 ${BY} Change`);
+  const q = await today(day([row({ planned_by: TEAM })], { telegram: false }));
+  assert.strictEqual(q.state(), `Approved: they see it in ${SEES} Planned by ${TEAM} ${BY} Change`);
+  const n = await today(day([row()])); assert.ok(!n.state().includes("Planned by"), "the team's own: no such line");
+  assert.ok(p.text("#pane-today").includes("Nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning."));
+});
+
 run(all);

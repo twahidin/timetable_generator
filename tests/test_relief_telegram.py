@@ -2136,6 +2136,14 @@ def swept(): n = TE.sweep(); send(); return n                                   
 def said(name): return [x for c, x in sent(CHATS[name])]
 def change_record(i, f):
     r = absences.load(i); f(r); absences._save(r)
+def waiting_choice(i, key, who, by):
+    """a planner's choice waiting for the relief team, as a record from before a head's own choice was approved at once holds it
+    (stage 2's shape: relief and relief_by, no pick, no approval): for tests about something else"""
+    def f(r):
+        x = next(x for x in r["lessons"] if x["key"] == key)
+        for k in ("pick", "approved", "sent_out", "ack", "change"): x.pop(k, None)
+        x.update(relief=who, relief_by=by)
+    change_record(i, f)
 def quoted(x): return urllib.parse.quote(x, safe="")
 def call(name, method, url, body=None, code=200):
     r = getattr(who(name), method)(url, json=body or {})
@@ -2355,7 +2363,8 @@ def every_save_asks_for_a_sweep_once_after_its_history_entry():
         after(lambda: call(EVE, "post", f"/api/relief/absences/{i}/acknowledge"))
         after(lambda: call(EVE, "post", f"/api/relief/absences/{i}/acknowledge", code=400), 0)                  # refused: nothing saved
         after(lambda: on_lesson(EVE, i, K5, "work", dict(text="Read", link="", files=[], known=[])))
-        after(lambda: on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)))
+        after(lambda: on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)))                                      # a head's own choice: approved and sent out, one save
+        waiting_choice(i, K5, SAM, HUGO)                                                                           # as a choice from before: waiting for the team
         after(lambda: on_lesson(EVE, i, K8, "needed")); after(lambda: on_lesson(EVE, i, K8, "not-needed", dict(why="No")))
         after(lambda: on_cover(TEAM, i, K5, "approve", dict(who=MAYA), code=400), 0); after(lambda: on_cover(EVE, i, K5, "approve", dict(who=SAM), code=403), 0)
         after(lambda: on_cover(TEAM, i, K5, "approve", dict(who=SAM)))
@@ -2365,7 +2374,7 @@ def every_save_asks_for_a_sweep_once_after_its_history_entry():
         after(lambda: on_cover(SAM, i, K5, "ask-change", dict(why="A meeting"))); after(lambda: on_cover(TEAM, i, K5, "keep"))
         after(lambda: on_cover(TEAM, i, K5, "relief", dict(relief=MAYA)))
         after(lambda: on_lesson(TEAM, i, K2, "split", dict(at=3))); after(lambda: on_lesson(TEAM, i, K2, "join"))
-        on_lesson(HUGO, i, K2, "relief", dict(relief=SAM)); rows_ = [dict(id=i, ckey=K2, who=SAM)]
+        waiting_choice(i, K2, SAM, HUGO); rows_ = [dict(id=i, ckey=K2, who=SAM)]
         after(lambda: call(TEAM, "post", "/api/relief/today/approve-all", dict(date="2026-10-13", covers=rows_)))
         after(lambda: call(TEAM, "post", "/api/relief/today/approve-all", dict(date="2026-10-13", covers=rows_)), 0)   # skipped: nothing saved
         sends = lambda: dict(date="2026-10-13", covers=[dict(rows_[0], approved_at=approved_at(i, K2))])
@@ -2442,7 +2451,7 @@ def the_minute_runs_every_hook_and_never_dies():
 @t
 def approve_queues_the_relief_once():
     with school(SAM, TEAM):
-        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        i = absent(by=HUGO); waiting_choice(i, K5, SAM, HUGO)
         assert TE.sweep() == 0 and outs() == []
         on_cover(TEAM, i, K5, "approve", dict(who=SAM))                                    # in the app: the save asked for the sweep
         assert outs() == [] and TE.sweep() == 0, "approved alone: nothing yet"
@@ -2491,7 +2500,7 @@ def the_work_and_its_files_go_with_the_relief():
 @t
 def nothing_goes_before_approval():
     with school(SAM, RUTH, MAYA, TEAM, LEE, HUGO):
-        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        i = absent(by=HUGO); waiting_choice(i, K5, SAM, HUGO)
         for hm in ("09:00", "09:05", "15:00", "23:00"): at(hm); assert TE.sweep() == 0 and outs() == [], hm
         CV.approve(i, K5, SAM, TEAM, SCHOOL, rs())
         for hm in ("23:00", "09:05"): at(hm); assert TE.sweep() == 0 and outs() == [], ("approved, not sent out: nothing either", hm)
@@ -3508,7 +3517,7 @@ def only_the_two_messages_name_an_exam():
 @t
 def no_message_carries_remarks_or_the_typed_reason():
     with school(EVE, SAM, ROSA, TEAM, LEE, HUGO, MAYA):
-        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)], reason="Other", reason_text="zebra-reason", remarks="quokka-remark")
+        i = absent(by=HUGO, reason="Other", reason_text="zebra-reason", remarks="quokka-remark"); waiting_choice(i, K5, SAM, HUGO)
         change_record(i, lambda r: [x.update(pick=dict(who=SAM, by="ai", reason="lemur-first-pick", at=clock.now)) for x in r["lessons"] if x["key"] == K5])
         on_cover(TEAM, i, K5, "approve", dict(who=SAM)); on_cover(TEAM, i, K5, "send-out", dict(who=SAM)); send()
         at("09:10"); CV.ask_change(i, K5, "walrus-why", SAM); new_pick(i, K5, MAYA, reason="okapi-new-pick"); swept()
@@ -4792,7 +4801,7 @@ def all_clear_goes_once_and_again_after_new_waiting():
 def nothing_is_sent_when_nothing_waits():
     with school(SAM, MAYA, TEAM):
         for hm in ("07:00", "10:00", "23:59"): assert ticked(hm, 14) == [] and ticked(hm, 12) == [], "no reliefs"
-        at("06:50", 13); i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); assert ticked("07:00", 13) == [], "a pick nobody has approved"
+        at("06:50", 13); i = absent(by=HUGO); waiting_choice(i, K5, SAM, HUGO); assert ticked("07:00", 13) == [], "a pick nobody has approved"
         on_cover(TEAM, i, K5, "approve", dict(who=SAM)); on_cover(TEAM, i, K5, "send-out", dict(who=SAM)); assert ticked("07:15") == keyed("0715"), "approved"
     for f in (lambda i: CV.acknowledge(i, K5, SAM), lambda i: CV.ask_change(i, K5, "x", SAM), lambda i: absences.cancel(i, "x", HUGO), lambda i: absences.not_needed(i, K5, "x", HUGO), lambda i: os.remove(absences._path(i))):
         with school(SAM, TEAM): i = today_reliefs((K5, SAM)); f(i); assert ticked("07:00") == [] and outs("report") == [] and ticked("10:30") == [] and texts_to() == []
@@ -4973,7 +4982,7 @@ def the_report_is_quick():
 @t
 def the_report_never_carries_a_reason():
     with school(SAM, EVE, ROSA, TEAM, MAYA):
-        at("06:50", 13); i = absent(by=HUGO, reason="Other", reason_text="zebra-reason", remarks="quokka-remark", lessons=[dict(key=K5, relief=SAM)])
+        at("06:50", 13); i = absent(by=HUGO, reason="Other", reason_text="zebra-reason", remarks="quokka-remark"); waiting_choice(i, K5, SAM, HUGO)
         change_record(i, lambda r: [x.update(pick=dict(who=SAM, by="ai", reason="lemur-pick", at=clock.now), work=dict(text="okapi-work", link="", files=[])) for x in r["lessons"] if x["key"] == K5])
         on_cover(TEAM, i, K5, "approve", dict(who=SAM)); on_cover(TEAM, i, K5, "send-out", dict(who=SAM)); give(i, K2, MAYA); CV.ask_change(i, K2, "walrus-why", MAYA); CV.keep(i, K2, TEAM); send(); ticked("07:00"); ticked("10:30"); remind(asks(i, K5)); ticked("11:00"); swept()
         got = [r for r in outs() if r["kind"] in ("report", "clear")]; assert len(got) == 3
@@ -8485,6 +8494,96 @@ def a_kept_holds_its_date_and_an_ask_after_the_cut_off_waits_no_longer_than_its_
         at("10:10", 13); CV.ask_change(i, K5, "A meeting", SAM); at("10:12", 13); TE.sweep(); assert sorted(n for k, n in told_of("ask")) == [LEE, TEAM]
         at("10:30", 13); send(); assert [r["state"] for r in outs("ask")] == ["dropped"] * 2 and said(TEAM) == [], "held until its lesson started: not sent"
         for hm, day in (("10:31", 13), ("06:30", 14)): at(hm, day); swept(); assert [r["state"] for r in outs("ask")] == ["dropped"] * 2, (hm, day)
+
+# ---- Send-out, Task 8: a head's own choice ----
+def absences_new_error(**kw):
+    try: absent(**kw)
+    except ValueError as e: return str(e)
+    return ""
+
+@t
+def a_head_s_choice_is_approved_and_sent_out_at_planning():
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); r, x, c = covered(i, K5)
+        assert CV.state(r, x, c) == "approved" and c["approved"] == dict(by=HUGO, at=clock.now) and c["sent_out"] == dict(by=HUGO, at=clock.now, approved_at=clock.now)
+        assert [h["what"] for h in c["history"]] == ["pick", "approved", "sent out"] and CV.planned_by(c) == HUGO
+        swept(); assert told_of("relief") == [("relief", SAM)], "in school hours: at once"
+        row_ = next(v for v in call(TEAM, "get", "/api/relief/today?date=2026-10-13")["rows"] if v["ckey"] == K5); assert (row_["out"], row_["planned_by"]) == ("sent", HUGO)
+        assert CV.state(*covered(i, K2)) == "open", "a lesson left open waits for the AI and the team"
+
+@t
+def a_head_s_choice_in_the_evening_goes_at_06_45():
+    with school(SAM):
+        at("21:00"); absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); swept(); assert told_of("relief") == [] and covering_of(SAM) == [], "nor in Reliefs I'm covering"
+        at("06:45", day=13); swept(); assert told_of("relief") == [("relief", SAM)] and covering_of(SAM) == [K5]
+
+@t
+def the_planner_may_choose_again_until_the_lesson_starts():
+    with school(SAM, MAYA):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); swept()
+        on_lesson(HUGO, i, K5, "relief", dict(relief=MAYA)); swept()
+        assert told_of("moved") == [("moved", SAM)] and ("relief", MAYA) in told_of("relief") and CV.planned_by(covered(i, K5)[2]) == HUGO
+        give(i, K5, LEE); assert on_lesson(HUGO, i, K5, "relief", dict(relief=SAM), code=400)["error"] == absences.APPROVED_ALREADY, "the team's now"
+    with school(SAM):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); at("10:30", day=13)
+        assert on_lesson(HUGO, i, K5, "relief", dict(relief=MAYA), code=400)["error"] == "This lesson has started: ask the relief team to change it."
+
+@t
+def a_head_s_choice_changed_before_it_goes_tells_only_the_new_teacher():
+    with school(SAM, MAYA, RUTH, TEAM):
+        absent(teacher=RUTH, dates=("2026-10-13",))
+        assert "is not free" in absences_new_error(by=HUGO, lessons=[dict(key=K5, relief=RUTH)]), "someone away (and teaching) then cannot be chosen"
+        at("21:00"); i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        at("22:00"); CV.change(i, K5, MAYA, TEAM, SCHOOL, rs())                    # the team changed it: their Send out is needed
+        at("06:45", day=13); swept()
+        assert told_of("relief") == [] and told_of("moved") == [] and told_of("gone") == [], "the first never heard; the new one is not sent out"
+        out(i, K5); swept(); assert told_of("relief") == [("relief", MAYA)]
+    with school(SAM, MAYA):
+        at("21:00"); i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        at("22:00"); on_lesson(HUGO, i, K5, "relief", dict(relief=MAYA))           # the head chose again
+        at("06:45", day=13); swept(); assert told_of("relief") == [("relief", MAYA)] and told_of("moved") == [], "the second at 06:45, the first nothing"
+
+@t
+def a_teachers_own_request_and_a_choice_from_before_wait_for_the_team():
+    with school(SAM, TEAM):
+        d = dict(teacher=EVE, dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=ROSA, lessons=[dict(key=K5, relief=SAM)])
+        i = absences.new(d, SCHOOL, EVE, "asked", may_choose=True)["id"]                  # a head's own absence naming someone (the API alone)
+        r, x, c = covered(i, K5); assert CV.state(r, x, c) == "waiting" and CV.planned_by(c) is None and not c.get("sent_out")
+        swept(); assert told_of("relief") == []
+    with school(SAM, TEAM):
+        i = absent(by=HUGO); waiting_choice(i, K5, SAM, HUGO)                             # saved before this change: waiting
+        swept(); r, x, c = covered(i, K5); assert CV.state(r, x, c) == "waiting" and CV.planned_by(c) is None and told_of("relief") == []
+        CV.approve(i, K5, SAM, TEAM, SCHOOL, rs()); swept(); assert told_of("relief") == [], "the team's approval alone tells nobody"
+        out(i, K5); assert CV.planned_by(covered(i, K5)[2]) is None
+        assert on_lesson(HUGO, i, K5, "relief", dict(relief=MAYA), code=400)["error"] == absences.APPROVED_ALREADY, "approved and sent out by the team: theirs"
+
+@t
+def the_planner_takes_their_own_choice_off_and_the_plan_page_shows_it():
+    with school(SAM, MAYA, TEAM):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        got = next(r for r in call(HUGO, "get", "/api/relief/absences/planned")["absences"] if r["id"] == i)
+        x5, x2 = [next(x for x in got["lessons"] if x["key"] == k) for k in (K5, K2)]
+        assert (x5["planned"], x5["may_choose"], x2["planned"], x2["may_choose"]) == (SAM, True, None, True), (x5, x2)
+        assert "may_choose" not in next(x for x in call(EVE, "get", f"/api/relief/absences/{i}")["lessons"] if x["key"] == K5), "hidden from the absent teacher"
+        on_lesson(HUGO, i, K5, "relief", dict(relief=""))
+        r, x, c = covered(i, K5); assert CV.state(r, x, c) == "open" and c["approved"] is None and c["sent_out"] is None and c["pick"] is None
+        assert [(h["what"], h["who"], h["by"]) for h in c["history"]][-1] == ("dropped", SAM, HUGO)
+        on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)); give(i, K5, MAYA)
+        got = next(r for r in call(HUGO, "get", "/api/relief/absences/planned")["absences"] if r["id"] == i)
+        x5 = next(x for x in got["lessons"] if x["key"] == K5); assert (x5["planned"], x5["may_choose"]) == (None, False), "the team's now"
+        assert on_lesson(HUGO, i, K5, "relief", dict(relief=""), code=400)["error"] == absences.APPROVED_ALREADY
+    with school(SAM):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); at("10:30", day=13)
+        got = next(r for r in call(HUGO, "get", "/api/relief/absences/planned")["absences"] if r["id"] == i)
+        assert next(x for x in got["lessons"] if x["key"] == K5)["may_choose"] is False, "started"
+        assert on_lesson(HUGO, i, K5, "relief", dict(relief=""), code=400)["error"] == absences.STARTED
+
+@t
+def a_head_s_choice_of_the_same_teacher_again_tells_nobody_twice():
+    with school(SAM):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); swept()
+        before = covered(i, K5)[2]; at("09:30"); on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)); swept()
+        assert covered(i, K5)[2] == before and told_of("relief") == [("relief", SAM)]
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

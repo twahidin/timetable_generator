@@ -3,7 +3,8 @@
    is chosen), from /api/relief/today, one row a cover (each part of a split lesson its own row), in time order: the
    periods and times, the class and subject, the room, the absent teacher and whether work is set, the relief teacher with
    who picked them and why, and the state in plain words. Buttons: Approve; Send out (an approved relief not sent out yet:
-   nothing reaches its teacher until it is, and one sent out outside school hours goes at the earliest send-out time); Choose
+   nothing reaches its teacher until it is, and one sent out outside school hours goes at the earliest send-out time; a head's
+   own choice, planned_by, is approved and sent out when it is planned, and its line reads "Planned by {head} · "); Choose
    or Change, which opens the "free then" list (Relief.freeList, drawn as Plan relief's) and approves the one chosen at once; Split (a cover of two periods or
    more that is not approved: the person chooses after which period); Join again (a split lesson none of whose parts is
    approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting,
@@ -107,6 +108,7 @@
     return `<div><b>${esc(p.who)}</b>${r.over_now ? ` <span class="mark">over a limit</span>` : ""}</div>${byLine(p)}${warn}`;
   }
 
+  const planned = r => (r.planned_by ? `Planned by ${r.planned_by} · ` : "");   /* a head's own choice, approved and sent out when it was planned */
   const by = r => (r.approved && r.approved.by ? `<div class="small muted">by ${esc(r.approved.by)}${clock(r.approved.at) ? `, ${esc(clock(r.approved.at))}` : ""}</div>` : "");
 
   function chip(r) {
@@ -114,8 +116,9 @@
     switch (r.state) {
       case "open": return c("No relief teacher yet", "");
       case "waiting": return c("Waiting for you", "st-amber") + (r.asked_after ? `<div class="small muted">${esc(`Asked at ${r.asked_after}, after the cut-off: nobody was pinged`)}</div>` : "");
-      case "approved": if (sentOut(r) !== "sent") return c("Approved", "st-sent") + `<div class="small muted">${esc(sentOut(r) === "held" && goes(r) ? `Will be sent at ${goes(r)}` : "Approved · not sent out")}</div>` + by(r);
-        return (bot() ? c("Approved", "st-sent") + `<div class="${isWrong(r) ? "td-warn" : "small muted"}">${esc(told(r))}</div>` : c("Approved: they see it in Reliefs I'm covering", "st-sent"))
+      case "approved": if (sentOut(r) !== "sent") return c("Approved", "st-sent") + `<div class="small muted">${esc(planned(r) + (sentOut(r) === "held" && goes(r) ? `Will be sent at ${goes(r)}` : "Approved · not sent out"))}</div>` + by(r);
+        return (bot() ? c("Approved", "st-sent") + `<div class="${isWrong(r) ? "td-warn" : "small muted"}">${esc(planned(r) + told(r))}</div>`
+          : c("Approved: they see it in Reliefs I'm covering", "st-sent") + (r.planned_by ? `<div class="small muted">${esc(`Planned by ${r.planned_by}`)}</div>` : ""))
         + by(r);
       case "acknowledged": return c(`✓ Acknowledged${r.ack && clock(r.ack.at) ? ` ${clock(r.ack.at)}` : ""}`, "st-ok");
       case "change": return c(`Asked to change${r.change && clock(r.change.at) ? ` ${clock(r.change.at)}` : ""}`, "st-blue");
@@ -498,7 +501,7 @@
         <div class="td-counts" id="tdCounts"></div>
         <div id="tdTop" aria-live="polite"></div>
         <div id="tdRows"></div>
-        <div class="note">Nothing reaches a relief teacher until someone on the relief team approves it and sends it out.</div></div>`;
+        <div class="note">Nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning.</div></div>`;
       pane.addEventListener("click", onClick);
       pane.addEventListener("change", onChange);
       pane.addEventListener("keydown", onKey);

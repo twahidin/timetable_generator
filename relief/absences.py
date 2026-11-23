@@ -26,6 +26,7 @@ ACKED = "This was acknowledged already."
 NO_NEED = "This lesson does not need relief."
 APPROVED_ALREADY = "This lesson's relief is approved already: ask the relief team to change it."
 IS_SPLIT = "This lesson is split: the relief team chooses for each part."
+STARTED = "This lesson has started: ask the relief team to change it."
 NO_LESSONS = "There are no lessons to cover in that time."
 TOO_MANY = "A lesson can have at most 5 files."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
@@ -203,6 +204,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
         for o, moved in moving:
             for x in built:
                 if x["needed"] and not x["_stopped"] and x["key"] in moved: _may_replace(moved[x["key"]], x, x["_ask"].get("relief"))
+        chosen = {}           # {key: the relief teacher chosen in this absence}
         for x in built:
             name = x["_ask"].get("relief")
             if name and x["needed"] and not x["_stopped"]:          # nobody is chosen for a lesson that does not happen (as choose)
@@ -211,6 +213,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
                 if name not in [p["name"] for g in free["groups"] for p in g["people"]]:
                     raise ValueError(f"{name} is not free for {' and '.join(x['classes'])} {x['subject']} then.")
                 x["relief"], x["relief_by"] = name, by
+                chosen[x["key"]] = name
             pending["lessons"].append(x)
         for x in built:      # the work checks come last
             x.pop("_stopped")
@@ -220,6 +223,9 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
                  remarks=remarks.strip(), reporting_officer=officer, by=by, how=how, at=_now(), acknowledged=None, cancelled=None,
                  lessons=pending["lessons"])
         backups = _take_over(moving, r)
+        if how == "planned":      # a head's own choice is approved and sent out at once; one asked by the teacher waits for the team
+            for x in r["lessons"]:
+                if x["key"] in chosen and x.get("relief") == chosen[x["key"]] and not x.get("approved"): _cover.chose(r, x, x, x["relief"], by, r["at"])
         _save(r)
         for o in backups: _save(o)      # after the absence: a lesson is never left in neither
     return r
@@ -522,11 +528,37 @@ def needed_again(id, key, by, *, team=False):
     return r
 
 
+def _started(pub, x, now):
+    """the lesson's first period has begun by now (a date-time); never for a lesson of a later day than today (the school's)"""
+    from relief import hours as _hours     # hours imports fill, which imports cover and this module: read when called
+    return datetime.date.fromisoformat(str(x["date"])) <= _lessons.today() and now >= _hours.starts(pub, x, x)
+
+
+def _may_choose(r, x, by):
+    """the planner may choose for lesson x: while nobody is approved for it, or while it is still by's own choice"""
+    return _cover.state(r, x, x) in ("open", "waiting") or _cover.planned_by(x) == by
+
+
+def may_choose_again(r, x, me, pub) -> bool:
+    """me may choose (or choose again) the relief teacher of lesson x of record r on the Plan page: one lesson, not split,
+    needed, not started, and nobody approved for it yet or it is still me's own choice (choose)"""
+    try:
+        if r.get("cancelled") or x.get("parts") or not x.get("needed") or not _may_choose(r, x, me): return False
+        if datetime.date.fromisoformat(str(x["date"])) < _lessons.today(): return False
+        from relief import fill as _fill
+        return not _started(pub, x, _fill._when(_now()))
+    except (KeyError, TypeError, ValueError): return False
+
+
 def choose(id, key, relief_name, by, pub, links=None):
-    """the planner's choice, its pick (waiting for the relief team); relief_name None or "" takes it off; the caller checks
-    the relief.plan right. Once approved (APPROVED_ALREADY), or once the team has split the lesson (IS_SPLIT), it is
-    changed on the team's Today page. A lesson an approved exam or event stops (links.stopped) gets no relief teacher
-    (taking one off still works)"""
+    """the planner's choice; relief_name None or "" takes it off; the caller checks the relief.plan right. On a planned absence
+    the choice is approved and sent out at once by the planner (cover.chose); on a teacher's own it is a pick waiting for the
+    relief team, as before. Allowed while nobody is approved for the lesson, or while it is still by's own choice
+    (cover.planned_by), else APPROVED_ALREADY: it is changed on the team's Today page (choosing their own choice again changes
+    nothing, so nobody is told twice); refused once the team has split the
+    lesson (IS_SPLIT) and once its first period has begun (STARTED). Taking an approved choice off writes it down as dropped
+    and the cover goes back to open, for the AI to pick and the team to approve. A lesson an approved exam or event stops
+    (links.stopped) gets no relief teacher (taking one off still works)"""
     pub = _pub(pub)
     with _LOCK:
         r = _editable(id)
@@ -534,19 +566,26 @@ def choose(id, key, relief_name, by, pub, links=None):
         _past(x)
         if not x["needed"]: raise ValueError(NO_NEED)
         if x.get("parts"): raise ValueError(IS_SPLIT)
-        if _cover.state(r, x, x) not in ("open", "waiting"): raise ValueError(APPROVED_ALREADY)
+        if not _may_choose(r, x, by): raise ValueError(APPROVED_ALREADY)
+        from relief import fill as _fill
+        if _started(pub, x, _fill._when(_now())): raise ValueError(STARTED)
         stopped = links.stopped(x) if links is not None and relief_name else ""
         if stopped: raise ValueError(f"This lesson is not happening: {stopped}.")
         now = _now()
         if not relief_name:
             if x.get("relief"):
                 _cover._settle(r, x)
-                _cover._log(x, "dropped", x["relief"], by, now)
-            x["relief"], x["relief_by"], x["pick"] = None, None, None
+                for gone in _cover.booked(x): _cover._log(x, "dropped", gone, by, now)
+            x.update(_cover.OPEN)
         else:
             free = _free.free_then(pub, _settings.load(pub), all_records(), dict(x, date=datetime.date.fromisoformat(x["date"])), r["teacher"], links=links)
             if relief_name not in [p["name"] for g in free["groups"] for p in g["people"]]:
                 raise ValueError(f"{relief_name} is not free for {' and '.join(x['classes'])} {x['subject']} then.")
+            if r.get("how") == "planned":
+                if relief_name == x.get("relief") and _cover.planned_by(x) == by: return r    # chosen already: nothing new to tell
+                _cover.chose(r, x, x, relief_name, by, now)
+                _save(r)
+                return r
             if x.get("relief"):
                 _cover._settle(r, x)
                 if x["relief"] != relief_name: _cover._log(x, "dropped", x["relief"], by, now)   # the waiting pick it replaces
