@@ -198,7 +198,7 @@ t("on a phone Remind all comes last, and no place is kept for it", () => {
   }
 });
 t("at any width there is room between the buttons at the top and the day", () => {
-  assert.ok(/margin-bottom:(\d+)px/.exec(css("relief.html", ".td-acts"))[1] >= 10, css("relief.html", ".td-acts"));
+  assert.ok(/margin-bottom:(\d+)px/.exec(css("relief.html", ".td-acts.tg"))[1] >= 10, css("relief.html", ".td-acts.tg"));
 });
 t("Remind all: what it sends, off while anything is on its way, and what it answers above the rows", async () => {
   const p = await today(day([row(), maya(), row({ ckey: "k7", key: "k7", linked: false }), inState("acknowledged", { ckey: "k8", key: "k8" }), inState("waiting", { ckey: "k9", key: "k9" })])), wait = later(); p.remind = wait.answer;
@@ -468,6 +468,78 @@ t("Remind and Remind all only for a relief that has reached its teacher", async 
   }
   const p = await today(day([row({ out: "sent" })])); assert.ok(p.btn("Remind") && p.acts().includes(ALL));
   const q = await today(day([row({ out: "held", told: told("queued") })])); await q.tick(60000); assert.strictEqual(q.reads(), 1, "held: not being sent, nothing to read again for");
+});
+
+/* ---- Send-out, Task 5: Today, by state and after the cut-off ---- */
+const HOURS = { morning: "06:30", send_from: "06:45", cut_off: "14:00", today: TODAY, next_day: "2026-10-14", past_cut_off: false };
+t("by state: not sent out, will be sent at, asked after the cut-off", async () => {
+  const p = await today(day([row({ out: "unsent", told: null }), maya({ out: "held", goes_at: "2026-10-13T06:45:00+08:00", told: null }), inState("waiting", { ckey: "k9", key: "k9", asked_after: "14:10" })], { hours: HOURS }));
+  assert.ok(p.state().startsWith("Approved Approved · not sent out") && p.state("k2").startsWith("Approved Will be sent at 06:45"));
+  assert.ok(p.state("k9").includes("Asked at 14:10, after the cut-off: nobody was pinged"));
+  assert.deepStrictEqual(p.top(), ["1 relief sent out: it will be sent at 06:45 on Tue 13 Oct. You can still change it until then."]);
+});
+t("past the cut-off: the next school day, its line, and the counters", async () => {
+  const p = await today(day([], { date: "2026-10-14", hours: Object.assign({}, HOURS, { past_cut_off: true }), counts: { need: 2, waiting: 2, approved: 0, unsent: 0, held: 0, acknowledged: 0, change: 0, nobody: 0, open: 0 } }));
+  assert.ok(p.top().includes("Past the cut-off (14:00). Nobody on the team is pinged until the morning message at 06:30. What you send out now is sent at 06:45 on Wed 14 Oct."));
+  assert.ok(p.text("#tdSub").includes("After 14:00 the page opens on the next school day") && p.text("#tdCounts").includes("Approved, not sent out"));
+  assert.strictEqual(p.calls.find(c => c.url.startsWith(`${URL}?`)).url, `${URL}?`, "the first reading asks for no date");
+  assert.deepStrictEqual(p.all("#tdSeg button").map(b => p.text(b)), ["Today", "Tomorrow"]);
+});
+t("no bot: no room kept under the buttons at the top", () => {
+  assert.ok(!/margin-bottom/.test(css("relief.html", ".td-acts")) && /margin-bottom:12px/.test(css("relief.html", ".td-acts.tg")));
+});
+t("the room under the buttons at the top is kept only while a bot is connected", async () => {
+  const p = await today(day([row()])), q = await today(day([row()], { telegram: false }));
+  assert.ok(p.find("#tdActs").classList.contains("tg") && !q.find("#tdActs").classList.contains("tg"));
+});
+t("two reliefs held: the plural, and the earliest time of a later day with its day", async () => {
+  const g = "2026-10-14T06:45:00+08:00";
+  const p = await today(day([row({ out: "held", goes_at: g, told: null }), maya({ out: "held", goes_at: g, told: null })], { hours: HOURS }));
+  assert.deepStrictEqual(p.top(), ["2 reliefs sent out: they will be sent at 06:45 on Wed 14 Oct. You can still change them until then."]);
+  assert.ok(p.state().startsWith("Approved Will be sent at Wed 14 Oct, 06:45"), p.state());
+});
+t("reliefs held for two times: the line names the earliest", async () => {
+  const p = await today(day([row({ out: "held", goes_at: "2026-10-14T06:45:00+08:00", told: null }), maya({ out: "held", goes_at: "2026-10-13T06:45:00+08:00", told: null })], { hours: HOURS }));
+  assert.deepStrictEqual(p.top(), ["2 reliefs sent out: they will be sent at 06:45 on Tue 13 Oct. You can still change them until then."]);
+});
+t("before the first answer the page is not called past", async () => {
+  const w = later(), p = await today(() => w.answer);
+  assert.ok(!p.text("#tdSub").includes("past"), p.text("#tdSub"));
+  w.give(200, day([], { hours: HOURS })); await p.settle();
+  assert.ok(!p.text("#tdSub").includes("past"));
+});
+t("no line above the rows when nothing is held, and none about the cut-off on another day", async () => {
+  const p = await today(day([row({ out: "unsent", told: null }), row({ ckey: "k8", key: "k8", out: "sent" })], { hours: Object.assign({}, HOURS, { past_cut_off: true }) }));
+  assert.deepStrictEqual(p.top(), [], "today's own view, past the cut-off: no line");
+  assert.strictEqual(p.state("k8").includes("Approved · not sent out"), false);
+  assert.ok(p.text("#tdSub").includes("After 14:00 the page opens on the next school day"));
+});
+t("a sent row says what it said, with no line of the new states", async () => {
+  const p = await today(day([row({ out: "sent" })], { hours: HOURS }));
+  assert.strictEqual(p.state(), `Approved Sent 07:20 ${BY} Change Remind`);
+});
+t("a row not sent out has Send out, Change and no Remind, whether a bot is connected or not", async () => {
+  for (const telegram of [true, false]) {
+    const p = await today(day([row({ out: "unsent", told: null })], { telegram }));
+    assert.strictEqual(p.state(), `Approved Approved · not sent out ${BY} Send out Change`);
+    const h = await today(day([row({ out: "held", goes_at: "2026-10-13T06:45:00+08:00", told: null })], { telegram }));
+    assert.strictEqual(h.state(), `Approved Will be sent at 06:45 ${BY} Change`);
+  }
+});
+t("a day with a next school day that is not tomorrow is named by its day; no next day, no button", async () => {
+  const fri = Object.assign({}, HOURS, { next_day: "2026-10-16" });
+  const p = await today(day([], { hours: fri }));
+  assert.deepStrictEqual(p.all("#tdSeg button").map(b => p.text(b)), ["Today", "Fri 16 Oct"]);
+  await p.click("#tdSeg button", "Fri 16 Oct");
+  assert.strictEqual(p.calls.filter(c => c.method === "GET" && c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=2026-10-16`);
+  const q = await today(day([], { hours: Object.assign({}, HOURS, { next_day: null }) }));
+  assert.deepStrictEqual(q.all("#tdSeg button").map(b => q.text(b)), ["Today"]);
+});
+t("the page opens on the server's date, and Refresh keeps the date shown", async () => {
+  const p = await today(c => ok(day([], { date: c.url.endsWith("?") ? "2026-10-14" : c.url.slice(-10), hours: HOURS })));
+  assert.strictEqual(p.find("#tdDate").value, "2026-10-14"); assert.strictEqual(p.text("#tdTitle"), "Relief on Wed 14 Oct");
+  await p.click("#tdActs button", "Refresh");
+  assert.strictEqual(p.calls.filter(c => c.method === "GET" && c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=2026-10-14`);
 });
 
 run(all);

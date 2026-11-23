@@ -5271,7 +5271,7 @@ def today_rows_say_when_it_was_told_and_if_not_on_telegram():
 def today_says_whether_the_bot_is_connected():
     def day_(name=TEAM): return call(name, "get", f"/api/relief/today?date={D13}")
     with school(SAM, TEAM):
-        i = today_reliefs((K5, SAM)); got = day_(); assert got["telegram"] is True and set(got) == {"date", "filling", "counts", "rows", "telegram"}, set(got)
+        i = today_reliefs((K5, SAM)); got = day_(); assert got["telegram"] is True and set(got) == {"date", "filling", "counts", "rows", "telegram", "hours"}, set(got)
         assert call(TEAM, "get", "/api/relief/today?date=2026-10-20")["telegram"] is True and call(TEAM, "get", "/api/relief/today?date=2026-10-20")["rows"] == [], "a day with nothing on it too"
         bot_ = tgdb.get_state("bot"); tgdb.set_state("bot", None); got = day_(); assert got["telegram"] is False and next(v for v in got["rows"] if v["ckey"] == K5)["linked"] is True, "a token, and not connected: what the rows say is not shown"
         for odd in ("x", dict(bot_, key=digest("another")), dict(bot_, username="")): tgdb.set_state("bot", odd); assert day_()["telegram"] is False, odd

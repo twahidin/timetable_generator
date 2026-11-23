@@ -1648,7 +1648,7 @@ def rt(f):
         store.published = old; FL.SYNC = False; FL.ON = False; PK.CALL = None; PK._seen.clear()
 
 ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
-       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out"}
+       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out", "asked_after"}
 
 @rt
 def today_lists_covers_in_time_order_with_counts_and_no_reason():
@@ -1671,7 +1671,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
                       start="10:30", end="11:30", work_set=True, state="approved",
                       pick=dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct."), approved=dict(by=TEAMER, at=NOW),
                       ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM), stopped="", duty="", told=None, linked=False,
-                      out="unsent", goes_at=None, sent_out=None), r5
+                      out="unsent", goes_at=None, sent_out=None, asked_after=None), r5
     r2, r6 = rows[1], rows[4]
     assert (r2["state"], r2["pick"]["who"], r2["pick"]["by"], r2["stale"], r2["over_now"], r2["work_set"]) == ("approved", FLEX, "team", False, True, False), r2
     assert (r6["id"], r6["state"], r6["pick"], r6["approved"], r6["over_now"], r6["warn"]) == (
@@ -1700,6 +1700,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     got = ok(team.get("/api/relief/today?date=2026-10-13"))
     assert [r["state"] for r in got["rows"] if r["id"] == j] == ["cancelled", "cancelled"] and got["counts"]["need"] == 4, got["counts"]
     assert ok(team.get("/api/relief/today")) == dict(date="2026-10-12", filling=False, rows=[], telegram=False,
+                                                    hours=dict(morning="06:30", send_from="06:45", cut_off="14:00", today="2026-10-12", next_day="2026-10-13", past_cut_off=False),
                                                     counts=dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0))
     no(team.get("/api/relief/today?date=13/10/2026"), 400, "Choose the dates again.")
 
@@ -2387,6 +2388,40 @@ def a_stale_pick_dropped_under_a_full_guard_waits_or_not_by_its_date():
         assert st(i, KF) == "open" and [h["what"] for h in cov(i, KF)[2]["history"]] == ["pick", "dropped"], "later date: dropped, held open, no app pick"
     with at("2026-10-13T08:01:00+08:00"):
         PK._seen.clear(); FL.run(call=first); assert st(i, KF) == "waiting" and cov(i, KF)[2]["pick"]["by"] == "ai"
+
+# ---- Send-out, Task 5: Today after the cut-off ----
+@rt
+def today_opens_on_the_next_school_day_after_the_cut_off():
+    fresh()
+    with at("2026-10-12T14:20:00+08:00"):
+        j = ok(staff(TEAMER).get("/api/relief/today")); assert (j["date"], j["hours"]["past_cut_off"], j["hours"]["next_day"]) == ("2026-10-13", True, "2026-10-13"), j["hours"]
+        assert j["hours"] == dict(morning="06:30", send_from="06:45", cut_off="14:00", today="2026-10-12", next_day="2026-10-13", past_cut_off=True), j["hours"]
+    with at("2026-10-16T21:00:00+08:00"): assert ok(staff(TEAMER).get("/api/relief/today"))["date"] == "2026-10-19", "Friday evening: Monday"
+    with at("2026-10-12T13:59:00+08:00"):
+        j = ok(staff(TEAMER).get("/api/relief/today")); assert (j["date"], j["hours"]["past_cut_off"]) == ("2026-10-12", False), j["hours"]
+    with at("2026-10-12T14:00:00+08:00"): assert ok(staff(TEAMER).get("/api/relief/today"))["date"] == "2026-10-13", "at the cut-off itself it is past"
+    with at("2026-10-17T10:00:00+08:00"):
+        j = ok(staff(TEAMER).get("/api/relief/today")); assert (j["date"], j["hours"]["next_day"], j["hours"]["past_cut_off"]) == ("2026-10-19", "2026-10-19", False), "Saturday morning: Monday, and not past any cut-off"
+    with at("2026-10-12T14:20:00+08:00"):
+        assert ok(staff(TEAMER).get("/api/relief/today?date=2026-10-12"))["date"] == "2026-10-12", "a date asked for is kept"
+        assert ok(staff(TEAMER).get("/api/relief/today?date="))["date"] == "2026-10-13", "an empty date is none"
+    with at("2026-10-13T14:10:00+08:00"):
+        i = absent(dates=("2026-10-13",))["id"]; rows_ = ok(staff(TEAMER).get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert {v["asked_after"] for v in rows_ if v["id"] == i} == {"14:10"}
+    with at("2026-10-13T13:59:00+08:00"):
+        k = absent(teacher=RUTH, dates=("2026-10-13",))["id"]; rows_ = ok(staff(TEAMER).get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert {v["asked_after"] for v in rows_ if v["id"] == k} == {None}, "before the cut-off"
+    fresh()
+    with at("2026-10-13T14:00:00+08:00"):
+        n = absent(teacher=EVE, dates=("2026-10-13",))["id"]; rows_ = ok(staff(TEAMER).get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert {v["asked_after"] for v in rows_ if v["id"] == n} == {"14:00"}, "at the cut-off itself"
+    with at("2026-10-12T14:10:00+08:00"): m = absent(teacher=SAM, dates=("2026-10-13",))["id"]
+    with at("2026-10-13T09:00:00+08:00"):
+        rows_ = ok(staff(TEAMER).get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert {v["asked_after"] for v in rows_ if v["id"] == m} == {None}, "sent after the cut-off of the day before: the team was pinged in the morning"
+    with at("2026-10-14T09:00:00+08:00"):
+        rows_ = ok(staff(TEAMER).get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert {v["asked_after"] for v in rows_ if v["id"] == n} == {None}, "only on the day it was sent"
 
 assert REAL == [], "a test reached the real call"
 

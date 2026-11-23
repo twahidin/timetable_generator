@@ -62,6 +62,7 @@ from relief import cover as _cover
 from relief import files as _files
 from relief import fill as _fill
 from relief import free as _free
+from relief import hours as _hours
 from relief import lessons as _lessons
 from relief import links as _chats
 from relief import settings as _settings
@@ -849,22 +850,51 @@ def _told(said, r, c, row):
         return None
 
 
+def _day_hours(pub, settings, now):
+    """(hours, opens): the times the page speaks of, dict(morning, send_from, cut_off, today, next_day, past_cut_off), and the
+    date Today opens on when none is asked for. next_day: the next school day after today, within 30 days, else None.
+    past_cut_off: today is a school day and its cut-off has come. opens: today; past the cut-off, or on a day that is not a
+    school day, next_day (today when there is none)"""
+    h, today = _hours.of(settings), _lessons.today()
+    at = _fill._when(now)
+    school = _hours.school(settings, pub, today)
+    past = school and at.time() >= h.cut_off
+    nxt = next((d for d in (today + datetime.timedelta(days=i) for i in range(1, 31)) if _hours.school(settings, pub, d)), None)
+    hrs = dict(morning=h.morning.strftime("%H:%M"), send_from=h.send_from.strftime("%H:%M"), cut_off=h.cut_off.strftime("%H:%M"), today=today.isoformat(),
+               next_day=nxt.isoformat() if nxt else None, past_cut_off=bool(past))
+    return hrs, (nxt if nxt and (past or not school) else today)
+
+
+def _asked_after(r, date, hrs, cut):
+    """"14:10" when the absence r was sent today, for today (date), at or after today's cut-off (cut): nobody on the team was pinged
+    for it; else None"""
+    if not r.get("at"): return None
+    try: at = _fill._when(r.get("at"))
+    except (TypeError, ValueError): return None
+    return at.strftime("%H:%M") if date == hrs["today"] == at.date().isoformat() and at.time() >= cut else None
+
+
 @bp.get("/api/relief/today")
 @need("relief")
 def today():
-    """every cover of the date's lessons that need relief (?date=YYYY-MM-DD, today when left out), in time order, one row a
+    """every cover of the date's lessons that need relief (?date=YYYY-MM-DD; left out: today, or past today's cut-off on a school day,
+    or on a day that is not one, the next school day, _day_hours), in time order, one row a
     cover (_row; a cancelled absence's as "cancelled", one an exam or event stops as "stopped", both out of the counts), with counts=dict(need, waiting, approved,
     unsent, held, acknowledged, change, nobody, open) (an approved relief, not acknowledged, counts as unsent, held or approved by
     its out: approved once it has reached its teacher) and filling: picks are being made (the page fetches again). On Telegram, each row: told,
     dict(state "sent" | "unsure" (it may have been) | "queued" | "failed" | "dropped", at) of the last message of the relief
     approved, its reminders too, else None (tell.Said.of; a stopped lesson's is None), and linked, its relief teacher can be
-    reached; telegram: the bot is connected (the page shows neither while it is not); relief.team"""
+    reached, and asked_after (_asked_after: "14:10" for an absence sent today, for today, after the cut-off, else None); telegram: the
+    bot is connected (the page shows neither while it is not); hours (_day_hours); relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
-    try: date = _day(request.args.get("date"), _lessons.today()).isoformat()
+    settings, now = _settings.load(pub), _absences._now()
+    hrs, opens = _day_hours(pub, settings, now)
+    try: date = _day(request.args.get("date"), opens).isoformat()
     except ValueError as e: return _refusal(e)
     filling = _fill.filling()                   # read first: a run that ends while the rows are read is fetched again
-    settings, records, rows, now = _settings.load(pub), _absences.all_records(), [], _absences._now()
+    records, rows = _absences.all_records(), []
+    cut = _hours.of(settings).cut_off
     links = _links_or_none(pub, settings["calendar"])
     said, reach = _telegram(pub)
     for r in records:
@@ -873,14 +903,14 @@ def today():
             for i, c in enumerate(_cover.covers(x)):
                 row = _row(pub, settings, records, r, x, c, i, links, now)
                 who = c.get("relief")
-                rows.append(dict(row, told=_told(said, r, c, row), linked=isinstance(who, str) and who in reach))
+                rows.append(dict(row, told=_told(said, r, c, row), linked=isinstance(who, str) and who in reach, asked_after=_asked_after(r, date, hrs, cut)))
     rows.sort(key=lambda v: (v["p"], v["absent"], v["ckey"]))
     counts = dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0)
     for v in rows:
         if v["state"] in ("cancelled", "stopped"): continue
         counts["need"] += 1; counts["nobody"] += v["nobody"]
         counts[dict(unsent="unsent", held="held").get(v["out"], "approved") if v["state"] == "approved" else v["state"]] += 1
-    return jsonify(date=date, filling=filling, counts=counts, rows=rows, telegram=_connected())
+    return jsonify(date=date, filling=filling, counts=counts, rows=rows, telegram=_connected(), hours=hrs)
 
 
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/approve")
