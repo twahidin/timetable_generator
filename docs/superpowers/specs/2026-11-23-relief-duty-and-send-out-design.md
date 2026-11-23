@@ -1,6 +1,6 @@
 # Relief duty and the send-out
 
-Date: 23 November 2026. Status: **draft for the lead's approval**. Mockups, all with made-up names:
+Date: 23 November 2026. Status: **approved by the committee lead on 23 November 2026** ("Approved, plan it"), with questions 2 to 4 as written (the first reading of each). Mockups, all with made-up names:
 `2026-11-23-relief-duty-and-send-out-mockups.html` beside this file (open it in a browser; one tab per screen).
 
 The relief module was built to the design the lead approved on 20 November (`2026-11-20-relief-module-design.md`) and to
