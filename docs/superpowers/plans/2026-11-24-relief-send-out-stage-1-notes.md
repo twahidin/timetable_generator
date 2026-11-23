@@ -563,6 +563,11 @@ Files and Who covers you (Task 11):
 - If the bot is connected before the deploy, the first minute after it sends "Covered" for every lesson acknowledged since and not
   over, at once.
 
+The report (fix round):
+- A relief approved and not sent out now brings the "not yet acknowledged" report at its first time, an hour before the first
+  period. Where the first period starts before 07:30, that report reaches the team before the 06:30 morning message.
+- A relief approved and never sent out whose lesson has started is in no report (open question 11).
+
 The blocked-bot alert (Task 12):
 - A block on Friday evening is told on Monday at 06:30.
 - An alert is lost when the app, or Telegram, is down for the whole first window after the block (Today's "not on Telegram" and the
@@ -629,6 +634,11 @@ After the final review of the whole branch, in four commits (three of code, then
 10. A relief teacher who goes away after the cut-off for a lesson later that day makes no "Relief needed again"; Today's next-day
     view says "Today still has {n} to arrange: open Today." (ruled in the fix round, F2: no ping after the cut-off, by "Pings stop,
     sending allowed"). Should a message go then after all?
+11. A relief approved and never sent out leaves the report once its lesson has started, with no line anywhere. Should the report
+    gain a line "Started, never sent out", as it has "Started without acknowledgement"?
+12. After the cut-off, the line "Today still has {n} to arrange" counts lessons that are open, waiting for approval, or approved
+    and not sent out. It does not count a request to change for a lesson of today (that request still reaches the team on
+    Telegram). Should it be counted too?
 
 The design's own points the lead may change (each is built as the design says):
 - Item 3's two readings: the relief teacher (not the reporting officer) is "the officer covering"; the teacher who is away (not a head
@@ -666,7 +676,7 @@ in the order of a day:
 5. Send a trial request for tomorrow at 15:00 with one lesson left without work: at 18:00 the trial teacher gets "Please set work".
 6. 06:30: the morning message on the team's phones. Its counts match Today (waiting, approved not sent out, held, nobody free, sent
    already) and the Away line is right.
-7. Before 06:45 press **Remind** on a relief sent out yesterday, before 06:45: "Not sent outside school hours: remind them from 06:45."
+7. Before 06:45 press **Remind** on a relief its teacher was told of yesterday: "Not sent outside school hours: remind them from 06:45."
 8. 06:45: the held reliefs reach their teachers as they are now (the changed one to its new teacher, the cancelled one to nobody), each
    once. The planned relief of step 2 gets its morning reminder.
 9. 07:00: "Please set work" again if work is still missing; set the work and see no third message.
@@ -688,7 +698,8 @@ in the order of a day:
     school day, because every approved relief, sent out or not, is then told at once. Messages of the new kinds still queued go when
     they are sent; a Relief settings save made while rolled back drops the new times. Going forward again, a relief the older
     version told reads "Approved · not sent out" until someone presses Send out (that press sends no second message), and a
-    takeover done by the older version drops the mark, so a cover it moved counts as sent out.
+    takeover done by the older version drops the mark, so a cover it moved counts as sent out. A relief on an absence asked for
+    while rolled back has no mark at all, so it too counts as sent out at its approval, as any relief from before this version.
 
 ## What stage 2 will add, and what stage 1 leaves ready
 
@@ -763,16 +774,18 @@ holidays." then gains "or days with no relief duty".
   fixed clock with nine people: no relief teacher messaged before 06:45, after the cut-off or at night, none twice; data written the
   old way safe.
 - Not checked: no real Telegram bot was called anywhere, and no model; no suite reaches the network. The Telegram side (the morning
-  message, Send out on Telegram, the repeats, the alert) was not walked on a practice phone: tests alone cover it. The pages were not
-  yet seen in a browser (above). Speed on the live service was not measured.
+  message, Send out on Telegram, the repeats, the alert) was not walked on a practice phone: tests alone cover it. In the
+  browser, the "sent" state, the late request, the view after the cut-off and its line were not seen (above). Speed on the live service was not measured.
 - Main 5de8cb5 (the admin roles and committees work, with Plan with AI's logged refusal reason and a code used twice) was merged
   into this branch as one merge commit. One file conflicted, `relief/links.py`, where this stage's blocked-bot alert (`note_alert`,
   `alerts`) and main's `forget` (what goes when a person is removed on the admin page) were written in the same place: both were kept
   whole. Then this stage was made to follow main. A removed person's note that the bot was blocked and every blocked-bot alert about
   them now go with their link, in the same transaction as their link and link codes, so a person given the same name later sees no
-  old block, and an alert about them that was already queued is dropped instead of sent. A removed person, and a person taken off
-  the Timetable committee, is on no list: not reachable, not on the relief team, not on duty for the morning message, and a message
-  queued for them is dropped as for anyone who has no Telegram any more. The rights that came from the old "Timetable committee"
+  old block, and an alert about them that was already queued is dropped instead of sent. A removed person is on no list: not reachable, not on the relief team, not on duty for the morning message, and a message
+  queued for them is dropped as for anyone who has no Telegram any more. A person taken off the Timetable committee loses only what the
+  tick gave (saving Relief settings, unless they are on the relief team); one who is also a teacher, a school leader, a head of
+  department or a subject head keeps relief through that role, and one with no such role who is not on the relief team is on no
+  list either. The rights that came from the old "Timetable committee"
   group now come from the Timetable committee tick; the test fixtures that made a committee member now tick it (a record in the old
   shape is still read as on the committee, and a test says so). The app's hooks (the morning message after the report, the History
   line by The app for a blocked bot) are each registered once, and the History page shows this stage's entries to the same people as
@@ -786,3 +799,14 @@ holidays." then gains "or days with no relief duty".
   13, classview 18, draft 31, exams (the last round 20), grid 14, groups 37, history 5, map 26, parents 46, people 31, plan 20,
   relief_inbox 3, relief_settings 25, relief_summary 11, relief_telegram 39, relief_today 59, split 189, subjectview 15, sync 17,
   teacherview 8, timetable_page 7, venueview 24.
+- The merge was reviewed by a fresh reviewer: nothing of main and nothing of this stage was lost or written twice; removing a person
+  takes only that person's rows (tried with eleven names made to look alike, such as one name that begins with another); each of the
+  app's hooks is there once. No Critical or Important finding; three small points, of which the one about wording is corrected above.
+- Last of all, every suite once more on the merged code (commit 91b2622), one at a time, run by the controller: all 31 `tests/*.py`
+  and all 25 `tests/*.test.js` pass at their first run, with the same counts as in the paragraph above (`test_relief_telegram` 439,
+  `test_relief_team` 82, `smoke` 103, `test_admin` 53, `test_accounts` 23, `test_plan` 212). Main was fetched again and had not
+  moved past 5de8cb5. The commit after it changes these notes and `docs/DEPLOY.md` alone.
+- Names check once more on the whole branch against main (counts only): 104 real staff names, 0 found; the school's full name 0;
+  token and key shapes 0.
+- After the last review, corrected in words here and in `docs/DEPLOY.md` (ruling F9, no code changed): step 7 of the first morning;
+  a relief on an absence asked for while rolled back; the report's two new known limits; open questions 11 and 12.

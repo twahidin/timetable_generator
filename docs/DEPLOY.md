@@ -273,7 +273,8 @@ sent. A Relief settings save made while rolled back drops the new times; forward
 Going forward again: a relief the older version told reads "Approved · not sent out" on Today, and is not in that
 teacher's Reliefs I'm covering, until someone presses **Send out**; that press sends no second message. A takeover done
 by the older version (a teacher's own absence taking over the lesson of an exam's or event's backup) drops the mark, so a cover it moved counts as
-sent out.
+sent out. A relief on an absence asked for while rolled back has no mark at all: it too counts as sent out at its
+approval, as any relief from before this version.
 
 ### Turning it off
 
