@@ -57,16 +57,16 @@ def rights_table():
     assert S("head") == {"setup", "timetable", "files"} and S("teacher") == {"timetable", "files"} and S("student") == {"timetable"}
     assert R.rights(None, "personal") == {"own"}
     base = {"timetable", "files"}
-    assert R.rights(person("executive"), "code") == base
-    assert R.rights(person("teacher"), "code") == base | {"relief"}
-    assert R.rights(person("leader"), "code") == base | {"relief", "relief.plan", "relief.settings"}
-    assert R.rights(person("hod"), "code") == base | {"relief", "relief.plan", "relief.settings"}
+    assert R.rights(person("executive"), "code") == base | {"history.own"}
+    assert R.rights(person("teacher"), "code") == base | {"relief", "history.own"}
+    assert R.rights(person("leader"), "code") == base | {"relief", "relief.plan", "relief.settings", "history.own"}
+    assert R.rights(person("hod"), "code") == base | {"relief", "relief.plan", "relief.settings", "history.own"}
     c = R.rights(person("committee"), "code")
-    assert c == base | {"relief", "relief.settings", "relief.save"} and not c & {"committee", "setup", "admin", "history", "codes"}
+    assert c == base | {"relief", "relief.settings", "relief.save", "history.own"} and not c & {"committee", "setup", "admin", "history", "codes"}
     assert "relief.plan" in R.rights(person("hod"), "code") and "setup" not in R.rights(person("hod"), "code")
-    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team"}
+    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team", "history.own"}
     cs = R.rights(person("committee"), "password")
-    assert cs == base | {"relief", "relief.settings", "relief.save", "committee", "setup", "history", "codes"}
+    assert cs == base | {"relief", "relief.settings", "relief.save", "committee", "setup", "history", "codes", "history.own"}
     assert "admin" in R.rights(dict(person("committee"), extras=dict(relief=False, exams=None, admin=True)), "password")
     assert "admin" not in R.rights(dict(person("committee"), extras=dict(relief=False, exams=None, admin=True)), "code")
     assert "admin" not in R.rights(dict(person("hod"), extras=dict(relief=False, exams=None, admin=True)), "password")
@@ -76,6 +76,18 @@ def rights_table():
     ex = lambda d: R.rights(dict(person("teacher"), extras=dict(relief=False, exams=iso(d), admin=False)), "code", today=today)
     assert "exams" not in ex(today - datetime.timedelta(days=1)) and "exams" in ex(today)
     assert R.rights(dict(person("committee"), off=True), "password") == frozenset()
+
+@t
+def history_rights_by_group():
+    hp = R.rights(person("hod"), "password"); assert "history.dept" in hp and "history.own" in hp and "history" not in hp
+    hc = R.rights(person("hod"), "code"); assert "history.own" in hc and "history.dept" not in hc   # relief settings is a change
+    for g in ("teacher", "executive", "leader"):   # anyone signed in by name can change something now (relief, their own events)
+        own = R.rights(person(g), "code"); assert "history.own" in own and not {"history", "history.dept"} & own, g
+    ex = dict(person("executive"), extras=dict(relief=False, exams="2999-12-31", admin=False))
+    assert "history.own" in R.rights(ex, "code")
+    assert {"history", "history.own"} <= R.rights(person("committee"), "password")
+    assert R.rights(dict(person("hod"), off=True), "password") == frozenset()
+    assert not {"history.dept", "history.own"} & (R.rights(None, "shared", "committee") | R.rights(None, "shared", "head"))
 
 def pub():
     return fake_pub([dict(name="Ms Test One", dept="Sci"), dict(name="Mr Test Two", dept="Maths")])

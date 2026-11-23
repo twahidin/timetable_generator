@@ -10,6 +10,7 @@
 <style>
 .hp{max-width:1100px;margin:0 auto;padding:20px}
 .hp .msg{border-radius:10px;padding:9px 14px;margin:0 0 12px;font-size:13.5px;line-height:1.5;background:var(--warn-bg);color:var(--warn);font-weight:600}
+.hp .msg.ok{background:var(--ok-bg);color:var(--ok)}
 .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
 .filters label{display:inline-flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)}
 .filters input[type=search]{min-width:170px}
@@ -42,9 +43,11 @@
 </header>
 <main class="hp">
   <div id="msg" role="status"></div>
+  <div id="scope"></div>
   <div class="filters" id="filters"></div>
   <div id="list"><p class="muted">Loading…</p></div>
   <div class="more" id="more"></div>
+  <p class="muted">The history is kept for two years.</p>
 </main>
 <script src="/static/history.js"></script>
 </body>
