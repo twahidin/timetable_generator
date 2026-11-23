@@ -1678,7 +1678,7 @@ def a_list_of_papers_changes_the_ones_there_and_adds_the_rest():
     s = env.load(st.exam)
     same(len(s["papers"]), 3); same(s["suggested"], [])
     e = s["papers"][0]
-    same((e["id"], e["paper"], e["minutes"], e["date"], e["start"], e["who"]), (pid, "Paper 1", 100, "2026-10-05", "08:00", "groups"))
+    same((e["id"], e["paper"], e["minutes"], e["date"], e["start"], e["who"]), (pid, "Paper 1", 100, "2026-10-05", "08:00", "level"))
     same((s["papers"][2]["subject"], s["papers"][2]["together"]), ("Literature", "Pair"))
     same(step["text"], "Put 2 papers in the draft")
     same(step["parts"]["suggested:" + pid], [True, False])
@@ -2068,8 +2068,8 @@ def the_rows_go_in_as_the_steps_put_them():
     papers = LR.to_papers(got["plain"] + got["other"])
     same([sorted(p) for p in papers], [sorted(["level", "subject", "paper", "minutes", "date", "start", "who", "together"])] * 4)
     same([(p["subject"], p["who"], p["together"]) for p in papers],
-         [("Mathematics G3", "level", ""), ("Mathematics G2", "groups", "Sec 3 Maths Paper 2"), ("Mathematics G3", "groups", "Sec 3 Maths Paper 2"),
-          ("English Language G3", "groups", "Languages")])
+         [("Mathematics G3", "level", ""), ("Mathematics G2", None, "Sec 3 Maths Paper 2"), ("Mathematics G3", None, "Sec 3 Maths Paper 2"),
+          ("English Language G3", None, "Languages")])
     env, st, _ = started(pub=pub)
     run(env, st, "put_list", dict(papers=papers), said="")
     s = env.load(st.exam)
@@ -4025,7 +4025,7 @@ def a_paper_the_list_changes_says_what_it_was():
     pasted(talk, env, "\n".join(many), call=a_reader())
     pasted(talk, env, "\n".join(x + ", 2026-10-08, 08:00" for x in many), call=a_reader())
     got = [x for x in texts(talk, "sys") if x.startswith("Changed by the list")][-1].split("\n")
-    same((len(got), got[1], got[-1]), (7, "Sec 3 Mathematics G2 Paper 1: was no time, 60 min, now 08:00 on Thu 8 Oct, 60 min.", "and 1 more: see the Papers tab."))
+    same((len(got), got[1], got[-1]), (7, "Sec 3 Mathematics G2 Paper 1: was 11:00 on Wed 7 Oct, 60 min, now 08:00 on Thu 8 Oct, 60 min.", "and 1 more: see the Papers tab."))
 
 @t
 def a_file_in_the_apps_own_layout_is_never_refused_for_the_ais_limits():
@@ -4117,5 +4117,59 @@ def the_app_refuses_what_only_a_strict_schema_used_to_keep_out():
     for tool, args, text in cases:
         unchanged(env, st, lambda: run(env, st, *AI.args_of(tool, args)), text)
     same(sorted({c[0] for c in cases}), sorted(n for n in AI.NAMES if n not in STRICT))
+
+@t
+def a_list_row_changes_only_what_it_says_on_a_paper_already_in_the_draft():
+    no_schedules()
+    env, st, _ = started(); two_papers(env, st)                    # English: level; Mathematics: groups
+    eng, maths = a_pid(env, st, "English"), a_pid(env, st, "Mathematics")
+    st.words.append("english on 6 oct at 8am")
+    run(env, st, "times", dict(items=[dict(id=eng, date="2026-10-06", start="08:00")]), said="english on 6 oct at 8am")
+    env.by_hand(st.exam, edit=lambda s: s["papers"][0].update(together="Pair"))
+    row = lambda **kw: dict(dict(level="Sec 3", subject="English", paper="Paper 1", minutes=100, date=None, start=None, who=None, together=""), **kw)
+    paper = lambda pid: next(p for p in env.load(st.exam)["papers"] if p["id"] == pid)
+    look = lambda pid: tuple(paper(pid)[k] for k in ("minutes", "date", "start", "together", "who"))
+    run(env, st, "put_list", dict(papers=[row()]), said="")       # only a new length: the time, the Sits with and the level stay
+    same(look(eng), (100, "2026-10-06", "08:00", "Pair", "level"))
+    run(env, st, "put_list", dict(papers=[row(minutes=110, who="groups")]), said="")
+    same(look(eng), (110, "2026-10-06", "08:00", "Pair", "level"))
+    run(env, st, "put_list", dict(papers=[row(date="2026-10-07")]), said="")    # a date and no start: the date, the start cleared
+    same(look(eng), (100, "2026-10-07", None, "Pair", "level"))
+    run(env, st, "put_list", dict(papers=[row(date="2026-10-08", start="10:00", together="Languages")]), said="")
+    same(look(eng), (100, "2026-10-08", "10:00", "Languages", "level"))
+    run(env, st, "put_list", dict(papers=[row(subject="Mathematics", minutes=60, who="level")]), said="")
+    same(look(maths), (60, None, None, "", "level"))
+    run(env, st, "put_list", dict(papers=[row(subject="Mathematics", paper="Paper 2", minutes=45)]), said="")
+    new = next(p for p in env.load(st.exam)["papers"] if p["paper"] == "Paper 2")
+    same((new["who"], new["students"], new["date"], new["together"]), ("groups", [], None, ""))
+    env.by_hand(st.exam, edit=lambda s: s["papers"][0].update(who="students", students=["3A-01", "3A-02"]))
+    for i, who in enumerate((None, "level", "groups", "students")):
+        run(env, st, "put_list", dict(papers=[row(minutes=70 + i, who=who)]), said="")
+        same((paper(eng)["who"], paper(eng)["students"], paper(eng)["minutes"]), ("students", ["3A-01", "3A-02"], 70 + i))
+
+@t
+def a_pasted_list_keeps_an_agreed_time_and_sits_with_and_says_what_changed():
+    env, talk = list_talk()
+    pasted(talk, env, ENG, call=a_reader())                       # English Language G3 at 08:00 on 6 Oct, 90 min
+    env.by_hand(talk.exam, edit=lambda s: s["papers"][0].update(together="Languages"))
+    pasted(talk, env, "Sec 3, English Language G3, Paper 1, 120", call=a_reader())
+    p = env.load(talk.exam)["papers"][0]
+    same((p["date"], p["start"], p["minutes"], p["together"], p["who"]), ("2026-10-06", "08:00", 120, "Languages", "groups"))
+    same([x for x in texts(talk, "sys") if x.startswith("Changed by the list")][-1],
+         "Changed by the list:\nSec 3 English Language G3 Paper 1: was 08:00 on Tue 6 Oct, 90 min, now 08:00 on Tue 6 Oct, 120 min.")
+    pasted(talk, env, "\n".join(f"Sec 3, Mathematics G{g}, Paper 1, 60, 2026-10-07, 10:00" for g in (2, 3)), call=a_reader())
+    lid = pasted(talk, env, MATHS, call=a_reader(BOTH))["list"]   # the line for both ties them: their Sits with changes
+    T.confirm_list(talk, env, lid, True)
+    ch = [x for x in texts(talk, "sys") if x.startswith("Changed by the list")][-1]
+    same(ch.split("\n"), ["Changed by the list:", "Sec 3 Mathematics G2 Paper 1: sits with Sec 3 Maths Paper 1, was none.",
+                          "Sec 3 Mathematics G3 Paper 1: sits with Sec 3 Maths Paper 1, was none."])
+    assert "Changed by the list: Sec 3 Mathematics G2 Paper 1: sits with Sec 3 Maths Paper 1, was none." in talk.notes[-1], talk.notes[-1]
+    lid = pasted(talk, env, MATHS.replace("Paper 1", "Paper 2").replace("60", "45"), call=a_reader(BOTH))["list"]
+    T.confirm_list(talk, env, lid, True)
+    env.by_hand(talk.exam, edit=lambda s: [p.update(together="Old") for p in s["papers"] if p["paper"] == "Paper 2"])
+    lid = pasted(talk, env, MATHS.replace("Paper 1", "Paper 2").replace("60", "50"), call=a_reader(BOTH))["list"]
+    T.confirm_list(talk, env, lid, True)
+    ch = [x for x in texts(talk, "sys") if x.startswith("Changed by the list")][-1]
+    assert "Sec 3 Mathematics G2 Paper 2: was 10:00 on Wed 7 Oct, 45 min, now 10:00 on Wed 7 Oct, 50 min; sits with Sec 3 Maths Paper 2, was Old." in ch, ch
 
 print(f"{COUNT} plan tests passed")

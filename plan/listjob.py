@@ -262,11 +262,17 @@ def _when(p) -> str:
 
 
 def _changed(talk, step) -> str:
-    """one sys line naming each paper already there whose date, start or length the list's step changed (at most 5) -> the
-    same sentences for the AI's note, "" when none"""
-    said = [f"{_papers.label(a)}: was {_when(b)}, now {_when(a)}." for k, (b, a) in step["parts"].items()
-            if k.startswith("paper:") and b is not None and a is not None
-            and any(b.get(x) != a.get(x) for x in ("date", "start", "minutes"))]
+    """one sys line naming each paper already there whose date, start, length or Sits with the list's step changed (at most
+    5) -> the same sentences for the AI's note, "" when none"""
+    said = []
+    for k, (b, a) in step["parts"].items():
+        if not (k.startswith("paper:") and b is not None and a is not None):
+            continue
+        bits = [f"was {_when(b)}, now {_when(a)}"] if any(b.get(x) != a.get(x) for x in ("date", "start", "minutes")) else []
+        if (b.get("together") or "") != (a.get("together") or ""):
+            bits.append(f"sits with {a.get('together') or 'none'}, was {b.get('together') or 'none'}")
+        if bits:
+            said.append(f"{_papers.label(a)}: {'; '.join(bits)}.")
     if not said:
         return ""
     more = [f"and {len(said) - MOST_SAID} more: see the Papers tab."] if len(said) > MOST_SAID else []

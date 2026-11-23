@@ -357,12 +357,13 @@ PUT = ("level", "subject", "paper", "minutes", "date", "start", "who", "together
 
 
 def to_papers(entries) -> list:
-    """the rows steps' put_list takes, from entries of match's plain and other"""
+    """the rows steps' put_list takes, from entries of match's plain and other: who is "level" when the row says the whole level
+    sits it, else None (put_list: groups for a new paper, kept for one that is there)"""
     if not isinstance(entries, list):
         raise Refused(WRONG)
     out = []
     for e in entries:
         if not isinstance(e, dict) or any(k not in e for k in PUT) or e["who"] not in ("level", "groups"):
             raise Refused(WRONG)
-        out.append({k: e[k] for k in PUT})
+        out.append(dict({k: e[k] for k in PUT}, who="level" if e["who"] == "level" else None))
     return out

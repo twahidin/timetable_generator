@@ -559,15 +559,23 @@ def _put_list_of(env, st, a, said):
             if p is None:
                 p = dict(id=secrets.token_hex(4), **row, minutes=None, date=None, start=None, who="groups", students=[], together="")
                 s["papers"].append(p)
-            was = p.get("who")
-            who = d.get("who") or was
-            if who == "students" and was != "students":
+            # a paper there already changes only what the row carries: its length always, its date and start when the row
+            # gives a date, its Sits with when the row has one, its who only to the whole level; a paper that students sit
+            # keeps its who and its students whatever the row says
+            was, said = p.get("who"), d.get("who")
+            if said == "students" and was != "students":
                 raise Refused(STUDENTS)
             p["minutes"] = _whole(d["minutes"], 1, f"Give {_papers.label(p)} a length in minutes.")
-            p.update(date=date, start=start, together=_txt(d.get("together")), who=who)
-            if who != "students":
+            if date is not None:
+                p.update(date=date, start=start)
+                _unmark(s, p["id"])
+            together = _txt(d.get("together"))
+            if together:
+                p["together"] = together
+            if said == "level" and was != "students":
+                p["who"] = "level"
+            if p.get("who") != "students":
                 p["students"] = []
-            _unmark(s, p["id"])
         if len(s["papers"]) > MAX_PAPERS:
             raise Refused(TOO_MANY)
     return fn
