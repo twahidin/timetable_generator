@@ -8,6 +8,7 @@ route answers 404 OFF; GET /plan still gives the page, which says so.
 Answers: a refusal is 400 {"error": sentence}; a talk that is unknown, closed or someone else's 410 {"error": talk.LOST}; a
 body that is not a JSON object, or a wrong type in it, 400 WRONG; a fault 500 FAULT, logged as its type and frames only.
 Nothing here logs or keeps what was typed. A talk's owner is app.py's: never the person's name."""
+import io
 import logging
 import os
 import traceback
@@ -15,6 +16,7 @@ from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.exceptions import HTTPException
+from werkzeug.formparser import parse_form_data
 
 from exams import approval as _approval
 from plan import ai as _ai
@@ -27,7 +29,8 @@ from plan.steps import Refused
 bp = Blueprint("plan_web", __name__)
 log = logging.getLogger("plan")
 
-CALL = None                     # the AI call of every answer: None in production (the real one, or the practice helper); tests put a stand-in
+CALL = None                     # an answer's AI call(messages, stop, deadline), given to talk.say: None in production; tests put a stand-in
+READ = None                     # the list reader's call(text, facts), given to talk.paste: None in production; tests put a stand-in
 OFF = "Plan with AI is not set up on this server."
 WRONG = "Check what was sent and try again."
 FAULT = "The app could not do that. Try again."
@@ -51,9 +54,14 @@ def init(need, env, owner):
 
 def guarded(f):
     """the route needs the exams rights: app.py's need() decides on every request; the names stay on the route as _need,
-    for the route map (tests/test_routes.py)"""
+    for the route map (tests/test_routes.py). The guarded function is made once, at the first request after init"""
+    made = []
+
     @wraps(f)
-    def inner(*a, **k): return _need(*GUARD)(f)(*a, **k)
+    def inner(*a, **k):
+        if not made:
+            made.append(_need(*GUARD)(f))
+        return made[0](*a, **k)
     inner._need = GUARD
     return inner
 
@@ -115,21 +123,19 @@ def _str(d, key, none_ok=False):
     return v
 
 
-def _int_or_none(v):
-    if v is None:
-        return None
-    if not isinstance(v, int) or isinstance(v, bool):
-        raise _Wrong()
-    return v
+def _count(v) -> int:
+    """a line number as the page sends it: a whole number of at least 0 (or its digits); anything else counts as 0"""
+    if isinstance(v, int) and not isinstance(v, bool):
+        return max(v, 0)
+    return int(v) if isinstance(v, str) and v.isascii() and v.isdigit() else 0
 
 
 def _after(d=None) -> int:
-    """the n after which the page wants the lines: the body's `after` (a whole number) when it has one, else ?after= (a
-    non-number there counts as 0)"""
+    """the n after which the page wants the lines: the body's `after` when it has one, else ?after=; a negative or a
+    non-number counts as 0"""
     if d is not None and d.get("after") is not None:
-        return _int_or_none(d.get("after"))
-    v = request.args.get("after", "")
-    return int(v) if v.isdigit() else 0
+        return _count(d.get("after"))
+    return _count(request.args.get("after", ""))
 
 
 def _mine(id):
@@ -200,15 +206,22 @@ def say(id):
     return _view(t, env, after)
 
 
+def _in_memory(*a, **k):
+    """the form parser's place for a file part: memory, never Werkzeug's temp file (which goes to disk over 500 KB)"""
+    return io.BytesIO()
+
+
 @bp.post("/api/plan/talks/<id>/list")
 @api
 def paste(id):
-    """{text, after?} or a multipart `file`: a list of papers (refused from its length before it is read when too big)"""
+    """{text, after?} or a multipart `file`: a list of papers. Refused from its length before it is read when too big or not
+    given (a chunked body); a form is parsed in memory only, so nothing of the file is ever put on the server's disk"""
     t, env = _mine(id)
-    if request.content_length is not None and request.content_length > MOST_BODY:
+    if request.content_length is None or request.content_length > MOST_BODY:
         return {"error": _listread.BAD_FILE}, 400
     if request.mimetype == "multipart/form-data":
-        f = request.files.get("file")
+        _, _form, files = parse_form_data(request.environ, stream_factory=_in_memory, max_content_length=MOST_BODY)
+        f = files.get("file")
         if f is None:
             raise _Wrong()
         data = f.read(_listread.MOST_BYTES + 1)
@@ -218,7 +231,7 @@ def paste(id):
     else:
         d = _body()
         text, filename, data, after = _str(d, "text"), None, None, _after(d)
-    _talk.paste(t, env, text=text, filename=filename, data=data, call=CALL)
+    _talk.paste(t, env, text=text, filename=filename, data=data, call=READ)
     return _view(t, env, after)
 
 

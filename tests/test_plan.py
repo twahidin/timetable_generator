@@ -3180,15 +3180,16 @@ def w_session(c):
     with c.session_transaction() as s: return dict(s)
 
 @contextlib.contextmanager
-def ai_on(call=None):
-    """the AI counts as set up, the routes' answers run on call, and nothing can reach the real AI"""
+def ai_on(call=None, read=None):
+    """the AI counts as set up, the routes' answers run on call and their list reading on read, and nothing can reach the
+    real AI"""
     reached = []
     def no_network(*a, **k):
         reached.append(1); raise AssertionError("a test reached for the real AI")
-    real = AI.enabled, AI._real_call, W.CALL
-    AI.enabled, AI._real_call, W.CALL = (lambda: True), no_network, call
+    real = AI.enabled, AI._real_call, AI._real_read, W.CALL, W.READ
+    AI.enabled, AI._real_call, AI._real_read, W.CALL, W.READ = (lambda: True), no_network, no_network, call, read
     try: yield
-    finally: AI.enabled, AI._real_call, W.CALL = real
+    finally: AI.enabled, AI._real_call, AI._real_read, W.CALL, W.READ = real
     assert not reached, "a test reached for the real AI"
 
 def w_done(c, id, after=0):
@@ -3423,7 +3424,7 @@ def odd_input_is_refused_with_a_sentence_and_never_a_500():
         answered(c.post("/api/plan/talks", json=dict(exam="nope")), 400, {"error": "That exam is not there any more."})
         id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
         u = f"/api/plan/talks/{id}"
-        for body in ([1], dict(text=5), dict(text="hi", pick=3), dict(text="hi", after="2"), dict(text="hi", after=True), dict(text=None)):
+        for body in ([1], dict(text=5), dict(text="hi", pick=3), dict(text=None)):
             answered(c.post(u + "/say", json=body), 400, WRONG_ANSWER)
         answered(c.post(u + "/say", json=dict(text="  ")), 400, {"error": T.EMPTY})
         answered(c.post(u + "/say", json=dict(text="hi", pick="Yes")), 400, {"error": T.NO_PICK})
@@ -3435,8 +3436,8 @@ def odd_input_is_refused_with_a_sentence_and_never_a_500():
             answered(c.post(u + "/list/L1", json=body), 400, WRONG_ANSWER)
         got, real = [], T.paste
         def paste(talk, env, text=None, filename=None, data=None, call=None):
-            got.append((talk.id, text, filename, data, call is W.CALL)); raise Refused(T.LIST_NEXT)
-        T.paste = paste
+            got.append((talk.id, text, filename, data, call is W.READ and call is not W.CALL)); raise Refused(T.LIST_NEXT)
+        T.paste, W.READ = paste, (lambda text, facts_: [])
         try:
             answered(c.post(u + "/list", json=dict(text="Sec 3, English, Paper 1, 90")), 400, {"error": T.LIST_NEXT})
             answered(c.post(u + "/list", data={"file": (io.BytesIO(b"PK\x03\x04 a book"), "papers.xlsx")}, content_type="multipart/form-data"), 400, {"error": T.LIST_NEXT})
@@ -3451,6 +3452,70 @@ def odd_input_is_refused_with_a_sentence_and_never_a_500():
         finally: T.paste = real
         answered(c.get(u + "?after=-3"), 200)
         answered(c.delete(u), 200, {"ok": True})
+
+@t
+def after_is_read_alike_from_the_body_and_the_query_and_never_refused():
+    fresh(); no_schedules(); w_records()
+    with ai_on(Script(reply(say("One.")), reply(say("Two.")))):
+        c = w_person(UNA)
+        id = answered(c.post("/api/plan/talks", json={}), 200)["id"]; u = f"/api/plan/talks/{id}"
+        answered(c.post(u + "/say", json=dict(text="first")), 200); w_done(c, id)          # lines 1 (me) and 2 (ai)
+        for q, n in (("1", 1), ("2", 0), ("-3", 2), ("x", 2), ("1.5", 2), ("", 2)):
+            same(len(answered(c.get(f"{u}?after={q}"), 200)["lines"]), n)
+        for after in (-3, "x", True, 1.5, [1], {}, "1"):                  # a negative or a non-number counts as 0: never refused
+            answered(c.post(u + "/undo", json=dict(step="nope", after=after)), 400, {"error": T.NO_STEP})
+        v = answered(c.post(u + "/say", json=dict(text="second", after="2")), 200)
+        same([l["text"] for l in v["lines"]], ["second"])                 # "2" counts as the query's 2 does
+        w_done(c, id)
+        same(len(answered(c.post(u + "/stop", json=dict(after=-1)), 200)["lines"]), 4)
+
+@t
+def a_list_file_is_never_put_on_the_server_s_disk():
+    import tempfile as TF, werkzeug.formparser as WF
+    fresh(); no_schedules(); w_records()
+    made = []
+    def no_disk(*a, **k):
+        made.append(1); raise AssertionError("a temp file was made")
+    data = bytes(range(256)) * 4096                                    # 1 MB, more than Werkzeug keeps in memory (500 KB)
+    got, real = [], T.paste
+    def paste(talk, env, text=None, filename=None, data=None, call=None):
+        got.append((filename, data)); raise Refused(T.LIST_NEXT)
+    names = ("SpooledTemporaryFile", "TemporaryFile", "NamedTemporaryFile", "mkstemp")
+    kept = {(m, n): getattr(m, n) for m in (TF, WF) for n in names if hasattr(m, n)}
+    with ai_on(Script(), read=lambda text, facts_: []):
+        c = w_person(UNA)
+        id = answered(c.post("/api/plan/talks", json={}), 200)["id"]; u = f"/api/plan/talks/{id}/list"
+        T.paste = paste
+        for (m, n) in kept: setattr(m, n, no_disk)
+        try:
+            answered(c.post(u, data={"file": (io.BytesIO(data), "papers.docx"), "note": "x"}, content_type="multipart/form-data"), 400, {"error": T.LIST_NEXT})
+            r = c.post(u, input_stream=io.BytesIO(b'{"text": "Sec 3, English, Paper 1, 90"}'), content_type="application/json",
+                       headers={"Transfer-Encoding": "chunked"})       # no Content-Length: refused before it is read
+            answered(r, 400, {"error": LR.BAD_FILE})
+        finally:
+            for (m, n), f in kept.items(): setattr(m, n, f)
+            T.paste = real
+    same(made, [])
+    same(got, [("papers.docx", data)])                                  # the file's bytes passed on whole, and once
+
+@t
+def one_talk_answers_with_its_call_and_reads_a_list_with_its_reader():
+    fresh(); no_schedules(); w_records()
+    call, seen = Script(reply(use("u1", "start_exam", dict(START_IN))), reply(say("Started."))), []
+    def read(text, facts_):
+        seen.append(text)
+        return [dict(line=1, level="Sec 3", subject="English", paper="Paper 1", minutes=90, date=None, start=None, all=False, subjects=[])]
+    with ai_on(call, read=read):
+        c = w_person(UNA)
+        id = answered(c.post("/api/plan/talks", json={}), 200)["id"]; u = f"/api/plan/talks/{id}"
+        answered(c.post(u + "/say", json=dict(text="Plan the mid-year exam")), 200)
+        v = w_done(c, id); exam = v["exam"]["id"]
+        answered(c.post(u + "/list", json=dict(text="Sec 3, English, Paper 1, 90", after=v["last"])), 200)
+        v = w_done(c, id, v["last"])
+    same((len(call.replies), len(call.sent), len(seen)), (0, 2, 1))     # the answer ran on call, the list on read
+    assert "English" in seen[0], seen
+    same([l["kind"] for l in v["lines"]][:1], ["me"]); assert any(l["kind"] in ("list", "did") for l in v["lines"]), v["lines"]
+    same([(p["level"], p["subject"], p["paper"]) for p in XS.load(exam)["papers"]], [("Sec 3", "English", "Paper 1")])
 
 @t
 def nothing_of_a_talk_reaches_the_server_s_log():
