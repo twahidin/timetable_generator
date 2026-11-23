@@ -13,7 +13,9 @@
    The page opens on the day the server says (no date asked: today, or the next school day once today's cut-off has come), and its
    second day button is the next school day (hours.next_day; "Tomorrow" when it is). An approved row says "Approved · not sent out",
    "Will be sent at 06:45" (held) or what its teacher was sent; a waiting row asked after the cut-off says so; above the rows, a
-   line for the reliefs held and, on the next school day past the cut-off, one for what sending out now does.
+   line for the reliefs held and, on the next school day past the cut-off, one for what sending out now does and one for how many
+   of today's lessons still to come are open, waiting or not sent out (hours.today_left: "Today still has 1 to arrange: open Today.",
+   whose "open Today" shows today; nobody is pinged for them after the cut-off).
    Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each); Send out and Send
    out all the same, with the approval shown ({id, ckey, who, approved_at}): the server
    refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
@@ -227,12 +229,14 @@
   function paintTop() {
     const h = T.hours, held = heldRows(), lines = [];
     if (h && h.past_cut_off && T.date && T.date === h.next_day) lines.push({ text: `Past the cut-off (${h.cut_off}). Nobody on the team is pinged until the morning message at ${h.morning}. What you send out now is sent at ${h.send_from} on ${day(T.date)}.` });
+    const left = h ? Number(h.today_left) || 0 : 0;   /* past the cut-off, on a later day: today's lessons still to come that are open, waiting or not sent out */
+    if (left > 0 && h.today && T.date && T.date !== h.today) lines.push({ text: `Today still has ${left} to arrange:`, today: h.today });
     if (held.length) {
       const first = held.map(r => String(r.goes_at)).sort()[0], at = first.slice(11, 16), d = first.slice(0, 10), one = held.length === 1;
       lines.push({ text: `${one ? "1 relief sent out: it" : `${held.length} reliefs sent out: they`} will be sent at ${at} on ${day(d)}. You can still change ${one ? "it" : "them"} until then.` });
     }
     lines.push(...T.top);
-    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}</p>`; });
+    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">open Today</button>.` : ""}</p>`; });
     if (T.data && T.data.filling) lines.push(`<p class="td-top small td-busy">Being picked… The page reads the day again every 3 seconds.</p>`);
     if (T.err && T.data) lines.push(`<p class="td-top">${say(T.err)} <button type="button" class="small" data-td="reload">Try again</button></p>`);
     if (lines.join("") !== T.lines) $("#tdTop", T.pane).innerHTML = T.lines = lines.join("");   /* a live region: what is there already is not said again */

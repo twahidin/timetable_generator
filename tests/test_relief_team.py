@@ -1723,7 +1723,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     got = ok(team.get("/api/relief/today?date=2026-10-13"))
     assert [r["state"] for r in got["rows"] if r["id"] == j] == ["cancelled", "cancelled"] and got["counts"]["need"] == 4, got["counts"]
     assert ok(team.get("/api/relief/today")) == dict(date="2026-10-12", filling=False, rows=[], telegram=False,
-                                                    hours=dict(morning="06:30", send_from="06:45", cut_off="14:00", today="2026-10-12", next_day="2026-10-13", past_cut_off=False),
+                                                    hours=dict(morning="06:30", send_from="06:45", cut_off="14:00", today="2026-10-12", next_day="2026-10-13", past_cut_off=False, today_left=0),
                                                     counts=dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0))
     no(team.get("/api/relief/today?date=13/10/2026"), 400, "Choose the dates again.")
 
@@ -2418,7 +2418,7 @@ def today_opens_on_the_next_school_day_after_the_cut_off():
     fresh()
     with at("2026-10-12T14:20:00+08:00"):
         j = ok(staff(TEAMER).get("/api/relief/today")); assert (j["date"], j["hours"]["past_cut_off"], j["hours"]["next_day"]) == ("2026-10-13", True, "2026-10-13"), j["hours"]
-        assert j["hours"] == dict(morning="06:30", send_from="06:45", cut_off="14:00", today="2026-10-12", next_day="2026-10-13", past_cut_off=True), j["hours"]
+        assert j["hours"] == dict(morning="06:30", send_from="06:45", cut_off="14:00", today="2026-10-12", next_day="2026-10-13", past_cut_off=True, today_left=0), j["hours"]
     with at("2026-10-16T21:00:00+08:00"): assert ok(staff(TEAMER).get("/api/relief/today"))["date"] == "2026-10-19", "Friday evening: Monday"
     with at("2026-10-12T13:59:00+08:00"):
         j = ok(staff(TEAMER).get("/api/relief/today")); assert (j["date"], j["hours"]["past_cut_off"]) == ("2026-10-12", False), j["hours"]
@@ -2467,6 +2467,26 @@ def back_to_open_leaves_a_cover_alone_unless_its_relief_is_who_and_away():
     with logged() as got, stand_in(CV, "back_to_open", boom): FL.run(now=mon("09:00"), call=first)
     assert [x.getMessage() for x in got] == ["an approved relief was not checked: ValueError"] and relief_of(i, K2) == BUSY, "logged by its kind, and the run goes on"
     FL.run(now=mon("09:01"), call=first); assert st(i, K2) == "waiting" and relief_of(i, K2) not in (BUSY, SAM) and relief_of(i, K5) == MAYA
+
+# ---- Send-out, final fix wave ----
+@rt
+def after_the_cut_off_the_next_day_says_how_many_of_today_are_still_to_arrange():
+    late = world([L(TUE, 13, 1, ["2C"], "Science", [EVE])]); late["model"]["NP"] = 14       # a lesson at 14:30, after the cut-off
+    k13 = [x for x in LS.on_date(late, CAL, EVE, D13) if x["p"] == 13][0]["key"]
+    left = lambda q="": ok(staff(TEAMER).get("/api/relief/today" + q))["hours"]["today_left"]
+    fresh(); old = store.published; store.published = lambda: late
+    try:
+        with at("2026-10-13T14:10:00+08:00"):
+            i = AB.new(body(), late, EVE, "asked")["id"]
+            j = ok(staff(TEAMER).get("/api/relief/today")); assert (j["date"], j["hours"]["today_left"]) == ("2026-10-14", 1), j["hours"]   # the lessons already over are not counted
+            assert left("?date=2026-10-13") == 0, "today's own view"
+            CV.change(i, k13, SAM, TEAMER, late, ST); assert st(i, k13) == "approved" and left() == 1, "approved, not sent out"
+            CV.send_out(i, k13, SAM, TEAMER, late, ST); assert left() == 0, "sent out: nothing left"
+        with at("2026-10-13T14:20:00+08:00"):
+            AB.new(body(SAM), late, SAM, "asked"); CV.back_to_open(i, k13, SAM); assert st(i, k13) in ("open", "waiting") and left() == 1, "its relief teacher found away: open again, and counted"
+        with at("2026-10-13T14:30:00+08:00"): assert left() == 0, "its lesson has started"
+        with at("2026-10-13T13:50:00+08:00"): assert left("?date=2026-10-14") == 0, "before the cut-off"
+    finally: store.published = old
 
 assert REAL == [], "a test reached the real call"
 

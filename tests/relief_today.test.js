@@ -564,4 +564,21 @@ t("a relief whose teacher is away: named above the new pick, or above an open ro
   assert.ok(!relief(q).includes("away then") && !relief(q, "k2").includes("away then"), "an approved row, or none named: no such line");
 });
 
+/* ---- Send-out, final fix wave ---- */
+t("past the cut-off, on the next day: how many of today are still to arrange, and open Today shows today", async () => {
+  const flat = el => el.kids.map(k => (typeof k === "string" ? k : flat(k))).join("");   /* the line as it reads, its button in it */
+  const past = (left, more) => day([], Object.assign({ date: "2026-10-14", hours: Object.assign({}, HOURS, { past_cut_off: true, today_left: left }) }, more));
+  const p = await today(past(1));
+  const line = p.all("#tdTop .td-top").find(e => p.text(e).startsWith("Today still"));
+  assert.ok(line, p.top()); assert.strictEqual(flat(line).replace(/\s+/g, " ").trim(), "Today still has 1 to arrange: open Today.");
+  p.day = c => ok(day([row()], { date: c.url.slice(-10), hours: Object.assign({}, HOURS, { past_cut_off: true, today_left: 1 }) }));
+  await p.click("#tdTop button", "open Today");
+  assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=${TODAY}`);
+  assert.strictEqual(p.text("#tdTitle"), "Relief today"); assert.strictEqual(p.find("#tdSeg button", "Today").getAttribute("aria-pressed"), "true");
+  assert.ok(!p.top().some(x => x.startsWith("Today still")), "on today's own view: no such line");
+  const q = await today(past(2)); assert.ok(q.top().some(x => x.startsWith("Today still has 2 to arrange:")), q.top());
+  const z = await today(past(0)); assert.ok(!z.top().some(x => x.startsWith("Today still")), "nothing left: no line");
+  const o = await today(day([], { date: "2026-10-14" })); assert.ok(!o.top().some(x => x.startsWith("Today still")), "no hours: no line");
+});
+
 run(all);

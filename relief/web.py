@@ -881,6 +881,26 @@ def _asked_after(r, date, hrs, cut):
     return at.strftime("%H:%M") if date == hrs["today"] == at.date().isoformat() and at.time() >= cut else None
 
 
+def _today_left(pub, records, links, hrs, date, now):
+    """how many covers of today's lessons still to come are open, waiting for approval, or approved and not sent out
+    (cover.sent_out), while the page shows a later day because today's cut-off is past; 0 on today's own view, before the cut-off,
+    and when there is none. Nobody is pinged for them (after the cut-off nobody is): the page says so. A cover that cannot be
+    read is passed over, logged by its kind"""
+    if not hrs["past_cut_off"] or date <= hrs["today"]: return 0
+    at, n = _fill._when(now), 0
+    for r in records:
+        if r.get("cancelled"): continue
+        for x in r.get("lessons") or []:
+            if x.get("date") != hrs["today"] or not x.get("needed"): continue
+            try:
+                if _cover.stopped(links, x): continue
+                for c in _cover.covers(x):
+                    s = _cover.state(r, x, c)
+                    n += (s in ("open", "waiting") or (s == "approved" and _cover.sent_out(c) is None)) and _hours.starts(pub, x, c) > at
+            except Exception as e: current_app.logger.error("relief: a lesson of today could not be counted (%s)", type(e).__name__)
+    return n
+
+
 @bp.get("/api/relief/today")
 @need("relief")
 def today():
@@ -892,7 +912,7 @@ def today():
     dict(state "sent" | "unsure" (it may have been) | "queued" | "failed" | "dropped", at) of the last message of the relief
     approved, its reminders too, else None (tell.Said.of; a stopped lesson's is None), and linked, its relief teacher can be
     reached, and asked_after (_asked_after: "14:10" for an absence sent today, for today, after the cut-off, else None); telegram: the
-    bot is connected (the page shows neither while it is not); hours (_day_hours); relief.team"""
+    bot is connected (the page shows neither while it is not); hours (_day_hours, with today_left: _today_left); relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
     settings, now = _settings.load(pub), _absences._now()
@@ -917,6 +937,7 @@ def today():
         if v["state"] in ("cancelled", "stopped"): continue
         counts["need"] += 1; counts["nobody"] += v["nobody"]
         counts[dict(unsent="unsent", held="held").get(v["out"], "approved") if v["state"] == "approved" else v["state"]] += 1
+    hrs = dict(hrs, today_left=_today_left(pub, records, links, hrs, date, now))
     return jsonify(date=date, filling=filling, counts=counts, rows=rows, telegram=_connected(), hours=hrs)
 
 
