@@ -7593,7 +7593,7 @@ def the_settings_say_what_could_not_be_sent_since_monday():
         assert u == dict(failed=3, unsure=1, since="2026-10-12", more=0, items=[
             dict(what="Relief planned", name=EVE, at="2026-10-13T07:10:00+08:00", state="failed"), dict(what="To the reporting officer", name=ROSA, at="2026-10-12T15:00:00+08:00", state="unsure"),
             dict(what="Weekly summary", name=TEAM, at="2026-10-12T15:00:00+08:00", state="failed"), dict(what="Message", name=ROSA, at="2026-10-12T09:00:00+08:00", state="failed")]), u
-        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "late", "morning"} and tgweb.UNSENT["late"] == "Late request for today" and tgweb.UNSENT["morning"] == "Morning message"
+        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "late", "morning", "repeat"} and tgweb.UNSENT["late"] == "Late request for today" and tgweb.UNSENT["morning"] == "Morning message"
         call(EVE, "get", ADMIN, code=401)                                                  # need("relief.save"): as before
 
 @t
@@ -8763,6 +8763,49 @@ def a_reminder_from_the_team_counts_against_the_morning_one():
 def the_repeat_kind_is_registered():
     assert "repeat" in TE.TEACHER_KINDS and "repeat" not in TE.ANY_HOUR and TE.CHECKS["repeat"] is TE._repeat_true
     assert TE.repeat_text("Wed 14 Oct", "2A Science", "", "", "", EVE, True) == "⏰ Reminder · your relief today, Wed 14 Oct\n2A Science\nFor Ms Evelyn Koh. The work is in the app."
+
+# ---- Send-out, Task 9 fix round 1: the label, a failed or dropped message, a press on a repeat, a request to change ----
+@t
+def a_failed_repeat_is_named_in_relief_settings():
+    with school(EVE, ROSA, TEAM, SAM):
+        at("09:00", day=13); key = "relief:x:2026-10-12T09:00:00+08:00:before"
+        q(key, SAM, text="A made-up message zebra-private", kind="repeat"); put(key, state="failed", at="2026-10-13T08:30:00+08:00")
+        got = call(TEAM, "get", ADMIN); text = json.dumps(got)
+        assert got["unsent"]["items"] == [dict(what="Reminder of a relief", name=SAM, at="2026-10-13T08:30:00+08:00", state="failed")], got["unsent"]
+        assert "zebra" not in text and "made-up message" not in text and "relief:x" not in text and ":before" not in text
+
+@t
+def a_failed_or_dropped_message_of_the_relief_does_not_hold_a_repeat_back():
+    for gone in ("failed", "dropped"):
+        with school(SAM):
+            absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); key = outs("relief")[0]["key"]
+            at("08:00", day=13); q(f"{key}:r1", SAM, kind="relief"); at("08:30", day=13); TE.sweep(); assert repeats() == [], "a message of it queued 30 minutes ago"
+            put(f"{key}:r1", state=gone); at("08:31", day=13); swept(); assert repeat_keys() == [("before", SAM, "sent")], gone
+
+@t
+def acknowledge_on_a_repeat_acknowledges_the_relief_once():
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); at("08:30", day=13); swept()
+        first, repeat_ = [r["token"] for r in rows("buttons") if (r["name"], r["what"]) == (SAM, "ack")]
+        assert repeat_ in outs("repeat")[0]["buttons"] and first in outs("relief")[0]["buttons"]
+        h = Since(); at("08:40", day=13); got = press_token(repeat_)
+        assert got == ("✅ Acknowledged 08:40.", False) and state_of(i, KW) == "acknowledged"
+        (e,) = h.new(); assert e[:4] == (SAM, SAM, "telegram", "relief acknowledged") and e[5] == i and e[4].startswith(f"Relief for {EVE} on Wed 14 Oct: {SAM} acknowledged"), e
+        p, = calls("editMessageText"); assert p["message_id"] == outs("repeat")[0]["message_id"] and p["text"].endswith("\n\n✅ Acknowledged 08:40.") and "reply_markup" not in p
+        at("08:50", day=13); assert press_token(first) == got and press_token(repeat_) == got and h.new() == [], "as the first message's button would: once"
+
+@t
+def no_repeat_while_asked_to_change_and_again_once_kept():
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:00", day=13); CV.ask_change(i, KW, "x", SAM); at("08:30", day=13); swept(); assert repeat_keys() == [], "asked to change: none"
+        at("08:40", day=13); CV.keep(i, KW, TEAM); swept(); assert repeat_keys() == [("before", SAM, "sent")] and told_of("kept") == [("kept", SAM)], "kept: they pick up again"
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:30", day=13); TE.sweep(); CV.ask_change(i, KW, "x", SAM); send(); assert repeat_keys() == [("before", SAM, "dropped")], "queued before the request"
+        swept(); assert repeat_keys() == [("before", SAM, "dropped")]
+        at("09:00", day=13); CV.keep(i, KW, TEAM); swept(); assert repeat_keys() == [("before", SAM, "sent")]
+        at("06:45", day=14); swept(); assert [k for k, _, _ in repeat_keys()] == ["before", "morning"]
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
