@@ -5,7 +5,7 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, datetime, gzip, hmac, io, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
+import copy, datetime, gzip, hmac, io, json, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -451,6 +451,7 @@ TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("se
          ("Exams and events", "", "/exams", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
+OWN_HISTORY = "Your own changes"
 GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
 DUTIES_TILE = ("My exam and event duties", "Your duties, your events and the lessons that don't happen")   # in place of Exams and events for everyone else
 TO_PASSWORD = "Sign in with your password to open this."
@@ -470,6 +471,7 @@ def _tiles(p):
         if link == "/exams" and not _route_exists("/exams"): continue
         if mine & set(need_):
             until = p["extras"].get("exams") if link == "/exams" else None
+            if link == "/history" and not mine & {"history", "history.dept"}: line = OWN_HISTORY     # only their own changes are there
             out.append((title, f"Until {_day(until)}" if until else line, link, False))
         elif title in GREYED and strong & set(need_): out.append((title, TO_PASSWORD, "/login/password", True))
         elif link == "/exams": out.append((*DUTIES_TILE, link, False))   # anyone else signed in by name: their own exam duties there
@@ -481,7 +483,8 @@ def _since_box(p):
     if len(s) < 2 or session.get("later") == s[-1]: return ""
     previous = s[-2]
     scope, allow, _ = history_scope()
-    try: got = history.summary(previous, allow if scope else (lambda e: False), p["name"])
+    if scope in (None, "own"): allow = lambda e: False     # only the committee and heads get the summary; everyone gets the published line
+    try: got = history.summary(previous, allow, p["name"])
     except Exception as e:
         print(f"WARNING: the summary since the last sign-in could not be made ({type(e).__name__})", file=sys.stderr, flush=True)
         return ""
@@ -513,7 +516,8 @@ def home_later():
 @app.get("/home")
 @need("timetable")
 def home():
-    """a person's tiles: only what they may open; with one tile (and nothing waiting for the password) it opens at once"""
+    """a person's tiles: only what they may open; with one tile (and nothing waiting for the password) it opens at once
+    (someone signed in by name has several now)"""
     p = who()
     if p is None: return redirect("/")   # a shared code is nobody's: its own page
     got = _tiles(p)
@@ -1795,8 +1799,16 @@ def history_scope():
             ds = e.get("depts")
             return isinstance(ds, list) and any(isinstance(d, str) and d in mine for d in ds)
         return "dept", (lambda e: e.get("who") == me or about_mine(e)), mine
-    if has("history.own") and p: return "own", (lambda e: e.get("who") == me), []
+    if has("history.own") and p:
+        shut = via() == "code"     # a personal code does not open the setup or the admin page: nor their history
+        return "own", (lambda e: e.get("who") == me and not (shut and e.get("kind") in _NOT_BY_CODE)), []
     return None, None, []
+
+_NOT_BY_CODE = {"setup", "setup-refused", "setup-replaced", "app", "account"}
+
+def _own_line():
+    """the piece of text a stored line about the signed-in person must hold, for history.read's raw (own scope only)"""
+    return json.dumps(who()["name"], ensure_ascii=False)
 
 @app.get("/history")
 @need("history", "history.dept", "history.own")
@@ -1875,7 +1887,9 @@ def api_history():
     before = q.get("before") or None
     scope, allow, mine = history_scope()
     if scope == "dept" and dept is not None and dept not in mine: return jsonify(entries=[], more=False, admin=has("admin"), depts=mine, scope=scope, download=False)
-    found = history.read(before=before, limit=limit + 1, allow=allow, **f)
+    found = history.read(before=before, limit=limit + 1, allow=allow, raw=_own_line() if scope == "own" else None, **f)
+    if scope != "all":
+        for e in found: e.pop("addr", None)     # where a refused try came from is the committee's to read
     shown = found[:limit]
     times = [t for t in map(history.ts_of, shown) if t is not None]     # a line whose ts cannot be read is skipped here
     if times and (has("setup") or has("admin")):

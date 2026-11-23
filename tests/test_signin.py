@@ -571,6 +571,13 @@ def published_line_for_everyone():
     assert "by 1 person" not in html and "Ann · " not in html and ">Later<" in html
 
 @t
+def a_teacher_is_not_shown_a_summary_of_their_own_changes():
+    c, r = code_in(staff_code(BEN)); assert went(r, "/home")
+    H.add(dict(kind="relief", what="request", who=BEN, **{"as": BEN}, via="code", where="Relief", text="Asked for relief"))
+    c, r = code_in(staff_code(BEN)); assert went(r, "/home")
+    assert SINCE not in c.get("/home").data.decode(), "only the committee and heads get the summary; a teacher only the published line"
+
+@t
 def no_box_on_first_sign_in_or_after_later():
     user, pw = account("Ms Vee Lim", group="committee")
     c, r = pw_in(user, pw); change("Ann")

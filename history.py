@@ -159,13 +159,13 @@ def _files():
 def _lines(name):
     try:
         with open(os.path.join(DIR, name), encoding="utf-8", errors="replace") as f:
-            return f.read().splitlines()
+            return f.read().split("\n")     # not splitlines: a text may hold a line separator (U+2028, U+0085) of its own
     except OSError:
         return []
 
 
-# files written before school time (stage 1) are named by the server's UTC clock, so a month's last hours, school time, are in
-# the file before: nine hours of slack (UTC+08:00 is 8 hours away at most) so no entry at a month's edge is skipped
+# files written before school time (stage 1) are named by the server's UTC clock, so the first hours of a school month (up to
+# 08:00) are in the file before: nine hours of slack (UTC+08:00 is 8 hours away at most) so no entry at a month's edge is skipped
 UTC_FILE_SLACK = 9 * 3600
 
 
@@ -177,10 +177,11 @@ def _month_end(name):
 
 
 def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, signins=False, before=None, limit=200,
-         who_contains=None, allow=None):
+         who_contains=None, allow=None, raw=None):
     """the entries, newest first, that match every filter given. where "Sign-in" shows the sign-ins without signins;
     where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`.
     allow(entry) -> bool is applied after every other filter (sign-ins too); month files wholly before `since` are not opened.
+    raw: a piece of text that must be in the stored line (a name as the line holds it): the lines without it are not read further.
     A line whose ts is not a number counts as written at 0, one whose depts is not a list as of no department"""
     out = []
     needle = who_contains.strip().lower() if isinstance(who_contains, str) and who_contains.strip() else None
@@ -191,6 +192,8 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
             break   # newest first: every later file is older still
         for line in reversed(_lines(name)):
             if needle and needle not in line.lower():   # cheap: the name is in the raw line or the entry cannot match
+                continue
+            if raw is not None and raw not in line:
                 continue
             try:
                 e = json.loads(line)

@@ -493,6 +493,38 @@ def a_teacher_sees_only_their_own():
     assert as_person(TOM).get("/history").status_code == 200
 
 @t
+def own_scope_hides_addresses_and_what_a_code_does_not_open():
+    fresh()
+    H.add({"kind": "signin", "who": TOM, "as": TOM, "ok": False, "addr": "10.0.0.9", "where": "Sign-in", "text": "refused"})
+    H.add({"kind": "account", "who": TOM, "as": TOM, "where": "Admin", "text": "gave access", "changes": [{"name": "X", "field": "note", "was": None, "now": "Only admins see this"}]})
+    H.add({"kind": "setup", "who": TOM, "as": TOM, "where": "Step 5 · Teacher Deployment Editor", "text": "a row"})
+    H.add({"kind": "relief", "who": TOM, "as": TOM, "where": "Relief", "text": "mine"})
+    es = api(as_person(TOM), "?signins=1")[1]["entries"]
+    assert [e["text"] for e in es] == ["mine", "refused"] and "addr" not in es[1], es      # a code does not open the setup or the admin page
+    by = {e["text"]: e for e in api(committee(), "?signins=1")[1]["entries"]}
+    assert by["refused"]["addr"] == "10.0.0.9" and "gave access" in by and "a row" in by, by
+
+@t
+def own_scope_parses_only_the_lines_that_name_them():
+    fresh()
+    H.add_many([{"kind": "relief", "who": f"Person {i}", "as": f"Person {i}", "where": "Relief", "text": f"t{i}"} for i in range(300)])
+    H.add({"kind": "relief", "who": TOM, "as": TOM, "where": "Relief", "text": "mine"})
+    n, real = [], H.json.loads
+    def spy(x, *a, **k):
+        if isinstance(x, str) and '"relief"' in x: n.append(1)     # the history's lines only (other json is read too)
+        return real(x, *a, **k)
+    H.json.loads = spy
+    try: got = api(as_person(TOM))[1]["entries"]
+    finally: H.json.loads = real
+    assert [e["text"] for e in got] == ["mine"] and len(n) == 1, len(n)
+
+@t
+def a_line_separator_inside_a_text_keeps_the_entry():
+    fresh()
+    H.add({"kind": "exams", "who": "Ann", "as": "Ann", "where": "Exams and events", "text": "Mid\u2028year\u0085test"})
+    assert [e["text"] for e in H.read()] == ["Mid\u2028year\u0085test"]
+
+@t
 def no_history_right_is_401():
     fresh()
     c = A.app.test_client()

@@ -7,7 +7,7 @@ Plan: `docs/superpowers/plans/2026-11-21-accounts-stage-2-put-back-and-since.md`
 
 - **Who sees which history.** The committee signed in with a password (and the shared committee code) sees everything. A HOD or SH signed in
   with a password sees the changes to their departments' rows (lessons, bands, teachers, subjects), by anyone, and their own changes. Anyone
-  else signed in by name who can change something (the setup, relief planning or settings, exams, the admin page) sees their own changes.
+  else signed in by name (a teacher, an executive) sees their own changes.
   Only the committee sees other people's sign-ins.
 - **Put back** on the history page. One save (everything a person changed in one go, e.g. a band and all its lessons, with the Class Parents
   lessons the app adjusted because of it) goes back whole, or not at all. The committee puts back any setup change; a head only their own, and
@@ -31,7 +31,8 @@ Plan rulings P1-P9 are in the plan. During the build:
 
 1. putback.py writes the exams date like the admin page does, with its own small function (it must not import app). Costs a second copy of a
    two-line formatter.
-2. Someone with no history right gets only the "published again" line in the summary, never a count of everything. Costs nothing (they see less).
+2. Only the committee and heads get the summary of changes on the home page; everyone else gets only the "published again" line (the design). A
+   teacher's own changes are on their History page. Costs nothing (they see less).
 3. Until account put back was built (Task 4), the route refused account changes. Replaced; costs nothing.
 4. The skipped and unchanged operations a retried save used to record are no longer recorded. Costs a small change to how stage 1 records.
 5. Marking which changes can be put back is done in one pass over the newer entries (it took 5.8 s on a long history before). Costs nothing.
@@ -67,7 +68,6 @@ Plan rulings P1-P9 are in the plan. During the build:
 
 ## For later stages
 
-- Relief stage 2 should add "relief" to the rights that give `history.own` when teachers' requests are recorded.
 - Stage 3 (Google) and stage 4 (codes for everyone) as planned.
 
 ## Checked
@@ -84,10 +84,14 @@ Plan rulings P1-P9 are in the plan. During the build:
 - **The sign-in box** says "Your code (the one the school gave you)" while any shared code is on, and "Your personal code" only when all are off.
 - **Brought up to main** (exams stages 2 to 4, relief stages 2 and 3, saved versions, upload box). Anyone signed in by name can now change
   something there (ask for relief, start an event), so everyone with a name has `history.own` and sees a History tile with their own changes
-  only (a ruling: the design's "everyone else who can change something"). The home tiles are Timetables, Relief, My exam and event duties,
-  History (and Committee page, Exams and events, Admin for those who may open them).
+  only (a ruling: the design's "everyone else who can change something"; the design's table says executives change nothing, but main lets
+  them start an event). A person signed in with a personal code never sees setup or account entries in it, nor another device's address.
+  The home tiles are Timetables, Relief, My exam and event duties, History ("Your own changes" for them; and Committee page, Exams and
+  events, Admin for those who may open them).
 - **Stage 1 went live first** (main 9280e46): the live history has files named by the server's UTC clock. A `since` filter leaves nine hours of
   slack so none is skipped at a month's edge; entries without `after`/`level` work or say why (see above).
 - **Change username** on the Admin page's person panel: the password is kept, the old username stops working and the person is signed out.
   Found by the lead on the live page; the server already allowed it.
-- Not in a browser: the History tile of an ordinary teacher.
+- Reviewed on its own (the merge, the wider history access, the older files, the username change) and the two important findings fixed: a
+  second press while a username is being saved sends nothing, and an ordinary person is not shown the summary of changes.
+- Browser: an executive's home page and History tile, the admin renaming themself with Enter pressed three times (one save, still signed in).

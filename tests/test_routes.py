@@ -393,7 +393,7 @@ def the_known_rights_are_every_right_the_table_gives():
 def an_executive_does_not_reach_relief():
     c = client(person(EVE, "code"))
     assert to_login(c.get("/relief")) and c.get("/api/relief/me").get_json() == AGAIN and c.get("/api/relief/me").status_code == 401
-    r = c.get("/home"); page = r.get_data(as_text=True)              # no Relief tile: Timetables and her own exam duties (two tiles)
+    r = c.get("/home"); page = r.get_data(as_text=True)              # no Relief tile: Timetables, her own exam duties and her own History
     assert r.status_code == 200 and re.findall(r'<a class="tile" href="([^"]+)"', page) == ["/timetable", "/exams", "/history"] and "My exam and event duties" in page, page[-600:]
     assert kept(c)["who"] == EVE
 
@@ -423,10 +423,12 @@ def home_shows_exactly_the_tiles_of_the_table():
     shown, greyed, page = tiles(client(person(TINA, "code")))
     assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], (shown, greyed)
     assert "Exams and events" not in page, "no Exams and events extra: her own exam duties only"
+    assert "Your own changes" in page and "Who changed what, and when" not in page
     assert f"Hello, {TINA}" in page and "Signed in with your code" in page and 'href="/logout"' in page and "Sign out" in page
     shown, greyed, page = tiles(client(person(ADA, "password")))
     assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), ("Admin", "/admin"), ("History", "/history")], shown
     assert greyed == [] and "Signed in with your password" in page
+    assert "Who changed what, and when" in page and "Your own changes" not in page
     assert "Until" not in page.split("Exams and events")[1].split("</a>")[0], "the committee's tile has no end date"
     shown, greyed, _ = tiles(client(person(ADA, "code")))           # the committee's code: all but the setup and the admin page
     assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")], shown   # their own history
