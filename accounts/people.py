@@ -14,7 +14,7 @@ _lock = threading.RLock()
 
 def blank():
     return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": []}, "moved": None, "migrated": False,
-            "migrated_exams": False}
+            "migrated_exams": False, "removed": {}}
 
 def _defaults():
     return {"group": None, "depts": [], "extras": {"timetable": False, "relief": False, "exams": None, "admin": False}, "username": None, "pw": None,
@@ -60,8 +60,14 @@ def _clean(got):
     return r
 
 def record(data, name):
+    """name's record, cleaned. A name with no stored record reads as the defaults with `n` its sign-out number from
+    `removed` (one past the n they had when they were removed), so no session made before a removal is ever accepted again,
+    and a record made later for that name (every one starts from record()) starts from that number"""
     got = ((data or {}).get("people") or {}).get(name)
-    return _clean(copy.deepcopy(got)) if isinstance(got, dict) else _defaults()
+    if isinstance(got, dict): return _clean(copy.deepcopy(got))
+    r, gone = _defaults(), (data or {}).get("removed")
+    r["n"] = _int(gone.get(name)) if isinstance(gone, dict) else 0
+    return r
 
 def _read():
     """-> (data, ok). ok is False when the file exists but could not be read or did not hold a dict"""
@@ -86,6 +92,7 @@ def _fill(d):
     b["moved"] = d.get("moved")
     b["migrated"] = d.get("migrated") is True
     b["migrated_exams"] = d.get("migrated_exams") is True
+    if isinstance(d.get("removed"), dict): b["removed"] = {k: v for k, v in d["removed"].items() if isinstance(k, str) and _int(v)}
     return b
 
 def update(fn):

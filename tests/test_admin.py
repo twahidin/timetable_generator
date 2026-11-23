@@ -60,9 +60,9 @@ RECORDS = {ALICIA: dict(group="committee", username=USERS[ALICIA], pw=PW.hash_pw
            JOSEPH: dict(group="committee", username=USERS[JOSEPH], pw=PW.hash_pw(PWS[JOSEPH])),
            PRIYA: dict(group="executive", added=True, extras=dict(NOBODY_EXTRAS, relief=True))}
 
-def publish():
+def publish(teachers=TEACHERS):
     """what store.published() reads: a fake school with the teachers, one class and one student"""
-    pub = RP.fake_pub(TEACHERS)
+    pub = RP.fake_pub(teachers)
     pub["meta"].update(published_at="1 Nov 2026, 09:00", ok=True)
     pub["model"].update(classes=[dict(name="1A", level="Sec 1")], class_ix={}, teacher_ix={}, room_ix={}, students=[dict(id="S001", name="Sam Student", cls="1A")])
     os.makedirs(store.PUB, exist_ok=True)
@@ -132,7 +132,7 @@ def t(f):
     return f
 
 ROUTES = (("GET", "/api/admin/people"), ("POST", "/api/admin/person"), ("POST", "/api/admin/bulk"), ("POST", "/api/admin/reset"),
-          ("GET", "/api/admin/ways"), ("POST", "/api/admin/shared-off"), ("GET", "/api/admin/students"))
+          ("GET", "/api/admin/ways"), ("POST", "/api/admin/shared-off"), ("GET", "/api/admin/students"), ("POST", "/api/admin/remove"))
 
 @t
 def the_people_list():
@@ -873,5 +873,142 @@ def an_old_committee_group_entry_is_not_put_back():
     assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "mixed" and rec(JOSEPH)["extras"]["admin"] is False
     mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == m["id"]][0]
     assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
+
+import relief.links as RL  # noqa: E402
+
+ON_TIMETABLE_REMOVE = "{} is on the published timetable, so they cannot be removed: they would come straight back. Switch them off instead."
+def removed_text(n): return f"{n} is removed. What they changed stays in the History."
+def cant_back_removed(n): return f"Can't put back: add {n} again with Add a person."
+
+def added_with_password(c, name, username):
+    """an added person (by name) with a username and a one-time password -> (the password client, the code client)"""
+    if not any(p["name"] == name for p in c.get("/api/admin/people").get_json()["people"]):
+        assert post(c, "/api/admin/person", name=name, added=True)[0] == 200
+    code, j = post(c, "/api/admin/reset", name=name, username=username); assert code == 200, (code, j)
+    SECRETS.append(j["once"])
+    return as_person(name, via="password"), as_person(name)
+
+@t
+def remove_each_refusal_has_its_sentence():
+    c = admin()
+    n = len(accounts())
+    assert post(c, "/api/admin/remove", name="Nobody Here") == (400, {"error": not_staff("Nobody Here")})
+    assert post(c, "/api/admin/remove", name=RAVI) == (400, {"error": ON_TIMETABLE_REMOVE.format(RAVI)})
+    assert post(c, "/api/admin/remove", name=ALICIA) == (400, {"error": ON_TIMETABLE_REMOVE.format(ALICIA)})   # on the timetable comes first
+    for bad in ([], "x", dict(name=3), dict()):
+        r = c.post("/api/admin/remove", json=bad); assert r.status_code == 400 and "error" in r.get_json(), (bad, r.status_code)
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=True, admin=True))[0] == 200
+    try:
+        lc = signed_in(LEE); before = raw()
+        assert post(lc, "/api/admin/remove", name=LEE) == (400, {"error": "You cannot remove yourself."})
+        assert raw() == before and LEE in P.load()["people"]
+    finally:
+        assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=False))[0] == 200
+    assert rec(LEE)["extras"]["admin"] is False and rec(LEE)["extras"]["timetable"] is False
+    assert all(x["what"] != "remove" for x in accounts()) and len(accounts()) == n + 2   # the two changes to LEE only
+
+@t
+def a_removed_person_is_gone_and_signed_out():
+    c = admin(); ZED = "Mr Zed Added"
+    pz, cz = added_with_password(c, ZED, "zed.added")
+    assert post(c, "/api/admin/person", name=ZED, note="keeps a note")[0] == 200                 # a note does not sign them out
+    assert pz.get("/api/day").status_code != 401 and cz.get("/api/day").status_code != 401
+    had = rec(ZED)
+    code, j = post(c, "/api/admin/remove", name=ZED)
+    assert (code, j) == (200, {"done": True, "text": removed_text(ZED)}), (code, j)
+    assert ZED not in P.load()["people"] and P.load()["removed"][ZED] == had["n"] + 1 >= 1
+    assert all(p["name"] != ZED for p in c.get("/api/admin/people").get_json()["people"])
+    assert pz.get("/api/day").status_code == 401 and cz.get("/api/day").status_code == 401
+    e = accounts()[0]
+    assert e["what"] == "remove" and e["text"] == f"Removed {ZED}" and e["people"] == [ZED] and e["who"] == ALICIA, e
+    assert all(s not in json.dumps(e) for s in SECRETS) and had["pw"] not in json.dumps(e) and "pw" not in json.dumps(e["changes"])
+    assert e["changes"] == [dict(name=ZED, field="removed", now=None, was=dict(role="Executive", timetable=False, relief=False, exams=None, admin=False,
+                                                                            depts=[], username="zed.added", note=had["note"], off=False))], e["changes"]
+    assert back(c, e["id"]) == (409, {"error": cant_back_removed(ZED)})
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == cant_back_removed(ZED), mine.get("back")
+    assert post(c, "/api/admin/person", name=ZED, username="zed.again", added=True)[0] == 200     # the username was free, the name can come back
+    assert rec(ZED)["n"] >= P.load()["removed"][ZED]
+    assert cz.get("/api/day").status_code == 401                                                 # the old code cookie stays dead after they are added again
+    code, j = post(c, "/api/admin/reset", name=ZED); assert code == 200; SECRETS.append(j["once"])
+    assert pz.get("/api/day").status_code == 401                                                 # and so does the old password cookie, with a new password
+    assert as_person(ZED).get("/api/day").status_code != 401                                     # a session made now is let in
+    first = P.load()["removed"][ZED]
+    assert post(c, "/api/admin/remove", name=ZED)[0] == 200                                      # removed again: the number keeps climbing
+    assert P.load()["removed"][ZED] > first and P.load()["removed"][ZED] == rec(ZED)["n"]
+
+@t
+def a_removed_person_s_code_session_ends_with_nothing_published():
+    c = admin(); YAN = "Ms Yan Added"
+    assert post(c, "/api/admin/person", name=YAN, added=True)[0] == 200
+    cy = as_person(YAN)
+    assert cy.get("/api/day").status_code != 401
+    assert post(c, "/api/admin/remove", name=YAN)[0] == 200
+    away = store.PUB + ".away"
+    os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
+    try:
+        assert store.published() is None
+        assert cy.get("/api/day").status_code == 401 and "who" not in kept(cy)
+        fresh = as_person(YAN)                                                                    # a session with the number as it reads now
+        assert fresh.get("/api/day").status_code == 409 and kept(fresh).get("who") == YAN       # a stand-in: signed in, nothing to show
+    finally:
+        os.rename(away, store.PUB); store._cache.update(stamp=None, value=None)
+    assert store.published() is not None
+
+@t
+def removed_then_named_by_a_new_timetable():             # Review Focus 4
+    c = admin(); KAI = "Mr Kai Added"
+    assert post(c, "/api/admin/person", name=KAI, added=True, extras=dict(relief=True))[0] == 200
+    old = as_person(KAI)
+    assert old.get("/api/day").status_code != 401
+    assert post(c, "/api/admin/remove", name=KAI)[0] == 200
+    publish(TEACHERS + [dict(name=KAI, dept="HU")])
+    try:
+        p = [p for p in c.get("/api/admin/people").get_json()["people"] if p["name"] == KAI]
+        assert len(p) == 1 and p[0]["group"] == "teacher" and p[0]["staff_only"] is False, p
+        assert p[0]["extras"] == dict(timetable=False, relief=False, exams=None, admin=False), p[0]["extras"]
+        assert old.get("/api/day").status_code == 401 and "who" not in kept(old)
+        assert post(c, "/api/admin/remove", name=KAI) == (400, {"error": ON_TIMETABLE_REMOVE.format(KAI)})
+        A._note_signin(KAI)                                                                     # a code sign-in makes their first record: from the number
+        assert KAI in P.load()["people"] and rec(KAI)["n"] == P.load()["removed"][KAI]
+        assert as_person(KAI).get("/api/day").status_code != 401 and old.get("/api/day").status_code == 401
+    finally:
+        publish()
+    assert not any(p["name"] == KAI for p in c.get("/api/admin/people").get_json()["people"])
+
+@t
+def a_failed_telegram_unlink_removes_nothing():
+    c = admin(); MAY = "Ms May Added"
+    assert post(c, "/api/admin/person", name=MAY, added=True)[0] == 200
+    real = RL.unlink
+    def broken(name, chat=None): raise OSError("the link store is locked")
+    RL.unlink = broken
+    try:
+        before, n, err = raw(), len(accounts()), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            assert post(c, "/api/admin/remove", name=MAY) == (503, {"error": "Their Telegram chat could not be unlinked, so nothing was removed. Try again."})
+        assert err.getvalue() == "WARNING: a Telegram chat could not be unlinked (OSError)\n", err.getvalue()
+        assert raw() == before and MAY in P.load()["people"] and len(accounts()) == n
+    finally:
+        RL.unlink = real
+    calls = []
+    def working(name, chat=None):
+        calls.append((name, chat, name in P.load()["people"])); return None
+    RL.unlink = working
+    try: assert post(c, "/api/admin/remove", name=MAY) == (200, {"done": True, "text": removed_text(MAY)})
+    finally: RL.unlink = real
+    assert calls == [(MAY, None, True)], calls                                                  # once, with the name, before the record went
+    assert MAY not in P.load()["people"]
+
+@t
+def a_tick_for_someone_just_removed_says_so():           # Review Focus 5
+    c = admin(); BO = "Mr Bo Added"
+    assert post(c, "/api/admin/person", name=BO, added=True)[0] == 200
+    assert post(c, "/api/admin/remove", name=BO)[0] == 200
+    before = raw()
+    assert post(c, "/api/admin/person", name=BO, extras=dict(relief=True)) == (400, {"error": not_staff(BO)})
+    assert post(c, "/api/admin/remove", name=BO) == (400, {"error": not_staff(BO)})
+    assert raw() == before
+
 
 print(f"{COUNT} admin tests passed")

@@ -315,4 +315,15 @@ def relief_s_management_move_keeps_the_committee():
         d["people"].pop(name); d["migrated"] = before["migrated"]; d["moved"] = before["moved"]
     P.update(undo)
 
+@t
+def a_removed_name_reads_with_its_sign_out_number():
+    assert P.record({"people": {}, "removed": {}}, "Mr Nobody")["n"] == 0
+    assert P.record(P.blank(), "Mr Nobody")["n"] == 0 and P.blank()["removed"] == {}
+    assert P.record({"people": {}, "removed": {"X": 4}}, "X")["n"] == 4
+    assert P.record({"people": {}, "removed": {"X": 4}}, "Y")["n"] == 0
+    assert P.record({"people": {"X": {"n": 2}}, "removed": {"X": 4}}, "X")["n"] == 2       # a stored record wins
+    for bad in ([1], "x", None, 3): assert P._fill({"people": {}, "removed": bad})["removed"] == {}, bad
+    assert P._fill({"people": {}, "removed": {"X": 4}})["removed"] == {"X": 4}
+    assert P.record(None, "X")["n"] == 0
+
 print(f"{COUNT} accounts tests passed")

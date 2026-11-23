@@ -17,6 +17,7 @@ import access, checks, compare, draft, history, putback, refit, refit_plan, stor
 from accounts import passwords, people, rights as rights_table
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
+from relief import links as relief_links
 import exams.relief_links as exams_relief_links
 from plan import ai as plan_ai, steps as plan_steps, web as plan_web
 from ttgen import choices
@@ -305,7 +306,7 @@ def _note_signin(name):
     """the time on the person's record (the last two are kept); a sign-in never fails for want of it"""
     def change(d):
         r = d["people"].get(name)
-        if not isinstance(r, dict): r = d["people"][name] = {}
+        if not isinstance(r, dict): r = d["people"][name] = people.record(d, name)   # a first record starts from their sign-out number
         s = r.get("signins") if isinstance(r.get("signins"), list) else []
         r["signins"] = [x for x in s if isinstance(x, (int, float)) and not isinstance(x, bool)][-1:] + [time.time()]
     try: people.update(change)
@@ -389,8 +390,8 @@ def account_password():
     if new != again: return _change_page(p, NOT_SAME), 400
     h = passwords.hash_pw(new)
     def change(d):
+        n = people.record(d, p["name"])["n"] + 1   # read before a record is made, so a first one starts from their sign-out number
         x = d["people"].setdefault(p["name"], {})
-        n = people.record(d, p["name"])["n"] + 1
         x.update(pw=h, must_change=False, n=n)
         return n
     try: n = people.update(change)
@@ -1717,6 +1718,10 @@ PICK_SHARED = "Pick a shared code."
 UNREAD_CHANGE = "The change could not be read. Reload the page and try again."
 FIRST_ADMIN = "Make the first admin"
 HAS_PASSWORD = "{} has a password already: they make themselves the first admin, signed in with it."
+REMOVE_ON_TIMETABLE = "{} is on the published timetable, so they cannot be removed: they would come straight back. Switch them off instead."
+REMOVE_SELF = "You cannot remove yourself."
+REMOVE_UNLINK = "Their Telegram chat could not be unlinked, so nothing was removed. Try again."
+REMOVED = "{} is removed. What they changed stays in the History."
 EXTRA_LABELS = {"timetable": "Timetable committee", "relief": "Relief team", "exams": "Exams and events", "admin": "Admin"}
 SIGNS_OUT = {"group", "depts", "timetable", "relief", "exams", "admin", "off"}   # and a username changed or removed
 _USERNAME = re.compile(r"[a-z0-9._-]{3,40}")
@@ -2234,6 +2239,48 @@ def admin_person():
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
     if out: _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out), by_=by_)
     return jsonify(_admin_item(pub, people.load(), name))
+
+def _remove_refusal(d, pub, me, name):
+    """why name cannot be removed, checked in order on the records d (Refused), else their staff item"""
+    item = next((p for p in people.staff(pub, d) if p["name"] == name), None)
+    if item is None: raise Refused(NOT_STAFF.format(name))
+    if not item["staff_only"]: raise Refused(REMOVE_ON_TIMETABLE.format(name))
+    if name == me: raise Refused(REMOVE_SELF)
+    if not [n for n in people.usable_admins(d) if n != name]: raise Refused(LAST_ADMIN.format(name))   # a guard: the admin doing it stays
+    return item
+
+@app.post("/api/admin/remove")
+@need("admin")
+def admin_remove():
+    """remove a person who is not on the published timetable (added by name, or a record left after they left it): their
+    Telegram chat is unlinked first, then their record goes and `removed[name]` becomes their n + 1 in one update, so every
+    session of theirs ends and none comes back, even once they are added again. What they changed stays in the History"""
+    stop = _admin_off()
+    if stop: return stop
+    me, by_, pub = who()["name"], by(), store.published()
+    try:
+        b = _body()
+        name = b.get("name")
+        if not isinstance(name, str): raise Refused(UNREAD_CHANGE)
+        if not people.readable(): raise people.Unreadable(people.UNREADABLE)
+        _remove_refusal(people.load(), pub, me, name)
+        try: relief_links.unlink(name)
+        except Exception as e:
+            print(f"WARNING: a Telegram chat could not be unlinked ({type(e).__name__})", file=sys.stderr, flush=True)
+            return {"error": REMOVE_UNLINK}, 503
+        def change(d):
+            item = _remove_refusal(d, pub, me, name)   # again, on the records as they are now
+            r = people.record(d, name)
+            was = dict(role=people.LABELS.get(item["group"], item["group"]), timetable=r["extras"]["timetable"], relief=r["extras"]["relief"],
+                       exams=r["extras"]["exams"], admin=r["extras"]["admin"], depts=list(r["depts"]), username=r["username"], note=r["note"], off=r["off"])
+            d["people"].pop(name, None)
+            d["removed"][name] = r["n"] + 1
+            return was
+        was = _update_as(me, change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    _account_entry("remove", [name], [dict(name=name, field="removed", was=was, now=None)], f"Removed {name}", by_=by_)
+    return jsonify(done=True, text=REMOVED.format(name))
 
 @app.post("/api/admin/bulk")
 @need("admin")

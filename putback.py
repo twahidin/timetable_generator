@@ -16,6 +16,7 @@ _OLD = "Can't put back: this change was recorded before Put back existed. Change
 _SINCE = "Can't put back: this was changed again since."
 _TAKEN = "Can't put back: another band is called {} now."
 _JOINED = "Can't put back: lessons or rules joined {} after this change."
+REMOVED = "Can't put back: add {} again with Add a person."
 OLD_GROUP = "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
 
 
@@ -129,6 +130,9 @@ def why_not(unit_entries, newer, today=None):
     account = first.get("kind") == "account"
     if account:
         changes = [c for e in unit_entries for c in e.get("changes") or [] if isinstance(c, dict)]
+        gone = next((c for c in changes if c.get("field") == "removed"), None)
+        if gone is not None:
+            return REMOVED.format(gone["name"])   # a removal is undone only by adding them again
         if any(c.get("field") == "group" and "committee" in (c.get("was"), c.get("now")) for c in changes):
             return OLD_GROUP     # the committee was a group then and is a tick now: the entry is refused whole
         if any(c.get("field") not in PUTTABLE for c in changes):
