@@ -28,7 +28,7 @@
 
   function line(st) {   /* what is said of it; nothing while the steps are shown */
     if (st.linked) return `${st.handle ? `Linked as @${st.handle} since` : "Linked since"} ${day(st.since)}.`;
-    return C.code ? "" : C.out ? "That code has run out." : "Get your reliefs and reminders on your own Telegram.";
+    return C.code ? "" : C.out ? "That code has run out." : st.blocked ? `Your Telegram was unlinked on ${day(st.blocked)}: the bot was blocked there. Unblock it in Telegram, then link again.` : "Get your reliefs and reminders on your own Telegram.";
   }
 
   function linked() {

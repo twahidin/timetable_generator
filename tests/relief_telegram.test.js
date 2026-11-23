@@ -370,4 +370,21 @@ t("every button has its words, and what it sends is what the routes take", async
   const q = await opened({ "GET ": ok(LINKED), "DELETE /link": ok(FREE) }); await q.click("button", "Unlink"); await q.click("button", "Unlink"); assert.deepStrictEqual(q.calls.filter(c => c.url.startsWith(URL)).map(c => [c.method, c.url, c.body]), [["GET", URL, undefined], ["DELETE", `${URL}/link`, undefined]]);
 });
 
+t("the ask form's Sent says when the officer is not on Telegram", async () => {
+  const p = await opened({ "GET ": ok(FREE) }), say = p.window.Relief.sentSays, plain = "Sent. The relief team can see it.";
+  assert.strictEqual(say({}), plain);
+  assert.strictEqual(say({ officer_not_told: "Ms Rosa Ng is not on Telegram: please tell them yourself." }), `${plain} Ms Rosa Ng is not on Telegram: please tell them yourself.`);
+  for (const odd of [null, 7, "", ["x"], { x: 1 }]) assert.strictEqual(say({ officer_not_told: odd }), plain, JSON.stringify(odd));
+  assert.strictEqual(say(null), plain);
+});
+
+const BLOCKED = "Your Telegram was unlinked on Tue 13 Oct: the bot was blocked there. Unblock it in Telegram, then link again.";
+t("unlinked because the bot was blocked: said until they link again", async () => {
+  const p = await opened({ "GET ": ok(Object.assign({}, FREE, { blocked: "2026-10-13T07:10:00+08:00" })) });
+  assert.strictEqual(p.card(), `Telegram ${BLOCKED} Link Telegram`);
+  p.api["POST /code"] = () => code(p); await p.click("button", "Link Telegram"); hasNot(p, BLOCKED);
+  const q = await opened({ "GET ": ok(Object.assign({}, LINKED, { blocked: "2026-10-13T07:10:00+08:00" })) }); hasNot(q, BLOCKED); has(q, "Linked as @sam_made_up");
+  const r = await opened({ "GET ": ok(Object.assign({}, FREE, { blocked: null })) }); has(r, LINE);
+});
+
 run(all);

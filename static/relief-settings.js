@@ -322,6 +322,15 @@
     return d.connected ? esc(`${people - tgRows(d.not_linked).length} of ${people} linked`) : "";
   }
 
+  function tgUnsent(u) {   /* what could not be sent since Monday: a kind, a name, a time and a state, nothing else */
+    const items = u && typeof u === "object" ? tgRows(u.items) : [];
+    if (!items.length) return "";
+    const n = Number(u.failed) || 0, m = Number(u.unsure) || 0, more = Number(u.more) || 0, msg = k => `${k} message${k === 1 ? "" : "s"}`, day = dayOf(u.since);
+    const head = n && m ? `${msg(n)} could not be sent, ${m} may not have been sent, since ${day}.` : n ? `${msg(n)} could not be sent since ${day}.` : `${msg(m)} may not have been sent since ${day}.`;
+    const row = x => `<li>${esc(`${x.what} · ${x.name} · ${dayOf(x.at)} ${String(x.at).slice(11, 16)} · ${x.state === "unsure" ? "may not have been sent" : "could not be sent"}`)}</li>`;
+    return `<p>${esc(head)}</p><ul>${items.map(row).join("")}${more ? `<li class="muted">${esc(`and ${more} more`)}</li>` : ""}</ul>`;
+  }
+
   function tgActs(d) {
     if (!d.token_set) return "";
     if (!d.connected) return `<div class="codes">${tgButton("connect", "Connect the bot", "primary")}</div>`;
@@ -355,12 +364,13 @@
     if (!TG.drawn.card) {   /* live: the lines that change, each on its own, so that one is not said with another */
       TG.drawn = { card: true };
       TG.box.innerHTML = `<div class="card tg"><h2>Telegram</h2><div id="tgTop"><div id="tgPractice"></div><p class="tg-state" id="tgState" aria-live="polite"></p><p class="tg-state" id="tgCount" aria-live="polite"></p>
-        <div class="small muted" id="tgOne"></div></div><div id="tgActs"></div><div id="tgSay" aria-live="polite"></div><div id="tgLists"></div></div>`;
+        <div class="small" id="tgUnsent"></div><div class="small muted" id="tgOne"></div></div><div id="tgActs"></div><div id="tgSay" aria-live="polite"></div><div id="tgLists"></div></div>`;
     }
     const a = document.activeElement, had = a && TG.box.contains(a) ? a : null;
     tgPut("tgPractice", d && d.practice ? `<p class="notice">Practice mode: nothing is sent to Telegram.</p>` : "");
     tgPut("tgState", d ? tgState(d) : tgSay(TG.err));
     tgPut("tgCount", d ? tgCount(d) : "");
+    tgPut("tgUnsent", d ? tgUnsent(d.unsent) : "");
     tgPut("tgOne", d && d.token_set ? esc(ONE_COPY) : "");
     tgPut("tgActs", d ? tgActs(d) : `<div class="codes">${tgButton("reload", "Try again", "small")}</div>`);
     tgPut("tgSay", TG.msg ? tgSay(TG.msg) : "");

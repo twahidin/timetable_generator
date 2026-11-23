@@ -15,7 +15,7 @@ when either raises, it waits for its next try (WAITS, below). An item that canno
 once, and the rest go on; only the store failing (sqlite3.OperationalError: locked, the disk) ends the run. Then what tg.call
 answers: "network" (nothing went out) begins a doubt (below) and ends the run; its try is counted, and it waits WAITS[tries], all
 five of them, so that it is failed at the sixth, only while it is the message itself (Telegram answers getMe at once);
-"slow" puts it back until the pause ends, no try counted; "blocked" unlinks the person, only while that chat is still theirs, and
+"slow" puts it back until the pause ends, no try counted; "blocked" unlinks the person, only while that chat is still theirs (and says so on their card: links.note_blocked), and
 removes the item, so that its key may be queued once they link again (the bot disconnected meanwhile: it is put back, nobody
 unlinked); "unsure" is unsure and ends the run; anything else failed.
 
@@ -238,7 +238,7 @@ def _blocked(item, chat):
     ours = False
     try:
         ours = links.connected() is not None
-        if ours: links.unlink(item["name"], chat)
+        if ours and links.unlink(item["name"], chat) is not None: links.note_blocked(item["name"])
     except Exception as e: _log.warning("a chat could not be unlinked (%s)", type(e).__name__)
     with tgdb.db() as c:
         if ours: c.execute("DELETE FROM outbox WHERE key=? AND state IN ('sending', 'unsure')", (item["key"],))
