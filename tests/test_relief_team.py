@@ -1443,13 +1443,16 @@ def a_stale_waiting_pick_is_dropped_and_picked_again():
         FL.run(ids=[i], call=first)
         assert st(i, K2) == "waiting" and relief_of(i, K2) == SAM and got == [], got
         assert [c["periods"] for c in CALLS] == ["P6–P7"]
-    # an approved relief is never dropped by the app: the team sees it is no longer free and changes it
+    # an approved relief is never dropped by the app for being no longer free: the team sees it and changes it; only its
+    # teacher's own absence then sends it back to open (Send-out, Task 10)
     fresh()
     i = absent(by=GRACE)["id"]
     CV.change(i, K5, SAM, TEAMER, PUB, ST)
+    with saved_settings(limits=dict(fat_per_day=3, other_per_day=None, never=[NEVER, SAM])): FL.run(call=first, now=mon("09:00"))
+    assert st(i, K5) == "approved" and relief_of(i, K5) == SAM, "never to be asked now: still approved, marked on Today"
     absent(teacher=SAM)
-    FL.run(call=first, now=mon("09:00"))
-    assert st(i, K5) == "approved" and relief_of(i, K5) == SAM
+    FL.run(call=first, now=mon("09:01"))
+    assert st(i, K5) == "waiting" and relief_of(i, K5) not in (SAM, None) and CV.was_away(cov(i, K5)[2])["who"] == SAM, "away then: back to open, picked again"
     # drop(who=): a relief that is someone else's by now is not dropped
     fresh()
     i = absent_waiting(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
@@ -1668,7 +1671,7 @@ def rt(f):
         store.published = old; FL.SYNC = False; FL.ON = False; PK.CALL = None; PK._seen.clear()
 
 ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
-       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out", "asked_after", "planned_by"}
+       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out", "asked_after", "planned_by", "away"}
 
 @rt
 def today_lists_covers_in_time_order_with_counts_and_no_reason():
@@ -1691,7 +1694,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
                       start="10:30", end="11:30", work_set=True, state="approved",
                       pick=dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct."), approved=dict(by=TEAMER, at=NOW),
                       ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM), stopped="", duty="", told=None, linked=False,
-                      out="unsent", goes_at=None, sent_out=None, asked_after=None, planned_by=None), r5
+                      out="unsent", goes_at=None, sent_out=None, asked_after=None, planned_by=None, away=None), r5
     r2, r6 = rows[1], rows[4]
     assert (r2["state"], r2["pick"]["who"], r2["pick"]["by"], r2["stale"], r2["over_now"], r2["work_set"]) == ("approved", FLEX, "team", False, True, False), r2
     assert (r6["id"], r6["state"], r6["pick"], r6["approved"], r6["over_now"], r6["warn"]) == (
@@ -2442,6 +2445,28 @@ def today_opens_on_the_next_school_day_after_the_cut_off():
     with at("2026-10-14T09:00:00+08:00"):
         rows_ = ok(staff(TEAMER).get("/api/relief/today?date=2026-10-13"))["rows"]
         assert {v["asked_after"] for v in rows_ if v["id"] == n} == {None}, "only on the day it was sent"
+
+# ---- Send-out, Task 10: an approved relief whose teacher is away goes back to open ----
+@ft
+def back_to_open_leaves_a_cover_alone_unless_its_relief_is_who_and_away():
+    fresh()
+    i = absent(by=GRACE)["id"]; CV.change(i, K5, SAM, TEAMER, PUB, ST)
+    before = snap(); assert CV.back_to_open(i, K5, SAM) == AB.load(i) and snap() == before, "Sam is not away: nothing saved"
+    absent(teacher=SAM)
+    before = snap(); assert CV.back_to_open(i, K5, MAYA) == AB.load(i) and snap() == before and relief_of(i, K5) == SAM, "the relief is not who any more"
+    got = CV.back_to_open(i, K5, SAM); c = cov(i, K5)[2]; same(got, i)
+    assert st(i, K5) == "open" and all(c[k] is None for k in ("relief", "relief_by", "pick", "approved", "sent_out", "ack", "change")), c
+    h = c["history"][-1]
+    assert (h["what"], h["who"], h["by"], h["why"]) == ("dropped", SAM, "app", "Mr Sam Tan was to cover it and is away then") and CV.was_away(c) == dict(who=SAM, at=NOW)
+    CV.set_pick(i, K5, pk(MAYA), PUB, ST); assert CV.was_away(cov(i, K5)[2]) == dict(who=SAM, at=NOW), "picked again, still waiting"
+    before = snap(); CV.back_to_open(i, K5, MAYA); assert snap() == before, "a waiting pick is not an approved relief"
+    CV.approve(i, K5, MAYA, TEAMER, PUB, ST); assert CV.was_away(cov(i, K5)[2]) is None, "approved since"
+    CV.change(i, K2, BUSY, TEAMER, PUB, ST); absent(teacher=BUSY)
+    with at("2026-10-14T09:00:00+08:00"): refuses(AB.PAST_LESSON, lambda: CV.back_to_open(i, K2, BUSY))
+    def boom(*a, **k): raise ValueError(AB.PAST_LESSON)
+    with logged() as got, stand_in(CV, "back_to_open", boom): FL.run(now=mon("09:00"), call=first)
+    assert [x.getMessage() for x in got] == ["an approved relief was not checked: ValueError"] and relief_of(i, K2) == BUSY, "logged by its kind, and the run goes on"
+    FL.run(now=mon("09:01"), call=first); assert st(i, K2) == "waiting" and relief_of(i, K2) not in (BUSY, SAM) and relief_of(i, K5) == MAYA
 
 assert REAL == [], "a test reached the real call"
 

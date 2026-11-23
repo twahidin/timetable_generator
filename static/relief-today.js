@@ -91,7 +91,12 @@
     return `<div class="why">${tag ? `<span class="td-by">${esc(tag)}</span> ` : ""}${esc(reason)}</div>`;
   }
 
-  function relief(r) {
+  function relief(r) {   /* who relieves the cover; an approved relief teacher who is away then (away) is named above an open or waiting one */
+    const away = r.away && (r.state === "open" || r.state === "waiting") ? `<div class="small muted td-away">${esc(`${r.away} was to cover it and is away then`)}</div>` : "";
+    return away + pickLines(r);
+  }
+
+  function pickLines(r) {
     const filling = !!(T.data && T.data.filling), warn = r.warn ? `<div class="td-warn">${esc(r.warn)}</div>` : "";
     const picking = `<span class="td-busy">Being picked…</span>`;
     if (r.state === "cancelled" || r.state === "stopped") return `<span class="muted">${r.pick ? esc(r.pick.who) : "—"}</span>`;

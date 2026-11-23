@@ -9,7 +9,8 @@ team released this approval to its teacher; written None with each approval, so 
 approved before there was Send out has no such key and counts as sent out at its approval, see sent_out), ack (None or
 dict(at)), change (None or dict(why, at, pick), pick None while being picked) and history (dict(what, who, by, at, why) for
 every pick ever made and every step).
-Every change is load, modify, save under absences._LOCK; nothing here calls the model.
+An approved relief whose teacher is away then goes back to open by itself (back_to_open, from relief.fill's runs), and
+was_away says so until it is approved again. Every change is load, modify, save under absences._LOCK; nothing here calls the model.
 
 links (exams.relief_links.Links, or None) says what approved exams and events do to a date. A lesson they stop is not picked
 for, approved, given to anyone, split, joined, kept, acknowledged or asked to change (NOT_HAPPENING) and takes nobody's time; nothing of it is written, so a lesson that happens
@@ -39,6 +40,7 @@ PICK_CHANGED = "The pick has changed since you looked: look again before approvi
 NOT_TO_SEND = "This relief is not approved yet."
 SENT_ALREADY = "This relief is sent out already."
 NOT_FREE_OUT = "{name} is no longer free then: change it"
+AWAY = "{name} was to cover it and is away then"
 BY = ("planner", "ai", "app", "team")
 OPEN = dict(relief=None, relief_by=None, pick=None, approved=None, sent_out=None, ack=None, change=None)
 APPROVED = ("approved", "acknowledged", "change")      # the states in which a relief is approved to its teacher
@@ -216,6 +218,34 @@ def drop(id, ckey, why, who=None, *, into="pick"):
         c.update(relief=None, relief_by=None, pick=None)
         _absences._save(r)
     return r
+
+
+def back_to_open(id, ckey, who, links=None):
+    """an approved relief (approved, acknowledged, asked to change) whose teacher who is away then (free._absent_then: an
+    absence of their own over its periods, or a backup's needed lesson) goes back to open, to be picked again: under the lock,
+    only while its relief is still who and they are away then, else the record is returned as it is and nothing saved. Nothing
+    of the old approval stays (approved, sent_out, ack, change: OPEN); the history keeps it, with "dropped" by "app" and why
+    AWAY (was_away reads it), and a request's new pick dropped too. A cover of a past date is refused (_past)"""
+    with _absences._LOCK:
+        r, x, c = _open(id, ckey)
+        if state(r, x, c) not in APPROVED or c.get("relief") != who: return r
+        if not _free._absent_then(_absences.all_records(), who, x["date"], int(c["p"]), int(c.get("n") or 1), links=links): return r
+        _settle(r, c)
+        now = _absences._now()
+        for gone in booked(c):                  # the relief, and a request's new pick: neither is wanted now
+            _log(c, "dropped", gone, "app", now, AWAY.format(name=who) if gone == who else None)
+        c.update(OPEN)
+        _absences._save(r)
+    return r
+
+
+def was_away(c):
+    """dict(who, at) of the last time the cover went back to open because its relief teacher was away then (back_to_open), while
+    it has not been approved or changed since; else None"""
+    for h in reversed(c.get("history") or []):
+        if h.get("what") in ("approved", "changed"): return None
+        if h.get("what") == "dropped" and h.get("by") == "app" and h.get("who") and h.get("why") == AWAY.format(name=h["who"]): return dict(who=h["who"], at=h.get("at"))
+    return None
 
 
 def _approve(r, x, c, who, by, pub, settings, records, now, waiting_only=False, links=None):

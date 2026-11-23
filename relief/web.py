@@ -791,7 +791,8 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
     school, on an exam duty or at an event (a backup's reason), else "". stale: its relief teacher (waiting or approved) is no longer free then; over_now: the
     relief takes them over a checked limit; nobody: an open cover nobody at all is free for; warn: the sentence for any of
     these, and OVER_ONLY for an open cover whose free people are all over a limit (the app picks none of them); change: a
-    request to change, with its new pick (stale too when that person is no longer free); out, goes_at and sent_out (_released, at
+    request to change, with its new pick (stale too when that person is no longer free); away: the relief teacher it was approved
+    to, who is away then, while it is open or waiting again since (cover.was_away), else None; out, goes_at and sent_out (_released, at
     now: absences._now() when None). One free_then for the cover gives them all; never the absence's reason. told and linked:
     today() puts them there"""
     s = _cover.state(r, x, c)
@@ -811,7 +812,8 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
                approved=c.get("approved") or None, ack=c.get("ack") or None,
                change=dict(why=ch.get("why"), at=ch.get("at"), pick=brief(new), stale=False) if ch else None,
                stale=False, over_now=False, nobody=False, warn=None, stopped="", duty=(r.get("reason_text") or "") if r.get("exams") else "",
-               told=None, linked=False, out=out, goes_at=goes, sent_out=so, planned_by=_cover.planned_by(c) if s in APPROVED else None)
+               told=None, linked=False, out=out, goes_at=goes, sent_out=so, planned_by=_cover.planned_by(c) if s in APPROVED else None,
+               away=(_cover.was_away(c) or {}).get("who") if s in ("open", "waiting") else None)
     if s == "cancelled": return row
     why = _cover.stopped(links, x)
     if why: return dict(row, state="stopped", stopped=why, out=None, goes_at=None, sent_out=None)

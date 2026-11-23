@@ -554,4 +554,14 @@ t("a head's own choice: Planned by them before its line, and no Send out", async
   assert.ok(p.text("#pane-today").includes("Nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning."));
 });
 
+/* ---- Send-out, Task 10 ---- */
+t("a relief whose teacher is away: named above the new pick, or above an open row, and nowhere else", async () => {
+  const relief = (p, k = "k5") => p.text(p.row(k).querySelector(".td-relief"));
+  const p = await today(day([inState("waiting", { away: SAM, pick: { who: MAYA, by: "ai", reason: "Teaches Science." } }), maya(inState("open", { away: SAM, ckey: "k2", key: "k2" }))]));
+  assert.strictEqual(relief(p), `${SAM} was to cover it and is away then ${MAYA} AI Teaches Science.`);
+  assert.strictEqual(relief(p, "k2"), `${SAM} was to cover it and is away then Not picked yet.`);
+  const q = await today(day([row({ away: SAM }), row({ ckey: "k2", key: "k2", away: null, state: "waiting", approved: null })]));
+  assert.ok(!relief(q).includes("away then") && !relief(q, "k2").includes("away then"), "an approved row, or none named: no such line");
+});
+
 run(all);

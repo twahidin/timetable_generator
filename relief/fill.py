@@ -21,6 +21,7 @@ import store
 from exams.days import bounds
 from relief import absences as _absences
 from relief import cover as _cover
+from relief import free as _free
 from relief import lessons as _lessons
 from relief import pick as _pick
 from relief import settings as _settings
@@ -170,6 +171,11 @@ def _one(pub, settings, id, ckey, call, clock, bnds, links=None):
     return None
 
 
+def _away(records, x, c, links=None):
+    """the cover's relief teacher is away at its periods (free._absent_then)"""
+    return _free._absent_then(records, c["relief"], x["date"], int(c["p"]), int(c.get("n") or 1), links=links)
+
+
 def _run(ids, date, call, now):
     pub = store.published()
     if not pub: return dict(picked=0, nobody=0)
@@ -181,7 +187,13 @@ def _run(ids, date, call, now):
     date = None if date is None else _date(date).isoformat()
     def clock(): return _when(now)              # the time given, else the time now at each step
     # 1. a waiting pick whose person is no longer free goes back to open, and so does the new pick of a request to change
-    #    (picked again below), due or not; an approved relief stays (the team changes it)
+    #    (picked again below), due or not; an approved relief stays (the team changes it), unless its teacher is away then
+    #    (an absence of their own over its periods): that goes back to open (cover.back_to_open), for that reason alone
+    records = _absences.all_records()
+    for id, ckey, who in [(r["id"], k, c["relief"]) for r, x, c, k in _covers(records, ids, date, clock(), bnds, links)
+                          if _cover.state(r, x, c) in _cover.APPROVED and _away(records, x, c, links)]:
+        try: _cover.back_to_open(id, ckey, who, links=links)          # checked again under the lock: not if it changed meanwhile
+        except Exception as e: _log.warning("an approved relief was not checked: %s", type(e).__name__)
     records = _absences.all_records()
     for id, ckey in [(r["id"], k) for r, x, c, k in _covers(records, ids, date, clock(), bnds, links) if _waits(r, x, c)]:
         got = _find(records, id, ckey)
@@ -214,9 +226,10 @@ def _run(ids, date, call, now):
 def run(ids=None, date=None, call=None, now=None):
     """make the picks -> dict(picked, nobody): picks saved, and covers left open with nobody free (NOBODY);
     dict(picked=0, nobody=0, busy=True) at once while another run is going; held=<covers left> too when the model's guard
-    stopped the run. First every waiting pick whose person is no longer free is dropped (cover.stale, then cover.drop);
-    then, in time order (the nearest date and period first), every open cover whose lesson is not over, of any date, or with
-    ids (an absence id or ids) or date (a date or an ISO string) every open cover of those; and every request to change
+    stopped the run. First every approved relief whose teacher is away then goes back to open (cover.back_to_open), and every
+    waiting pick whose person is no longer free is dropped (cover.stale, then cover.drop); then, in time order (the nearest
+    date and period first), every open cover whose lesson is not over, of any date, or with ids (an absence id or ids) or
+    date (a date or an ISO string) every open cover of those; and every request to change
     with no new pick yet (of ids or date, when given) for someone other than the teacher who asked. A full guard ends the
     run at the first cover of a later date: the rest stay open for the next run, not handed to the app's own order; a
     cover of today (or a request to change for today) is picked by the app's own order at once. A cover whose lesson has
