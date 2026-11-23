@@ -152,9 +152,17 @@
     const calOk = (!L || L.calendar_ok) && E.calendar_ok;
     const cal = calOk ? "" : `<p class="notice">${esc(NO_CALENDAR)} <a href="/relief/settings">Relief settings</a></p>`;
     $("#main").innerHTML = `<div class="head"><h1>${use ? "Exams, tests and events" : "Exams and events"}</h1>
-      <div class="row">${use ? `<button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button>` : ""}<button type="button" ${use ? "" : `class="primary"`} data-act="evOpen" ${E.calendar_ok && !ne.open ? "" : "disabled"}>+ New event</button></div></div>
+      <div class="row">${use ? planButton(L) : ""}${use ? `<button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button>` : ""}<button type="button" ${use ? "" : `class="primary"`} data-act="evOpen" ${E.calendar_ok && !ne.open ? "" : "disabled"}>+ New event</button></div></div>
       ${cal}${nf.open ? newForm() : ""}${ne.open ? newEvForm() : ""}${dutiesCard()}
       ${rows || `<div class="card"><p class="muted">${use ? "No exams, tests or events yet." : "You are not in charge of an event yet."}</p></div>`}${use ? "" : `<p><a href="${esc(S.home || "/home")}">Back to Home</a></p>`}`;
+  }
+
+  /* Plan with AI: a button-like link on the list when the list's reply says the server has it (plan), and a line in an exam's
+     head while the chat may change that exam (a draft, sent back included, or withdrawn); never on an event */
+  function planButton(L) { return L && L.plan === true ? `<a class="filebtn" href="/plan">Plan with AI</a>` : ""; }
+  function planLine(plan, s, ev) {
+    if (plan !== true || ev || !s || !["draft", "withdrawn"].includes(s.status || "draft")) return "";
+    return `<div class="line"><a href="/plan?exam=${encodeURIComponent(s.id)}">Open in Plan with AI</a></div>`;
   }
 
   function blankEv() { return { open: false, name: "", levels: [], classes: [], start: "", end: "", in_charge: "" }; }
@@ -347,7 +355,7 @@
   function render() {
     const s = S.sched;
     $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
-      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}</div>
+      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}${planLine(S.plan, s, isEv())}</div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
       <div class="xtabs" role="tablist">${S.tabs.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
@@ -1455,7 +1463,7 @@
     const [r, v, l, me] = await Promise.all([api("GET", `${S.base}/${id}`), api("GET", `${S.base}/${id}/view`), api("GET", ev ? "/api/events" : "/api/exams"), api("GET", "/api/exams/me")]);
     for (const x of [r, v, l, me]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
     for (const x of [r, v, l, me]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
-    S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
+    S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft"; S.plan = l.j.plan === true;
     S.sched = r.j; S.known = copyOf(r.j); S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + (ev ? " · Events" : " · Exams");
     render();
@@ -1465,11 +1473,25 @@
     } catch (e) { /* no storage */ }
   }
 
+  /* the tab a link names in its hash (/exams/<id>#papers, from Plan with AI's checklist): the page's own tab keys only; an
+     unknown hash is ignored. Opened as a click on that tab would, once the schedule is drawn */
+  function tabFromHash(hash, tabs) {
+    const k = String(hash || "").replace(/^#/, "");
+    return k && (tabs || []).some(x => x.key === k) ? k : null;
+  }
+  function openTab() {
+    const k = S.sched ? tabFromHash(location.hash, S.tabs) : null;
+    if (!k || k === S.tab) return;
+    S.tab = k; S.note = ""; render();
+    if (k === "approval") { S.abMsg = ""; loadReview(false); }
+    if (k === "egoes") loadEvAway(false);
+  }
+
   document.addEventListener("click", onClick);
   document.addEventListener("input", onInput);
   document.addEventListener("change", onChange);
   document.addEventListener("toggle", e => { const d = e.target; if (d && d.dataset && d.dataset.d) S.open[d.dataset.d] = d.open; }, true);
   window.addEventListener("beforeunload", onBeforeUnload);
   const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname), me2 = /^\/events\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
-  if (me2) startOne(me2[1], true); else if (m && m[1] !== "settings") startOne(m[1], false); else startList();
+  if (me2) startOne(me2[1], true).then(openTab); else if (m && m[1] !== "settings") startOne(m[1], false).then(openTab); else startList();
 })();

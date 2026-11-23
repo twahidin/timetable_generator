@@ -720,4 +720,42 @@ function rigIc(extra) {
   if (bad.length) { console.error(`teacher in charge: ${bad.length} of ${ic.length} failed\n  ${bad.join("\n  ")}`); process.exit(1); }
   console.log(`teacher in charge and the save check cases passed (${ic.length})`);
 })().catch(e => { console.error(e); process.exit(1); });
+/* Plan with AI: the tab named in the link's hash opens when the page loads; the button on the list and the line in an exam's head */
+const tabFromHash = new Function(`${cut("tabFromHash")}; return tabFromHash;`)();
+const TABS = [{ key: "when" }, { key: "papers" }, { key: "access" }, { key: "approval" }];
+t("the hash opens a known tab and ignores an unknown one", () => {
+  assert.strictEqual(tabFromHash("#papers", TABS), "papers");
+  assert.strictEqual(tabFromHash("#access", TABS), "access");
+  assert.strictEqual(tabFromHash("#nothing", TABS), null);
+  assert.strictEqual(tabFromHash("", TABS), null);
+  assert.strictEqual(tabFromHash("#", TABS), null);
+  assert.strictEqual(tabFromHash(undefined, TABS), null);
+  assert.strictEqual(tabFromHash("#ewhen", TABS), null, "an event's tab on an exam");
+});
+const openTab = (S, hash) => {
+  const calls = [];
+  const f = new Function("S", "location", "render", "loadReview", "loadEvAway", `${cut("tabFromHash")}\n${cut("openTab")}; return openTab;`)(
+    S, { hash }, () => calls.push("render"), k => calls.push("review " + k), k => calls.push("away " + k));
+  f(); return calls;
+};
+t("opening the page with a hash draws that tab once; with no hash or an unknown one nothing changes", () => {
+  const S = () => ({ sched: { id: "x1" }, tabs: TABS, tab: "when", note: "kept", abMsg: "x" });
+  let s = S(); assert.deepStrictEqual(openTab(s, ""), []); assert.deepStrictEqual([s.tab, s.note], ["when", "kept"]);
+  s = S(); assert.deepStrictEqual(openTab(s, "#zzz"), []); assert.strictEqual(s.tab, "when");
+  s = S(); assert.deepStrictEqual(openTab(s, "#when"), [], "the tab it opens on anyway");
+  s = S(); assert.deepStrictEqual(openTab(s, "#papers"), ["render"]); assert.strictEqual(s.tab, "papers");
+  s = S(); assert.deepStrictEqual(openTab(s, "#approval"), ["render", "review false"]); assert.strictEqual(s.abMsg, "");
+  s = S(); s.sched = null; assert.deepStrictEqual(openTab(s, "#papers"), [], "a page that did not open");
+});
+const planBits = new Function("esc", `${cut("planButton")}\n${cut("planLine")}; return { planButton, planLine };`)(esc);
+t("Plan with AI on the list only when the list says plan, and on an exam's head only for a draft or withdrawn exam", () => {
+  assert(planBits.planButton({ plan: true }).includes('<a class="filebtn" href="/plan">Plan with AI</a>'));
+  assert.strictEqual(planBits.planButton({ plan: false }), ""); assert.strictEqual(planBits.planButton({}), ""); assert.strictEqual(planBits.planButton(null), "");
+  const line = (plan, s, ev) => planBits.planLine(plan, Object.assign({ id: "ab12cd34" }, s), ev);
+  for (const st of [undefined, "draft", "withdrawn"]) assert(line(true, { status: st }, false).includes('<a href="/plan?exam=ab12cd34">Open in Plan with AI</a>'), String(st));
+  assert(line(true, { status: "draft", note: "Fix Sec 2" }, false).includes("Open in Plan with AI"), "sent back");
+  for (const st of ["waiting", "approved", "changes"]) assert.strictEqual(line(true, { status: st }, false), "", st);
+  assert.strictEqual(line(false, { status: "draft" }, false), "", "plan false");
+  assert.strictEqual(line(true, { status: "draft" }, true), "", "never on an event");
+});
 console.log(`${n} exams page tests passed`);
