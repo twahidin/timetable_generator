@@ -28,9 +28,10 @@ The newest real setup with the timetable that goes with it: 1,026 lessons (1,985
 | A teacher away one weekday (a Must rule added) | 20 | 25 of 98 broken-rule lines; 36 of the 98 are lessons of bands, which never move | 2.7 to 6.5; 15 |
 | Six teachers changed at once | 6 | 11 of 36 warnings; 3 or 4 of the 6 plans not finished in time. With 90 seconds: 12 of 36, none late, 85 s | 21 to 28; 32 |
 | One class: one period more of a subject, one fewer of another | 20 | 14 of 20 adds; 0 of 20 deletes, rightly (see below) | 7.4; 20 |
-| One class: one lesson (3 periods) more of a subject, one lesson fewer of another | 20 | 33 of 40 warnings: 20 of 20 deletes, 13 of 20 adds; 13 of 20 plans whole; 8 plans take a lesson to another day | 16; 38 (load 15 to 35) |
+| One class: one lesson (3 periods) more of a subject, one lesson fewer of another | 20 | 33 of 40 warnings: 20 of 20 deletes, 13 of 20 adds; 13 of 20 plans whole; 8 plans take a lesson to another day | 10 to 16; 31 to 38 |
 
 - **Steps of the answers** (teacher to the freest colleague): 16 teacher changes, 10 exchanges, 5 moves; 6 of the 16 plans take a lesson to another day (1 to 4 lessons). A teacher away one weekday: every answer goes to another day, as it must.
+- **The same again on the final code** (after the final review's fixes): 16 of 30 and 33 of 40, as before.
 - **Nothing wrong was offered.** In every run: no list was refused by the judge that Apply uses, no plan raised the number of critical mistakes or of warnings, and every warning a plan said it settles was settled when the list was judged again (0 of all).
 - **A period fewer is not a lesson fewer.** At this school a lesson is 3 periods long, so a setup that plans one period fewer cannot be met by deleting a lesson: the app refuses with "That would leave … with N periods; step 3 plans N.", which is true. The realistic change is a whole lesson more or fewer (the last row): every surplus lesson was deleted, and two in three missing ones were added, 10 of them after a move.
 - **The limits.** `MAX_NODES = 250` is never reached on the real file: one search judges 4 to 11 lists on average and 143 at most, and a run with 80 gave the same answers. What ends a search is that it has tried everything inside the lead's rules, or the time. `BUDGET_S = 30` leaves a single change well inside it (2 to 8 s on average). A large change (six teachers at once) does not finish: the list says "Not looked at in time; run Re-fit again." for the rest, and applying the list and running again carries on. **No constant was changed.**
@@ -73,7 +74,29 @@ On a scratch server with the sample school's made-up names, twice (before and af
 - A draft changed in another tab: the sentence, the list greyed, the focus on Run Re-fit again, which makes a new list. A failed run and an app restart.
 - The keyboard: Tab stays inside, undo keys do not reach the board, the focus goes back to the button. 375 px wide: no sideways scroll.
 
-Not checked: the school's real file in a browser (it was measured through the app's functions only); a Needs you line whose reason equals its text (read in the code); Safari and Firefox; a slow network; printing.
+- After the final review's fixes: the chip of the rule of days reads "Lessons stay on their day unless nothing works there"; a list that settles everything is applied and the button greys with "Nothing to re-fit: the timetable fits the setup.".
+
+Not checked: the school's real file in a browser (it was measured through the app's functions only); a Needs you line whose reason equals its text (read in the code); Safari and Firefox; a slow network; printing; how much slower other pages are while a re-fit runs (the job is a thread of the one web worker, for up to 40 seconds).
+
+## The final review (whole branch, then one fix wave)
+
+Verdict: ready with fixes, nothing critical. Made in the one fix wave: the chip of the rule of days (it stated the old rule); a Needs you sentence that was about a timetable the list had changed since now says "Not looked at in time; run Re-fit again."; an unforeseen error inside a change is logged and said as "The app could not work this one out: change it on the board." instead of being hidden; `_trades` stops at its limit; an explicit return in the check of the whole list; a pointer in the plan's rule of days.
+
+Left as they are, by ruling:
+
+- **Focus after an Apply that settles everything.** The fix made is not reached in the real flow: the Re-fit button is still on when the window closes, takes the focus, and is turned off by the redraw that follows, so the focus ends on the page (seen in the browser). A keyboard user presses Tab once more. The comment on that line in `rfClose` says more than the code does. To put right in the next change to the window: give the focus after the draft is redrawn.
+- When the check of the whole list takes an answer out, a later answer that went to another day because of it stays, and the answer taken out says "No list of up to 3 moves fits it." though a list was found. Rare: no list was at fault in any run on the real file.
+- With only Not placed lessons, lessons without a teacher or two bands at one time on the draft, the button is on and the window says "The app has no change to offer for these." with each under Needs you. Greying the button would say "the timetable fits the setup", which would be untrue.
+- A deletion, and a teacher change that is blocked for good, still get a look on other days that cannot help them, and can say "Not looked at in time" when the time is up first.
+- A teacher change or a trade may be made on a lesson an earlier warning moved (the rule is about moving a lesson twice).
+- Answers to warnings are not part of what makes a list stale.
+- Each answer is judged with the Not placed lessons as they were before the list; Apply judges the whole list again and writes nothing when it refuses.
+- A search stopped by its limit of lists could let an answer on another day in before a same-day one deeper in the search; the limit was never reached on the real file.
+- The cures of the check of the whole list can change what the list leaves after a Needs you sentence was written for another warning.
+
+## Suites
+
+On the code of the final fix wave (with main merged in), each on its own, all passing: the 28 Python suites (`tests/smoke.py` 102 checks, `tests/test_refit.py` 166, `test_board` 58, `test_versions` 44, `test_routes` 18, `test_fixes` 65, `test_helper` 20 and the 21 others), the 17 `node tests/*.test.js` files, and `node --check` on the 28 scripts of `static/`. `tests/test_sync.py` failed once on its own one-second timing check while the machine was busy and passed when run again; this branch does not touch it.
 
 ## Deferred small points
 
