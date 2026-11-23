@@ -1092,16 +1092,23 @@
     await loadEvAway(false); S.aw.say = say; if (S.tab === "egoes") paint();
   }
 
-  /* only the name changes, at the server and here: what is typed meanwhile is left alone, and its save keeps the stored name */
+  /* only the name changes, at the server and here: what is typed meanwhile is left alone, and its save keeps the stored name.
+    It saves once, so it waits its turn on the chain (a save on its way goes first, one typed meanwhile goes after it with the new
+    revision) and its answer must be exactly the next revision (takeOwn); a page blocked meanwhile sends nothing */
   async function icChange() {
     const name = S.ic.who;
-    if (!name || S.busy) return;
+    if (!name || S.busy || S.blocked) return;
     S.busy = true; S.ic.msg = ""; paintIc();
+    return onChain(() => icSend(name), () => { S.busy = false; paintIc(); });
+  }
+  async function icSend(name) {
     const r = await api("POST", `${S.base}/${S.id}/in-charge`, { name });
     S.busy = false;
     if (r.status === 401 || r.status === 403) return;
+    if (r.ok && !takeOwn(r.j)) { S.ic = { open: false, who: "", msg: "" }; paintIc(); paint(); return; }   /* someone saved in between: the save line says Reload */
     if (r.ok) {
       S.sched.in_charge = name; if (S.sched.approved) S.sched.approved.in_charge = name;
+      if (S.known) { S.known.in_charge = name; if (S.known.approved) S.known.approved.in_charge = name; }   /* the server's copy holds it now */
       S.ic = { open: false, who: "", msg: `${name} is in charge now.` };
       takeReview(r.j);
       const chip = $("#statchip"); if (chip) { chip.textContent = S.label; chip.className = "chip " + chipClass({ label: S.label }); }

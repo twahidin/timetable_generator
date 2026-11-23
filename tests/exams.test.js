@@ -129,6 +129,7 @@ function rig(ev) {
       const h0 = srv.holds[rest]; delete srv.holds[rest];
       if (h0) await h0;
       if (rest === "/fill" && !srv.noAdd) { const n = srv.sched.papers.length + 1; srv.sched.papers = srv.sched.papers.concat([{ id: "p" + n }]); srv.sched.going = srv.sched.going.concat(["G" + n]); }
+      if (rest === "/in-charge") srv.sched.in_charge = b.name;
       if (rest === "/away") { srv.sched.going = srv.sched.going.map(x => x === "Ms A" ? "Ms C" : x); srv.sched.duties = srv.sched.duties.map(d => d.who === "Ms A" ? { who: "Ms C" } : d); }
       if (!(rest === "/fill" && srv.noAdd)) srv.sched.rev++;   /* a fill that adds no one saves nothing */
       srv.lock = null; done();
@@ -144,7 +145,7 @@ function rig(ev) {
   const names = NAMES.filter(has);
   const f = new Function("S", "api", "paint", "paintSave", "render", "$", "chipClass", "esc", "isEv", "location", "setTimeout", "clearTimeout",
     `${CONSTS}\n${fns(NAMES)}\nreturn {${names.join(",")}};`)(S, api, noop, noop, noop, () => null, () => "", esc, () => S.base === "/api/events", loc, setTimeout, clearTimeout);
-  return { S, srv, f, loc };
+  return { S, srv, f, loc, api };
 }
 const gate = () => { let go; const p = new Promise(r => { go = r; }); return { p, go }; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -620,14 +621,14 @@ async function runChange(S, answer, { while_, at } = {}) {
   const calls = [], drawn = [], body = {}, doc = { body, activeElement: at === undefined ? body : at }, chip = { textContent: "", className: "" };
   const api = async (...a) => { calls.push(a); if (while_) while_(S); return answer; };
   const note = k => (...a) => { drawn.push([k, ...a].join(" ").trim()); };
-  const names = ["S", "api", "document", "$", "chipClass", "paintIc", "takeReview", "refreshView", "paint", "paintSave"];
-  const f = new Function(...names, `${cut("icChange").replace(/^function/, "async function")}; return icChange;`)(S, api, doc, sel => sel === "#statchip" ? chip : null,
-    x => "c-" + x.label, note("ic"), j => { drawn.push("review"); S.label = j.label; }, note("view"), note("paint"), note("save"));
+  const names = ["S", "api", "document", "$", "chipClass", "paintIc", "takeReview", "refreshView", "paint", "paintSave", "isEv", "clearTimeout"];
+  const f = new Function(...names, `${CONSTS}\n${fns(["blockPage", "takeOwn", "onChain", "icChange", "icSend"])}; return icChange;`)(S, api, doc, sel => sel === "#statchip" ? chip : null,
+    x => "c-" + x.label, note("ic"), j => { drawn.push("review"); S.label = j.label; }, note("view"), note("paint"), note("save"), () => true, clearTimeout);
   return { f, calls, drawn, chip };
 }
 const evS = extra => Object.assign({ base: "/api/events", id: "e1", busy: false, msg: "Give the event a name.", bad: true, sbNote: "a note", abMsg: "", dirty: true, label: "",
-  ic: { open: true, who: "Mr B", msg: "old" }, sched: { in_charge: "Ms A", where: "Museum", approved: { in_charge: "Ms A" } } }, extra);
-const yes = { ok: true, status: 200, j: { status: "waiting", label: "Waiting" } }, field = { closest: () => null }, inLine = { closest: sel => sel === "#icname, #icline" ? {} : null };
+  ic: { open: true, who: "Mr B", msg: "old" }, sched: { in_charge: "Ms A", where: "Museum", approved: { in_charge: "Ms A" }, rev: 3 }, chain: Promise.resolve(), blocked: false }, extra);
+const yes = { ok: true, status: 200, j: { status: "waiting", label: "Waiting", rev: 4 } }, field = { closest: () => null }, inLine = { closest: sel => sel === "#icname, #icline" ? {} : null };
 (async () => {
   let S = evS(), w = await runChange(S, yes, { while_: s => { s.sched.where = "Science Centre"; } });
   const first = w.f(), second = w.f();          // pressed twice
@@ -637,7 +638,7 @@ const yes = { ok: true, status: 200, j: { status: "waiting", label: "Waiting" } 
   assert.deepStrictEqual([S.ic, S.msg, S.bad], [{ open: false, who: "", msg: "Mr B is in charge now." }, "Give the event a name.", true], "the save's own line is not touched");
   assert.deepStrictEqual(w.drawn, ["ic", "review", 'ic [data-act="icOpen"]', "view"], "only the heading is drawn again");
   assert.deepStrictEqual([w.chip.textContent, w.chip.className], ["Waiting", "chip c-Waiting"]);
-  S = evS({ sched: { in_charge: "Ms A", approved: null } }); w = await runChange(S, yes); await w.f();
+  S = evS({ sched: { in_charge: "Ms A", approved: null, rev: 3 } }); w = await runChange(S, yes); await w.f();
   assert.strictEqual(S.sched.in_charge, "Mr B");
   for (const [at, focus] of [[field, "ic"], [inLine, 'ic [data-act="icOpen"]'], [null, 'ic [data-act="icOpen"]']]) {
     w = await runChange(evS(), yes, { at }); await w.f(); assert.strictEqual(w.drawn[2], focus, "someone typing on the tab keeps the focus");
@@ -656,4 +657,67 @@ t("Change, Back and Put them in charge are wired, and the list's choice is kept"
     assert.ok(SRC.includes(code), code);
 });
 
+/* the change of teacher in charge keeps to the save check: it waits its turn on the chain, its answer must be the next revision,
+   and a page blocked meanwhile does nothing */
+function rigIc(extra) {
+  const R = rig(true), { S } = R;
+  Object.assign(S, { me: { can_approve: true }, ic: { open: true, who: "Mr B", msg: "" } }, extra);
+  S.sched.in_charge = S.known.in_charge = "Ms A";
+  const body = {}, doc = { body, activeElement: body, querySelector: () => null };
+  const names = NAMES.concat(["paintIc", "icName", "icLine", "icChange", "icSend"]);
+  R.f = new Function("S", "api", "paint", "paintSave", "render", "$", "chipClass", "esc", "isEv", "location", "setTimeout", "clearTimeout", "document", "opt",
+    `${CONSTS}\n${fns(names)}\nreturn {${names.filter(has).join(",")}};`)(S, R.api, () => {}, () => {}, () => {}, () => null, () => "", esc, () => true, R.loc, setTimeout, clearTimeout, doc,
+    (v, cur, text) => `<option value="${esc(v)}">${esc(text)}</option>`);
+  return R;
+}
+(async () => {
+  const ic = [];
+  const c = (name, f) => ic.push([name, f]);
+  c("a save on its way goes first, and the change takes the next revision", async () => {
+    const { S, srv, f } = rigIc(), g = gate(); srv.holds["PUT"] = g.p;
+    f.edit(() => { S.sched.name = "Mine"; }); const w = f.flush(); await tick();
+    const p = f.icChange(); await tick();
+    assert.deepStrictEqual(srv.calls.map(x => x.join(" ")), ["PUT "], "the change waits for the save");
+    g.go(); await w; await p; await tick();
+    assert.deepStrictEqual(srv.calls.filter(x => x[0] !== "GET").map(x => x.join(" ")), ["PUT ", "POST /in-charge"], "the save, then the change");
+    assert.strictEqual(S.blocked, false, S.blockMsg); assert.strictEqual(S.sched.rev, 3); assert.strictEqual(srv.sched.rev, 3);
+    assert.deepStrictEqual([S.sched.in_charge, srv.sched.in_charge, srv.sched.name, S.ic.msg], ["Mr B", "Mr B", "Mine", "Mr B is in charge now."]);
+    f.edit(() => { S.sched.where = "Museum"; }); await f.flush();
+    assert.strictEqual(S.blocked, false, "the save after it is not refused"); assert.deepStrictEqual([srv.sched.rev, srv.sched.where, srv.sched.in_charge], [4, "Museum", "Mr B"]);
+  });
+  c("something typed just before is saved after it, with the new revision", async () => {
+    const { S, srv, f } = rigIc();
+    f.edit(() => { S.sched.name = "Mine"; });
+    await f.icChange(); assert.strictEqual(S.sched.rev, 2); assert.strictEqual(S.dirty, true, "what was typed is still to save");
+    await f.flush();
+    assert.deepStrictEqual([S.blocked, S.dirty, srv.sched.rev, srv.sched.name, srv.sched.in_charge], [false, false, 3, "Mine", "Mr B"]);
+    assert.strictEqual(S.known.in_charge, "Mr B", "the server's copy is known to hold the new name");
+  });
+  c("someone saved in between: the page is blocked and saves nothing more", async () => {
+    const { S, srv, f } = rigIc(); srv.sched.rev = 2;
+    await f.icChange();
+    assert.strictEqual(S.blocked, true); assert.strictEqual(S.blockMsg, "This event was changed by someone else since you opened it. Reload to carry on.");
+    assert.deepStrictEqual([S.busy, S.sched.in_charge, S.ic.msg], [false, "Ms A", ""]);
+    f.edit(() => { S.sched.name = "Mine"; }); await f.flush();
+    assert.ok(!srv.calls.some(x => x[0] === "PUT"), "nothing is saved"); assert.strictEqual(srv.sched.name, "E");
+  });
+  c("a blocked page does nothing, also when it is blocked while the change waits its turn", async () => {
+    let { S, srv, f } = rigIc({ blocked: true, blockMsg: "x" });
+    await f.icChange(); assert.deepStrictEqual(srv.calls, []); assert.strictEqual(S.busy, false);
+    ({ S, srv, f } = rigIc()); const g = gate(); srv.holds["PUT"] = g.p;
+    f.edit(() => { S.sched.name = "Mine"; }); const w = f.flush(); await tick();
+    const p = f.icChange(); await tick(); assert.strictEqual(S.busy, true);
+    f.blockPage("Blocked."); g.go(); await w; await p;
+    assert.ok(!srv.calls.some(x => x[1] === "/in-charge"), "the change is not sent"); assert.deepStrictEqual([S.busy, S.sched.in_charge], [false, "Ms A"]);
+  });
+  c("the other tab, opened before the change, is refused on its next save", async () => {
+    const { S, srv, f } = rigIc(); srv.sched.rev = 2; srv.sched.in_charge = "Mr B";   /* the change, made from another tab */
+    f.edit(() => { S.sched.name = "Mine"; }); await f.flush();
+    assert.deepStrictEqual([S.blocked, S.blockMsg, srv.sched.name], [true, SENT("Ms B"), "E"]);
+  });
+  const bad = [];
+  for (const [name, run] of ic) { try { await run(); } catch (e) { bad.push(`${name}: ${String(e && e.message).split("\n").slice(0, 2).join(" ")}`); } }
+  if (bad.length) { console.error(`teacher in charge: ${bad.length} of ${ic.length} failed\n  ${bad.join("\n  ")}`); process.exit(1); }
+  console.log(`teacher in charge and the save check cases passed (${ic.length})`);
+})().catch(e => { console.error(e); process.exit(1); });
 console.log(`${n} exams page tests passed`);

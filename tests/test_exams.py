@@ -3467,4 +3467,30 @@ def a_start_given_as_7_50_is_the_stored_07_50():
         ps = [dict(p, start="7:55") if p["id"] == "pa" else p for p in e["papers"]]
         assert c.put(f"/api/exams/{id}", json=dict(e, papers=ps)).get_json()["suggested"] == []
 
+# ------------------------------------------------------------------------------------------------ the teacher in charge and the save check
+@t
+def the_change_of_teacher_in_charge_keeps_to_the_save_check():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        id = _event(a)["id"]; url = f"/api/events/{id}/in-charge"
+        old = c.get(f"/api/events/{id}").get_json(); r0 = old["rev"]; assert r0 == SC.load(id)["rev"]
+        r = c.post(url, json=dict(name="Mr Ben Ong")); assert r.status_code == 200, r.data
+        j = r.get_json(); assert j["rev"] == r0 + 1 == SC.load(id)["rev"], (j.get("rev"), SC.load(id).get("rev"))
+        before = SC.load(id)
+        for body in (dict(old, where="Somewhere else"), dict(old, where="Somewhere else", in_charge="Mr Ben Ong")):   # the other tab, opened before
+            r = c.put(f"/api/events/{id}", json=body, headers=_OLD)
+            assert r.status_code == 409 and r.get_json() == {"error": "This event was changed by Timetable committee since you opened it. Reload to carry on."}, r.data
+            assert SC.load(id) == before, "nothing is saved"
+        r = c.put(f"/api/events/{id}", json=dict(old, rev=j["rev"], where="Somewhere else"), headers=_OLD)
+        assert r.status_code == 200 and r.get_json()["rev"] == r0 + 2, r.data
+        s = SC.load(id); assert s["where"] == "Somewhere else" and s["in_charge"] == "Mr Ben Ong", "the page's save after it keeps the change"
+        r = c.post(url, json=dict(name="Mr Ben Ong")); assert r.status_code == 400 and SC.load(id)["rev"] == r0 + 2, "a refused change saves nothing"
+        import history, putback
+        e = [x for x in history.read(kinds={"exams"}, limit=50) if x.get("what") == "in-charge"][0]
+        assert putback.unit_of(e) is None and "exams" not in putback.TOUCH_KINDS, "Put back never reaches a schedule"
+        r = c.post("/api/history/back", json=dict(id=e["id"])); assert r.status_code == 409 and r.get_json() == {"error": A.CANT_BACK}, r.data
+        assert SC.load(id)["rev"] == r0 + 2 and SC.load(id)["in_charge"] == "Mr Ben Ong"
+    _reset()
+
 print(f"{COUNT} exams tests passed")
