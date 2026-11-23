@@ -163,14 +163,15 @@ class Refused(Exception):
 class Replaced(Exception):
     """the whole setup was replaced after the version the change was made on: it is not applied"""
 
-def apply_changes(ops, client, check=None, since=None, filter=None, by=None):
+def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag=None):
     """apply a change to the current setup; returns (the new version, refused).
     check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied.
     filter(spec, ops) -> (allowed, refused) also runs under the lock: only the allowed operations are applied (one
     version, one log entry holding just them; none when nothing is allowed) and refused, [(index in ops, sentence)], is
     handed back for the caller to report.
     since: the version the change was made on; when the setup was replaced after it, Replaced is raised and nothing
-    is applied (the change belongs to a setup that is gone)"""
+    is applied (the change belongs to a setup that is gone)
+    tag: a dict added to each kind-"setup" entry of the applied operations (not to refused entries or the app's follow-ups)"""
     with _setup_lock:
         cur = _load()
         if not cur: raise LookupError("no setup")
@@ -189,6 +190,8 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None):
         batch = "b" + os.urandom(4).hex()
         try: entries = history.setup_entries(copy.deepcopy(cur["spec"]), ops, by, batch, cur["v"] + 1)
         except Exception as e: entries = []; _warn(e)
+        if tag:
+            for e in entries: e.update(copy.deepcopy(tag))
         entries += _refused_entries(cur["spec"], all_ops, refused, by, cur["v"] + 1)   # before the change is applied
         sync.apply(cur["spec"], ops)
         cur["v"] += 1

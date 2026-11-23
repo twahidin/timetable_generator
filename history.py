@@ -6,6 +6,7 @@ The row a setup entry is about is `row` (the entry's own `id` is its place in th
 import copy
 import datetime
 import json
+import math
 import os
 import re
 import threading
@@ -25,6 +26,9 @@ WHERE = {"venues": "Step 1 · Venues", "classes": "Step 2 · Classes", "subjects
 _SCHOOL_DAY = "School & day"
 _NAME_FIELD = {"venues": "room", "classes": "class", "subjects": "subject", "teachers": "name", "blocks": "block",
                "roles": "role", "students": "name"}
+SCHOOL_TZ = datetime.timezone(datetime.timedelta(hours=8))   # school time, whatever the server's clock zone
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 _lock = threading.Lock()
 _last = [0, -1]   # ms and counter of the last id given out
 
@@ -74,8 +78,36 @@ def _make(entry):
     ts = e["ts"] if isinstance(e.get("ts"), (int, float)) else time.time()
     e["id"] = _new_id()
     e["ts"] = float(ts)
-    e["at"] = datetime.datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
+    e["at"] = datetime.datetime.fromtimestamp(ts, SCHOOL_TZ).isoformat(timespec="seconds")
     return e
+
+
+def ts_of(e):
+    """an entry's time as a number of seconds, or None when its line has none that can be read (cut short, hand-edited)"""
+    ts = e.get("ts") if isinstance(e, dict) else None
+    return float(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts) else None
+
+
+def day_start(text):
+    """the timestamp of 00:00 school time on a day written YYYY-MM-DD; None when it cannot be read"""
+    try: return datetime.datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=SCHOOL_TZ).timestamp()
+    except (ValueError, TypeError): return None
+
+
+def _clock(d):
+    h = d.hour % 12 or 12
+    return f"{d.day} {_MONTHS[d.month - 1]}, {h}:{d.minute:02d} {'am' if d.hour < 12 else 'pm'}"
+
+
+def when_text(ts):
+    """"Tuesday 18 Nov, 4:12 pm": school time"""
+    d = datetime.datetime.fromtimestamp(ts, SCHOOL_TZ)
+    return f"{_DAYS[d.weekday()]} {_clock(d)}"
+
+
+def short_when(ts):
+    """"19 Nov, 10:02 am": school time"""
+    return _clock(datetime.datetime.fromtimestamp(ts, SCHOOL_TZ))
 
 
 def _write(entries):
@@ -127,21 +159,41 @@ def _files():
 def _lines(name):
     try:
         with open(os.path.join(DIR, name), encoding="utf-8", errors="replace") as f:
-            return f.read().splitlines()
+            return f.read().split("\n")     # not splitlines: a text may hold a line separator (U+2028, U+0085) of its own
     except OSError:
         return []
 
 
+# files written before school time (stage 1) are named by the server's UTC clock, so the first hours of a school month (up to
+# 08:00) are in the file before: nine hours of slack (UTC+08:00 is 8 hours away at most) so no entry at a month's edge is skipped
+UTC_FILE_SLACK = 9 * 3600
+
+
+def _month_end(name):
+    """the first instant after the month a file holds, in school time"""
+    y, m = int(name[:4]), int(name[5:7])
+    y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return datetime.datetime(y, m, 1, tzinfo=SCHOOL_TZ).timestamp()
+
+
 def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, signins=False, before=None, limit=200,
-         who_contains=None):
+         who_contains=None, allow=None, raw=None):
     """the entries, newest first, that match every filter given. where "Sign-in" shows the sign-ins without signins;
-    where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`"""
+    where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`.
+    allow(entry) -> bool is applied after every other filter (sign-ins too); month files wholly before `since` are not opened.
+    raw: a piece of text that must be in the stored line (a name as the line holds it): the lines without it are not read further.
+    A line whose ts is not a number counts as written at 0, one whose depts is not a list as of no department"""
     out = []
     needle = who_contains.strip().lower() if isinstance(who_contains, str) and who_contains.strip() else None
     where_kind = _WHERE_KIND.get(where)
+    this_month = datetime.datetime.now(SCHOOL_TZ).strftime("%Y-%m") + ".jsonl"
     for name in _files():
+        if since is not None and name != this_month and _month_end(name) + UTC_FILE_SLACK <= since:
+            break   # newest first: every later file is older still
         for line in reversed(_lines(name)):
             if needle and needle not in line.lower():   # cheap: the name is in the raw line or the entry cannot match
+                continue
+            if raw is not None and raw not in line:
                 continue
             try:
                 e = json.loads(line)
@@ -155,17 +207,64 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
                 continue
             if e.get("kind") == "signin" and not signins and not (kinds and "signin" in kinds) and where_kind != "signin":
                 continue
-            ts = e.get("ts") or 0
+            ts = ts_of(e) or 0
+            depts = e.get("depts") if isinstance(e.get("depts"), list) else []
             if where is not None and e.get("where") != where and not (where_kind and not e.get("where") and e.get("kind") == where_kind):
                 continue
             if (who is not None and e.get("who") != who) \
-                    or (kinds and e.get("kind") not in kinds) or (since is not None and ts < since) \
-                    or (until is not None and ts > until) or (dept is not None and dept not in (e.get("depts") or [])):
+                    or (kinds and (not isinstance(e.get("kind"), str) or e.get("kind") not in kinds)) or (since is not None and ts < since) \
+                    or (until is not None and ts > until) or (dept is not None and dept not in depts):
+                continue
+            if allow is not None and not allow(e):
                 continue
             out.append(e)
             if len(out) >= limit:
                 return out
     return out
+
+
+CHANGE_KINDS = ("setup", "setup-replaced", "draft", "relief", "exams", "account")   # not sign-ins, refusals or the app's follow-ups
+
+
+def summary(since, allow, me, top=8):
+    """what changed since `since` for the home page's "Since you last signed in": n (changes allow lets through), people
+    (distinct names), rows [(who, where, count)] most first (who is "Your own changes" for `me`; at most `top`), more (rows
+    left out) and published (the newest publish time, whatever allow says, or None). One read, so one month file for a recent `since`"""
+    def is_publish(e): return e.get("kind") == "draft" and e.get("what") == "publish"
+    ok = (lambda e: True) if allow is None else allow
+    found = read(since=since, kinds=CHANGE_KINDS, allow=lambda e: is_publish(e) or bool(ok(e)), limit=10 ** 6)
+    published, counts, people = None, {}, set()
+    for e in found:
+        ts = e.get("ts")
+        if is_publish(e) and isinstance(ts, (int, float)) and (published is None or ts > published): published = float(ts)
+        if not ok(e): continue
+        name = str(e.get("as") or e.get("who") or "Someone")
+        people.add(name)
+        who = "Your own changes" if me is not None and e.get("who") == me else name
+        key = (who, str(e.get("where") or ""))
+        counts[key] = counts.get(key, 0) + 1
+    rows = sorted(((w, wh, n) for (w, wh), n in counts.items()), key=lambda r: (-r[2], r[0], r[1]))
+    return dict(n=sum(counts.values()), people=len(people), rows=rows[:top], more=max(0, len(rows) - top), published=published)
+
+
+def find(entry_id):
+    """the entry with this id (sign-ins too), or None. Ids grow in the order entries are written, so the newest files and
+    lines are read first and the search stops once it reads an id older than the one it looks for"""
+    if not isinstance(entry_id, str) or not entry_id:
+        return None
+    for name in _files():
+        for line in reversed(_lines(name)):
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or not isinstance(e.get("id"), str):
+                continue
+            if e["id"] == entry_id:
+                return e
+            if e["id"] < entry_id:
+                return None
+    return None
 
 
 def prune(today=None):
@@ -223,9 +322,12 @@ def row_label(section, row):
 
 
 def _depts(spec, section, row):
-    """The departments a row belongs to: a lesson's by its subject, a band's by its lessons, a teacher's own."""
+    """The departments a row belongs to: a lesson's by its subject, a band's by its lessons, a teacher's and a subject's own."""
     if not isinstance(row, dict):
         return []
+    if section == "subjects":
+        d = str(row.get("dept") or "").strip()
+        return [d] if d else []
     if section == "lessons":
         d = sync.lesson_dept(spec, row)
         return [d] if d else []
@@ -253,6 +355,12 @@ def _row_entry(work, op):
     was_row = copy.deepcopy(None if name == "add" else sync._find(work, section, rid))
     d0 = _depts(work, section, was_row)
     was = was_row if name == "del" else (was_row.get(field) if was_row and field else None)
+    extra = {}
+    if name == "del":   # the row before it, so a put back can set it where it was ("" when it was first)
+        rows = sync._rows(work, section)
+        i = next((n for n, r in enumerate(rows) if isinstance(r, dict) and r.get("_id") == rid), None)
+        if i is not None:
+            extra["after"] = (rows[i - 1].get("_id") or "") if i and isinstance(rows[i - 1], dict) else ""
 
     def finish(e):
         r = sync._find(work, section, rid)
@@ -271,7 +379,7 @@ def _row_entry(work, op):
                 e["text"] = _cut(f"{lab}: {field} {_show(e['was'])} → {_show(e['now'])}")
             else:
                 e["text"] = _cut(f"{lab}: {field} + {_show(op[4])} − {_show(op[5])}")
-    return dict(section=section, row=rid, field=field, was=copy.deepcopy(was), where=WHERE.get(section, "Setup")), finish
+    return dict(section=section, row=rid, field=field, was=copy.deepcopy(was), where=WHERE.get(section, "Setup"), **extra), finish
 
 
 def _plain_entry(work, op):
@@ -288,11 +396,15 @@ def _plain_entry(work, op):
         sec, field, label, now, was = "top", op[1], op[1], op[2], work.get(op[1])
     e = dict(section=sec, row=None, field=field, was=copy.deepcopy(was), now=copy.deepcopy(now), label=label, depts=[],
              where=_SCHOOL_DAY, text=_cut(f"{label}: {_show(was)} → {_show(now)}"))
+    if name == "day":
+        e["level"] = op[1]
     return e, None
 
 
 def setup_entries(spec_before, ops, by, batch, v):
-    """One kind-"setup" entry per operation, each judged on a working copy as the operations before it leave it."""
+    """One kind-"setup" entry per operation that changed something, each judged on a working copy as the operations
+    before it leave it. An operation apply skips (a row added that is there already, one deleted that is gone, a field no
+    one may set) and a value set to what it was give no entry: a save the page sends again records nothing new."""
     work = copy.deepcopy(spec_before)
     out = []
     for op in ops:
@@ -307,9 +419,12 @@ def setup_entries(spec_before, ops, by, batch, v):
                 e, finish = _plain_entry(work, op)
             else:
                 continue
-            sync.apply(work, [copy.deepcopy(op)])
+            if sync.apply(work, [copy.deepcopy(op)]):
+                continue
             if finish:
                 finish(e)
+            if op[0] not in ("add", "del") and sync._canon(e["was"]) == sync._canon(e["now"]):
+                continue
             out.append(dict(kind="setup", batch=batch, v=v, op=op[0], **by, **e))
         except Exception as x:   # a malformed operation gives no entry, said in one line; the save path must never fail here
             store._warn(x)

@@ -55,6 +55,11 @@ input.plain{font-size:16px;letter-spacing:normal;text-transform:none}
 .tile:hover,.tile:focus-visible{transform:translateY(-3px);border-color:var(--accent)}
 .tile.off{opacity:.6;box-shadow:none}.tile.off:hover,.tile.off:focus-visible{transform:none}
 .home .foot{text-align:center;margin-top:28px}
+/* "Since you last signed in": a small box above the tiles */
+.since{border:1px solid var(--line);border-radius:16px;background:var(--glass);padding:14px 18px;margin-bottom:18px}
+.since h2{font-size:16px;margin:0 0 4px}.since p{margin:4px 0}.since ul{list-style:none;margin:6px 0;padding:0}
+.since li{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
+.since .row{display:flex;align-items:center;gap:16px;margin-top:8px}.since form{margin:0}
 
 @media (max-width:1100px) and (min-width:761px){
   .choices:has(> .choice:nth-child(4)){grid-template-columns:repeat(2,minmax(0,1fr))}

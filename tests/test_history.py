@@ -120,7 +120,7 @@ def setup_entries_values():
     assert es[2]["was"] == "Maths" and es[2]["now"] == "Science" and set(es[2]["depts"]) == {"Maths", "Science"}
     assert es[3]["now"] is None and es[3]["was"]["class"] == spec["classes"][0]["class"] and es[3]["text"].startswith("Deleted ")
     assert H.row_label("x", None) == "(gone)"
-    s2 = H.setup_entries(spec, [["school", "name", "X"], ["day", "Sec 1", "Mon", None], ["top", "k", 1]], by, "b2", 8)
+    s2 = H.setup_entries(spec, [["school", "name", "X"], ["day", "Sec 1", "Odd Mon", None], ["top", "k", 1]], by, "b2", 8)
     assert [e["where"] for e in s2] == ["School & day"] * 3 and s2[0]["text"].startswith("name: ")
 
 @t
@@ -144,8 +144,8 @@ def setup_entries_never_raises():
     err = io.StringIO()
     with contextlib.redirect_stderr(err): es = H.setup_entries(spec, ops, H.by_of("Ann", "password"), "b", 1)
     assert [e["op"] for e in es] == ["set"] and es[0]["now"] == "hi", es
-    lines = err.getvalue().splitlines()                                 # an operation dropped is said, as the store says it: its type only
-    assert len(lines) == 3 and all(re.fullmatch(r"warning: the history could not be written \((IndexError|TypeError)\)", x) for x in lines), lines
+    lines = err.getvalue().splitlines()                                 # an operation dropped is said, as the store says it: its type only (the short merge is skipped by apply: no entry, nothing said)
+    assert len(lines) == 2 and all(re.fullmatch(r"warning: the history could not be written \((IndexError|TypeError)\)", x) for x in lines), lines
 
 @t
 def row_label_every_section():
@@ -393,7 +393,9 @@ def who_filter_is_one_read_and_pages_cleanly():
         H.add({"kind": "setup", "as": "Rare Person" if i % 400 == 0 else "Bulk Bob", "text": f"n{i}"})
     calls = []
     real = H.read
-    def spy(*a, **k): calls.append(1); return real(*a, **k)
+    def spy(*a, **k):
+        if not k.get("kinds"): calls.append(1)    # the read for Put back marks (kinds given) is a second one, by design
+        return real(*a, **k)
     A.history.read = spy
     try:
         c = committee()
@@ -433,5 +435,272 @@ def unsafe_links_are_dropped():
         H.add({"kind": "exams", "as": "A", "text": l, "link": l})
     got = {e["text"]: e.get("link") for e in api(committee())[1]["entries"]}
     assert got == {"//evil.example": None, "/\\evil.example": None, "/\t/evil.example": None, "http://x.example": None, "/exams": "/exams"}, got
+
+# ------------------------------------------------------------------------------------------------ who sees which history
+from accounts import passwords as PW, people as P  # noqa: E402
+HANA, ANN, BOB, EVA, TOM = "Hana Test", "Ann Test", "Bob Test", "Eva Test", "Tom Test"
+P.update(lambda d: d["people"].update({
+    HANA: dict(group="hod", added=True, depts=["Maths"], username="hana.t", pw=PW.hash_pw(secrets.token_hex(8))),
+    EVA: dict(group="executive", added=True, extras=dict(exams="2999-12-31")),
+    TOM: dict(group="teacher", added=True)}))
+
+def as_person(name, via="code"):
+    c = A.app.test_client()
+    with c.session_transaction() as s:
+        s.update(who=name, via=via, n=P.record(P.load(), name)["n"])
+        if via == "password": s["exp"] = time.time() + 3600
+    return c
+
+def texts(c, q=""): return [e["text"] for e in api(c, q)[1]["entries"]]
+
+@t
+def a_head_sees_their_departments_and_their_own():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": ANN, "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "maths"})
+    H.add({"kind": "setup", "who": BOB, "as": BOB, "where": "Step 4 · Teachers", "depts": ["Science"], "text": "science"})
+    H.add({"kind": "setup", "who": HANA, "as": HANA, "where": "Step 6 · Configuration & constraints", "depts": [], "text": "hana's own"})
+    H.add({"kind": "account", "who": ANN, "as": ANN, "where": "Admin", "text": "account by Ann"})
+    H.add({"kind": "signin", "who": BOB, "as": BOB, "text": "Bob in"})
+    c = as_person(HANA, "password")
+    s, d = api(c)
+    assert s == 200 and [e["text"] for e in d["entries"]] == ["hana's own", "maths"], d
+    assert d["scope"] == "dept" and d["depts"] == ["Maths"] and d["download"] is False, d
+    assert texts(c, "?signins=1") == ["hana's own", "maths"]
+    assert texts(c, "?dept=Science") == [] and texts(c, "?dept=Maths") == ["maths"]
+    H.add({"kind": "signin", "who": HANA, "as": HANA, "text": "Hana in"})
+    assert texts(c, "?signins=1") == ["Hana in", "hana's own", "maths"]
+    k = api(committee())[1]; assert k["scope"] == "all" and k["download"] is True and len(k["entries"]) == 4, k
+
+@t
+def own_scope_sees_only_own():
+    fresh()
+    H.add({"kind": "exams", "who": EVA, "as": EVA, "text": "mine"})
+    H.add({"kind": "exams", "who": ANN, "as": ANN, "text": "not mine"})
+    H.add({"kind": "signin", "who": EVA, "as": EVA, "text": "Eva in"})
+    H.add({"kind": "signin", "who": ANN, "as": ANN, "text": "Ann in"})
+    c = as_person(EVA)
+    s, d = api(c)
+    assert s == 200 and [e["text"] for e in d["entries"]] == ["mine"] and d["scope"] == "own" and d["download"] is False, d
+    assert texts(c, "?signins=1") == ["Eva in", "mine"]
+    assert c.get("/history").status_code == 200
+
+@t
+def a_teacher_sees_only_their_own():
+    fresh()
+    H.add({"kind": "relief", "who": TOM, "as": TOM, "where": "Relief", "text": "mine"}); H.add({"kind": "relief", "who": "Someone Else", "as": "Someone Else", "where": "Relief", "text": "theirs"})
+    code, j = api(as_person(TOM))
+    assert code == 200 and [e["text"] for e in j["entries"]] == ["mine"] and j["scope"] == "own" and j["download"] is False, j
+    assert as_person(TOM).get("/history").status_code == 200
+
+@t
+def own_scope_hides_addresses_and_what_a_code_does_not_open():
+    fresh()
+    H.add({"kind": "signin", "who": TOM, "as": TOM, "ok": False, "addr": "10.0.0.9", "where": "Sign-in", "text": "refused"})
+    H.add({"kind": "account", "who": TOM, "as": TOM, "where": "Admin", "text": "gave access", "changes": [{"name": "X", "field": "note", "was": None, "now": "Only admins see this"}]})
+    H.add({"kind": "setup", "who": TOM, "as": TOM, "where": "Step 5 · Teacher Deployment Editor", "text": "a row"})
+    H.add({"kind": "relief", "who": TOM, "as": TOM, "where": "Relief", "text": "mine"})
+    es = api(as_person(TOM), "?signins=1")[1]["entries"]
+    assert [e["text"] for e in es] == ["mine", "refused"] and "addr" not in es[1], es      # a code does not open the setup or the admin page
+    by = {e["text"]: e for e in api(committee(), "?signins=1")[1]["entries"]}
+    assert by["refused"]["addr"] == "10.0.0.9" and "gave access" in by and "a row" in by, by
+
+@t
+def own_scope_parses_only_the_lines_that_name_them():
+    fresh()
+    H.add_many([{"kind": "relief", "who": f"Person {i}", "as": f"Person {i}", "where": "Relief", "text": f"t{i}"} for i in range(300)])
+    H.add({"kind": "relief", "who": TOM, "as": TOM, "where": "Relief", "text": "mine"})
+    n, real = [], H.json.loads
+    def spy(x, *a, **k):
+        if isinstance(x, str) and '"relief"' in x: n.append(1)     # the history's lines only (other json is read too)
+        return real(x, *a, **k)
+    H.json.loads = spy
+    try: got = api(as_person(TOM))[1]["entries"]
+    finally: H.json.loads = real
+    assert [e["text"] for e in got] == ["mine"] and len(n) == 1, len(n)
+
+@t
+def a_line_separator_inside_a_text_keeps_the_entry():
+    fresh()
+    H.add({"kind": "exams", "who": "Ann", "as": "Ann", "where": "Exams and events", "text": "Mid\u2028year\u0085test"})
+    assert [e["text"] for e in H.read()] == ["Mid\u2028year\u0085test"]
+
+@t
+def no_history_right_is_401():
+    fresh()
+    c = A.app.test_client()
+    with c.session_transaction() as s: s["role"] = "teacher"   # the shared teacher code: nobody's own history
+    assert c.get("/api/history").status_code == 401
+    r = c.get("/history"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
+
+@t
+def old_files_in_the_server_s_clock_are_read_at_a_month_s_edge():
+    fresh()
+    # stage 1 (live) named its files by the server's UTC clock: 1 Oct 04:00 school time is 30 Sep 20:00 UTC, kept in 2026-09.jsonl
+    ts = datetime.datetime(2026, 10, 1, 4, 0, tzinfo=H.SCHOOL_TZ).timestamp()
+    e = {"id": H._new_id(), "kind": "setup", "ts": ts, "at": "2026-09-30T20:00:00+00:00", "who": "Ann", "as": "Ann", "where": "Step 1 \u00b7 Venues", "text": "old clock"}
+    os.makedirs(H.DIR, exist_ok=True)
+    with open(os.path.join(H.DIR, "2026-09.jsonl"), "w") as f: f.write(json.dumps(e) + "\n")
+    since = datetime.datetime(2026, 10, 1, 2, 0, tzinfo=H.SCHOOL_TZ).timestamp()
+    assert [x["text"] for x in H.read(since=since)] == ["old clock"]
+
+@t
+def days_are_school_days():
+    fresh()
+    os.environ["TZ"] = "UTC"; time.tzset()
+    ev = lambda *a: datetime.datetime(*a, tzinfo=H.SCHOOL_TZ).timestamp()
+    a = H.add({"kind": "app", "text": "late", "ts": ev(2026, 11, 18, 23, 30)})
+    b = H.add({"kind": "app", "text": "early", "ts": ev(2026, 11, 19, 0, 30)})
+    assert a["at"].endswith("+08:00") and a["at"].startswith("2026-11-18T23:30"), a["at"]
+    c = committee()
+    assert texts(c, "?from=2026-11-19&to=2026-11-19") == ["early"]
+    assert texts(c, "?from=2026-11-18&to=2026-11-18") == ["late"]
+    assert H.day_start("2026-11-19") == ev(2026, 11, 19) and H.day_start("nope") is None and H.day_start(None) is None
+
+@t
+def since_param():
+    fresh()
+    for i in range(3): H.add({"kind": "app", "text": f"e{i}", "ts": 1800000000 + i * 10})
+    c = committee()
+    assert texts(c, "?since=1800000010") == ["e2", "e1"]
+    s, d = api(c, "?since=abc"); assert s == 400 and d == {"error": "Pick a time as a number of seconds."}, d
+
+@t
+def months_before_since_are_not_read():
+    fresh()
+    ev = lambda m, d=10: datetime.datetime(2026, m, d, 12, tzinfo=H.SCHOOL_TZ).timestamp()
+    for m in (8, 9, 10): H.add({"kind": "app", "text": f"m{m}", "ts": ev(m)})
+    calls = []
+    real = H._lines
+    def spy(name): calls.append(name); return real(name)
+    H._lines = spy
+    try: got = H.read(since=ev(10, 1))
+    finally: H._lines = real
+    assert [e["text"] for e in got] == ["m10"] and calls == ["2026-10.jsonl"], calls
+    assert [e["text"] for e in H.read(since=ev(9, 1))] == ["m10", "m9"]
+    # an entry at the very start of a month is in that month's file, and a `since` after the month ends skips it
+    assert H.read(since=ev(11, 1), allow=lambda e: True) == []
+
+@t
+def allow_filters_last_and_when_text_is_school_time():
+    fresh()
+    H.add({"kind": "signin", "who": "A", "as": "A", "text": "in"}); H.add({"kind": "app", "text": "x"})
+    assert [e["text"] for e in H.read(signins=True, allow=lambda e: e.get("who") == "A")] == ["in"]
+    assert H.when_text(datetime.datetime(2026, 11, 18, 8, 12, tzinfo=datetime.timezone.utc).timestamp()) == "Wednesday 18 Nov, 4:12 pm"   # 18 Nov 2026 is a Wednesday (the plan says Tuesday)
+    assert H.short_when(datetime.datetime(2026, 11, 19, 2, 2, tzinfo=datetime.timezone.utc).timestamp()) == "19 Nov, 10:02 am"
+    assert H.short_when(datetime.datetime(2026, 11, 19, 4, 0, tzinfo=datetime.timezone.utc).timestamp()) == "19 Nov, 12:00 pm"
+    assert H.short_when(datetime.datetime(2026, 11, 19, 16, 5, tzinfo=datetime.timezone.utc).timestamp()) == "20 Nov, 12:05 am"
+
+def _sheet(r):
+    import openpyxl
+    return openpyxl.load_workbook(io.BytesIO(r.data))["History"]
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+HEAD_ROW = ["Day", "Time", "Who", "Signed in with", "Where", "What", "Was", "Became", "Departments"]
+
+@t
+def download_is_the_committees():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": ANN, "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "maths"})
+    assert as_person(HANA, "password").get("/api/history/download").status_code == 401
+    r = committee().get("/api/history/download")
+    today = datetime.datetime.now(H.SCHOOL_TZ).strftime("%Y-%m-%d")
+    assert r.status_code == 200 and r.mimetype == XLSX, (r.status_code, r.mimetype)
+    assert r.headers["Content-Disposition"] == f"attachment; filename=history-{today}.xlsx", r.headers["Content-Disposition"]
+    rows = [[c.value for c in row] for row in _sheet(r).iter_rows()]
+    assert rows[0] == HEAD_ROW and len(rows) == 2 and rows[1][2] == ANN and rows[1][5] == "maths" and rows[1][8] == "Maths", rows
+    assert committee().get("/api/history/download?from=nope").status_code == 400
+
+@t
+def download_keeps_the_filters():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": ANN, "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "maths"})
+    H.add({"kind": "setup", "who": BOB, "as": BOB, "where": "Step 4 · Teachers", "depts": ["Science"], "text": "science"})
+    H.add({"kind": "signin", "who": BOB, "as": BOB, "via": "shared", "text": "in"})
+    rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download?dept=Maths")).iter_rows()]
+    assert [r[5] for r in rows] == ["What", "maths"], rows
+    rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download?signins=1&who=bob")).iter_rows()]
+    assert [(r[5], r[3]) for r in rows[1:]] == [("in", "shared code"), ("science", None)], rows
+
+@t
+def download_cells_are_never_formulas():
+    fresh()
+    for ch in "=+-@":
+        H.add({"kind": "setup", "who": ANN, "as": ch + "as", "where": "Step 4 · Teachers", "depts": [ch + "d"], "text": ch + "text",
+               "was": ch + "was", "now": ch + "now"})
+    ws = _sheet(committee().get("/api/history/download"))
+    seen = set()
+    for row in list(ws.iter_rows())[1:]:
+        assert row[2].value[1:] == "as" and row[5].value[1:] == "text" and row[6].value[1:] == "was" and row[7].value[1:] == "now" and row[8].value[1:] == "d", [c.value for c in row]
+        for c in row:
+            if c.value is not None: assert c.data_type == "s", (c.coordinate, c.data_type, c.value)   # an empty cell has no value to misread
+        seen.add(row[5].value[0])
+    assert seen == set("=+-@"), seen
+
+@t
+def download_says_when_there_are_more():
+    fresh()
+    for i in range(5): H.add({"kind": "app", "text": f"e{i}"})
+    real = A.HISTORY_DOWNLOAD_MAX; A.HISTORY_DOWNLOAD_MAX = 3
+    try: rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download")).iter_rows()]
+    finally: A.HISTORY_DOWNLOAD_MAX = real
+    assert [r[5] for r in rows[1:4]] == ["e4", "e3", "e2"] and len(rows) == 5, rows
+    assert rows[4][0] == "There are more entries than one download holds: pick fewer days.", rows[4]
+    assert len(_sheet(committee().get("/api/history/download"))["A"]) == 6
+
+
+@t
+def download_of_many_rows_is_quick():
+    fresh()
+    H.add_many([{"kind": "app", "text": f"e{i}"} for i in range(3000)])
+    real = A.HISTORY_DOWNLOAD_MAX; A.HISTORY_DOWNLOAD_MAX = 5000
+    try:
+        t0 = time.time(); r = committee().get("/api/history/download"); took = time.time() - t0
+    finally: A.HISTORY_DOWNLOAD_MAX = real
+    print(f"3000-row download took {took:.2f}s")
+    assert r.status_code == 200 and took < 5, (r.status_code, took)
+    assert len(list(_sheet(r).iter_rows())) == 3001
+
+@t
+def download_drops_characters_excel_refuses():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": "An\x0bn", "where": "Step 4 · Teachers", "text": "te\x01xt", "was": "w\x01", "now": "n\x02"})
+    r = committee().get("/api/history/download")
+    assert r.status_code == 200, r.status_code
+    row = [c.value for c in list(_sheet(r).iter_rows())[1]]
+    assert row[2] == "Ann" and row[5] == "text" and row[6] == "w" and row[7] == "n", row
+
+SINCE = "Since you last signed in"
+
+@t
+def a_mistyped_line_never_takes_the_page_down():
+    fresh()
+    CY = "Cy Test"
+    P.update(lambda d: d["people"].update({CY: dict(group="committee", added=True, username="cy.t", pw=PW.hash_pw(secrets.token_hex(8)))}))
+    t0 = time.time() - 3600
+    P.update(lambda d: [d["people"][n].update(signins=[t0, time.time()]) for n in (CY, HANA)])
+    row = dict(kind="setup", op="set", section="teachers", row="r1", field="short", who=ANN, where="Step 4 · Teachers", depts=["Maths"], **{"as": ANN})
+    good = H.add(dict(row, batch="bgood", was="A", now="B", text="good"))
+    bad = [dict(row, batch="bts", was="B", now="C", text="ts as text", ts="soon"),
+           dict(row, batch="bdepts", field="name", text="depts as a number", depts=5),
+           dict(row, batch="bnested", field="dept", text="depts holding a list", depts=[["Maths"]]),
+           dict(row, batch="bvia", field="note", text="via as a list", via=["password"]),
+           dict(row, batch="bkind", text="kind as a list", kind=["setup"])]
+    with open(month_file(good), "a") as f:
+        for i, b in enumerate(bad): f.write(json.dumps(dict(b, id=good["id"] + str(i), at=good["at"], ts=b.get("ts", good["ts"] + i + 1))) + "\n")
+    cy, hana = as_person(CY, "password"), as_person(HANA, "password")
+    for c in (cy, hana, committee()):
+        for q in ("", "?from=2020-01-01", f"?since={t0}", "?dept=Maths", "?signins=1"):
+            s, d = api(c, q); assert s == 200, (q, s)
+    s, d = api(cy)
+    assert {"good", "ts as text", "depts as a number", "via as a list"} <= {e["text"] for e in d["entries"]}, d
+    assert "back" in next(e for e in d["entries"] if e["text"] == "good"), d        # still marked (a line with no readable time is not placed after it)
+    seen = {e["text"] for e in api(hana)[1]["entries"]}                    # the head: Maths rows; a line whose departments cannot be read is no one's department
+    assert {"good", "ts as text", "via as a list"} <= seen and not {"depts as a number", "depts holding a list"} & seen, seen
+    r = cy.get("/api/history/download"); assert r.status_code == 200, r.status_code
+    rows = {x[5]: x for x in ([c.value for c in row] for row in _sheet(r).iter_rows())}
+    assert rows["via as a list"][3] == "['password']" and rows["ts as text"][0] in (None, ""), rows
+    for c in (cy, hana):
+        r = c.get("/home"); assert r.status_code == 200 and SINCE in r.data.decode(), r.data.decode()[:300]
+    assert cy.post("/api/history/back", json={"id": good["id"] + "0"}).status_code == 409
 
 print(f"{COUNT} history tests passed")
