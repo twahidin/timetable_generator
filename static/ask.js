@@ -95,7 +95,25 @@ var Ask = (function () {
     return f.kind === "swap" ? f.a : null;
   }
 
+  /* the side panel's tab for what the page is about */
+  function tabLabel(sub) { return sub.kind === "place" ? "Empty period" : "Lesson"; }
+
+  /* what the page about sub holds: Lift out (a lesson on the timetable), Delete this lesson and the lists (a lesson), and the group the
+     lists are for (the one chosen, else the first row's); a place, a lesson gone (card null) or an entry of step 5's list holds none */
+  function parts(sub, card) {
+    if (sub.kind === "place" || !card || card.entry) return { lift: false, del: false, lists: false, group: null };
+    var rows = card.rows || [], g = sub.group !== null && sub.group !== undefined ? sub.group : rows.length ? rows[0].group : null;
+    return { lift: onTimetable(card), del: true, lists: true, group: g === undefined ? null : g };
+  }
+
+  /* the line under a lesson's name: its day and period (and time), or "Not placed" (and where it was); a band's number of groups */
+  function where(card, day, time, was) {
+    var n = (card.rows || []).length, grp = card.band ? " · " + n + " group" + (n === 1 ? "" : "s") : "";
+    if (!onTimetable(card)) return "Not placed" + (was ? " (" + was + ")" : "") + grp;
+    return day + " period " + card.p + (time ? " (" + time + ")" : "") + grp;
+  }
+
   return { ofCard: ofCard, ofPlace: ofPlace, pointable: pointable, empty: empty, groups: groups, starters: starters, query: query, verdict: verdict,
-           send: send, stale: stale, target: target };
+           send: send, stale: stale, target: target, tabLabel: tabLabel, parts: parts, where: where };
 })();
 if (typeof module !== "undefined") module.exports = Ask;
