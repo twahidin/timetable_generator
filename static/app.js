@@ -955,8 +955,7 @@ function render() {
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
-  if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); }   // again: the person opened the step
-  if (id === "publish") loadRenames();   // the renamed teachers, when the setup, the draft or what is published moved since they were fetched
+  if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); if (id === "publish") loadRenames(again); }   // again: the person opened the step: the draft, and the renamed teachers (whatever their signature), are fetched again
   if (id === "download") fitCheck();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
@@ -3428,19 +3427,20 @@ async function refreshDraft() {   // the draft again from the server, and the st
 /* step 9: the renamed teachers a publish asks about (GET /api/draft/renames, committee only), RNP.list, and the person's picks by old
    name, RN. Fetched on step 9 only, once for each state of the setup, the draft and what is published (rnSig): a render on step 9
    asks, and the status poll asks, but a fetch happens only when the state moved; its answer redraws only when the list changed */
-const RNP = { list: [], sig: null, busy: false, gen: 0 };
+const RNP = { list: [], sig: null, busy: false, gen: 0, again: false };   // again: the person opened step 9 while a fetch was on its way
 let RN = {};
 const rnSig = () => JSON.stringify([SYNC.v, G.st && G.st.setup_saved_at, draftSig(), G.st && G.st.published ? G.st.published.at : null]);
 function rnTake(list) {   // a new list of pairs: the picks are forgotten when its old names change -> true when the list changed
   list = Array.isArray(list) ? list : [];
-  const olds = x => JSON.stringify(x.map(p => p && p.old));
+  const olds = x => JSON.stringify(x.map(p => p && p.old).sort());   // as a set: the same names in another order keep the picks
   if (olds(list) !== olds(RNP.list)) RN = {};
   const changed = JSON.stringify(list) !== JSON.stringify(RNP.list);
   RNP.list = list; return changed;
 }
-async function loadRenames() {
-  if (STEPS[S.step][0] !== "publish" || S.practice || !committee() || RNP.busy) return;
-  const sig = rnSig(); if (sig === RNP.sig) return;
+async function loadRenames(again) {   // again: the person has just opened step 9: fetched whatever the signature
+  if (STEPS[S.step][0] !== "publish" || S.practice || !committee()) return;
+  if (RNP.busy) { if (again) RNP.again = true; return; }   // never two at once; an opening meanwhile is fetched for when this one is in
+  const sig = rnSig(); if (!again && sig === RNP.sig) return;
   RNP.busy = true; const gen = RNP.gen; let list = null;
   try {
     const r = await fetch("/api/draft/renames"), j = await r.json().catch(() => ({}));
@@ -3448,7 +3448,8 @@ async function loadRenames() {
     if (r.ok && Array.isArray(j.renames)) list = j.renames;
   } catch (e) { }
   finally { RNP.busy = false; }
-  if (gen !== RNP.gen) return;   // a refusal of a publish brought a newer list meanwhile
+  if (RNP.again) { RNP.again = false; loadRenames(true); return; }   // opened again meanwhile: this answer may be older than what the person came back to
+  if (gen !== RNP.gen) return;   // a refusal of a publish, or a publish, came meanwhile: this answer is older
   RNP.sig = sig;   // tried for this state: a failure is not asked again until the state moves (a publish refused brings the list too)
   if (list && rnTake(list) && STEPS[S.step][0] === "publish") render();
   if (rnSig() !== sig) loadRenames();   // the state moved while the answer was on its way
@@ -3465,7 +3466,7 @@ async function publishDraft() {   // step 9
     if (r.status === 409 && (j.critical || j.unplaced)) { toast(j.error); await refreshDraft(); return; }   // a critical mistake, or a lesson not placed, arrived meanwhile: the step shows it now
     if (r.status === 409 && Array.isArray(j.renames)) { RNP.gen++; rnTake(j.renames); RNP.sig = rnSig(); again(); toast(j.error || "Choose for each teacher with a new name first."); return; }   // a renamed teacher still to choose for (or for an admin): the server's list, drawn again
     if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; S.help = null; RN = {}; RNP.sig = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
+    S.draft = j; S.help = null; RN = {}; RNP.sig = null; RNP.gen++; again(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { again(); toast("Could not reach the server: " + err.message); }
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }

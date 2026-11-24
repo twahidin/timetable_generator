@@ -21,11 +21,12 @@ var Renames = (function () {
     return { same: same, different: different, note: note };
   }
 
-  /* "" when Publish may go; else the first that applies: a pair only an admin can publish, a pair with no pick (a pick not
+  /* "" when Publish may go; else the first that applies: a pair only an admin can publish, a pair with neither choice offered, a pair with no pick (a pick not
      offered, made before the list changed, is the reason it is not) */
   function gate(pairs, picks) {
     var ps = list(pairs), i, p, k;
     for (i = 0; i < ps.length; i++) if (ps[i].needs_admin) return adminText(ps[i]);
+    for (i = 0; i < ps.length; i++) { k = offers(ps[i]); if (!k.same && !k.different) return k.note; }   // nothing to pick: why, not "Choose"
     for (i = 0; i < ps.length; i++) if (!pickOf(picks, ps[i].old)) return "Choose for each teacher with a new name first.";
     for (i = 0; i < ps.length; i++) {
       p = ps[i]; k = pickOf(picks, p.old);
@@ -43,7 +44,7 @@ var Renames = (function () {
       if (p.needs_admin) return '<div class="rnpair">' + head + '<p class="muted small">' + esc(adminText(p)) + "</p></div>";
       var o = offers(p), cur = pickOf(picks, p.old);
       var radio = function (v, label, says) {
-        return '<div><label class="radio"><input type="radio" name="rn-' + i + '" data-rn="' + i + "|" + v + '"' + (cur === v ? " checked" : "")
+        return '<div><label class="radio"><input type="radio" name="rn-' + i + '" id="rn' + i + v + '" data-rn="' + i + "|" + v + '"' + (cur === v ? " checked" : "")
           + (o[v] ? "" : " disabled") + "> " + esc(label) + '</label> <span class="muted small">' + esc(says) + "</span></div>";
       };
       return '<div class="rnpair">' + head

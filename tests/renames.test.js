@@ -24,6 +24,12 @@ t("gate: a pick that is not offered (picked before the list changed) says why", 
   assert.strictEqual(Renames.gate([p], { "Mdm Lee": "different" }), "You cannot remove your own account.");
   assert.strictEqual(Renames.gate([p], { "Mdm Lee": "same" }), "");
 });
+t("gate: a pair where neither choice is offered says why, not \"Choose\"", () => {
+  const p = pair({ joins: false, no_remove: "You cannot remove your own account." });
+  assert.strictEqual(Renames.gate([p], {}), "You cannot remove your own account.");
+  assert.strictEqual(Renames.gate([tg(), p], {}), "You cannot remove your own account.");
+  assert.strictEqual(Renames.gate([p, pair({ old: "Mr Ong", needs_admin: true })], {}), "An admin has to publish this one: New Teacher 3's account must follow or be removed.");
+});
 t("offers: both, with no note, when nothing stands in the way", () => {
   assert.deepStrictEqual(Renames.offers(pair()), { same: true, different: true, note: "" });
   assert.deepStrictEqual(Renames.offers(tg({ no_remove: "x" })), { same: true, different: true, note: "" });   // no account: nothing to remove
@@ -54,10 +60,11 @@ t("card: the heading, each sentence, and the picks", () => {
   assert.ok(h.includes("New Teacher 3 starts fresh. Mdm Lee&#39;s account is removed."));
   assert.ok(h.includes("New Teacher 4 starts fresh. Mr Tan&#39;s Telegram link is removed."));
   assert.ok(h.includes("Same person") && h.includes("A different person"));
-  assert.ok(/<input type="radio" name="rn-0" data-rn="0\|different" checked>/.test(h));
-  assert.ok(/<input type="radio" name="rn-0" data-rn="0\|same">/.test(h));
-  assert.ok(/<input type="radio" name="rn-1" data-rn="1\|same">/.test(h) && /<input type="radio" name="rn-1" data-rn="1\|different">/.test(h));
+  assert.ok(/<input type="radio" name="rn-0" id="rn0different" data-rn="0\|different" checked>/.test(h));
+  assert.ok(/<input type="radio" name="rn-0" id="rn0same" data-rn="0\|same">/.test(h));
+  assert.ok(/<input type="radio" name="rn-1" id="rn1same" data-rn="1\|same">/.test(h) && /<input type="radio" name="rn-1" id="rn1different" data-rn="1\|different">/.test(h));
   assert.ok(!h.includes("disabled"));
+  assert.ok(h.includes('id="rn0same"') && h.includes('id="rn0different"') && h.includes('id="rn1same"') && h.includes('id="rn1different"'));   // render() puts focus back by id
 });
 t("card: never a pick the person did not make", () => {
   assert.ok(!Renames.card([pair(), tg()], {}, esc).includes("checked"));
