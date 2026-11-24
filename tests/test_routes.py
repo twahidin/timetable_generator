@@ -193,6 +193,7 @@ GUARDS = {
     "draft_fix": ('committee',),
     "draft_fixes": ('committee',),
     "draft_get": ('committee',),
+    "draft_renames": ('committee',),
     "draft_grid": ('committee',),
     "draft_lesson": ('committee',),
     "draft_options": ('committee',),

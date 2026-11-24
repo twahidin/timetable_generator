@@ -253,3 +253,51 @@ def migrate(pub, relief_raw, exams_raw=None):
     if done["relief"][0]: _moved_entry(done["relief"][1], "Moved from relief's lists")
     if done["exams"][0]: _moved_entry(done["exams"][1], "Moved from the exams committee list")
     return out or None
+
+
+def _removed(d):
+    if not isinstance(d.get("removed"), dict): d["removed"] = {}
+    return d["removed"]
+
+def _people(d):
+    if not isinstance(d.get("people"), dict): d["people"] = {}
+    return d["people"]
+
+def join(d, old, new):
+    """inside an update: the same person renamed. new's record takes whatever old's has set (its sign-ins and `added` stay
+    new's), n becomes one past the larger, and old's record goes with removed[old] = its n + 1, so no session made under the
+    old name is accepted again. -> the changes for the History (a password as "set" or None, never its hash). ValueError
+    when new already has a username, a password or a Google sign-in: the caller must not ask"""
+    o, r = record(d, old), record(d, new)
+    if r["username"] or r["pw"] or r["google"]: raise ValueError(f"{new} has a sign-in of their own")
+    out = []
+    def put(field, now, shown=lambda v: v):
+        if r[field] != now: out.append(dict(name=new, field=field, was=copy.deepcopy(shown(r[field])), now=copy.deepcopy(shown(now)))); r[field] = now
+    if o["group"] is not None: put("group", o["group"]); put("depts", list(o["depts"]))
+    if o["username"]: put("username", o["username"])
+    if o["pw"]: put("pw", o["pw"], lambda v: "set" if v else None); put("must_change", o["must_change"])
+    if o["google"]: put("google", o["google"], lambda v: "set" if v else None)
+    if o["note"].strip(): put("note", o["note"])
+    if o["off"]: put("off", True)
+    ex, oe = r["extras"], o["extras"]
+    for k in ("timetable", "relief", "admin"):
+        if oe[k] and not ex[k]: out.append(dict(name=new, field=k, was=False, now=True)); ex[k] = True
+    later = max((v for v in (ex["exams"], oe["exams"]) if v), default=None)
+    if later != ex["exams"]: out.append(dict(name=new, field="exams", was=ex["exams"], now=later)); ex["exams"] = later
+    put("code_n", max(o["code_n"], r["code_n"]))
+    r["n"] = max(o["n"], r["n"]) + 1
+    ps = _people(d)
+    ps.pop(old, None)
+    _removed(d)[old] = o["n"] + 1
+    ps[new] = r
+    return out
+
+def drop(d, old):
+    """inside an update: a different person now has the name's row. old's record goes and removed[old] = its n + 1. -> what it
+    had, as the admin page's removal records it"""
+    r = record(d, old)
+    _people(d).pop(old, None)
+    _removed(d)[old] = r["n"] + 1
+    ex = r["extras"]
+    return dict(role=LABELS.get(r["group"]) if r["group"] else None, timetable=ex["timetable"], relief=ex["relief"], exams=ex["exams"],
+                admin=ex["admin"], depts=list(r["depts"]), username=r["username"], note=r["note"], off=r["off"])
