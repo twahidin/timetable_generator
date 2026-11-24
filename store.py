@@ -21,6 +21,8 @@ os.makedirs(RUNS, exist_ok=True)
 KEEP_SAVES = 48
 _lock = threading.Lock()
 _publishing = threading.Lock()   # one publish at a time: each writes the same folder before swapping it in
+_remaking = threading.Lock()     # one remake of the files to download at a time (remake_files); never taken by a publish or a student update
+_turns = dict(publish=0, swap=0)  # how many publishes and model swaps this process has made (precise: published_at and students_at are to the minute)
 
 def now():
     return datetime.datetime.now().astimezone().strftime("%d %b %Y, %H:%M")
@@ -157,13 +159,22 @@ def _risky(ops):
     edits = [o for o in ops if isinstance(o, list) and len(o) > 1 and o[0] in ("add", "set", "merge") and o[1] == "teachers"]
     return len(dels) > BIG_DELETE or any(len(o) > 1 and o[1] == "teachers" for o in dels) or len(edits) >= BIG_TEACHERS
 
+def _student_ids(ops):
+    """the distinct _ids of the student rows the operations name, in order"""
+    out = []
+    for op in ops:
+        if not (isinstance(op, list) and len(op) > 2 and op[1] == "students"): continue
+        i = op[2].get("_id") if op[0] == "add" and isinstance(op[2], dict) else op[2] if op[0] in ("set", "merge", "del") else None
+        if isinstance(i, str) and i and i not in out: out.append(i)
+    return out
+
 class Refused(Exception):
     """a change the caller's check turned down; the message is a sentence for the person"""
 
 class Replaced(Exception):
     """the whole setup was replaced after the version the change was made on: it is not applied"""
 
-def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag=None):
+def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag=None, told=None):
     """apply a change to the current setup; returns (the new version, refused).
     check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied.
     filter(spec, ops) -> (allowed, refused) also runs under the lock: only the allowed operations are applied (one
@@ -171,7 +182,9 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag
     handed back for the caller to report.
     since: the version the change was made on; when the setup was replaced after it, Replaced is raised and nothing
     is applied (the change belongs to a setup that is gone)
-    tag: a dict added to each kind-"setup" entry of the applied operations (not to refused entries or the app's follow-ups)"""
+    tag: a dict added to each kind-"setup" entry of the applied operations (not to refused entries or the app's follow-ups)
+    told: a dict that, when operations were applied, gets the batch id ("batch") and the student rows they named
+    ("students": [(before, after)], deep copies; None for a row added or deleted)"""
     with _setup_lock:
         cur = _load()
         if not cur: raise LookupError("no setup")
@@ -193,7 +206,13 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag
         if tag:
             for e in entries: e.update(copy.deepcopy(tag))
         entries += _refused_entries(cur["spec"], all_ops, refused, by, cur["v"] + 1)   # before the change is applied
+        named = _student_ids(ops) if told is not None else []
+        was = {r.get("_id"): r for r in copy.deepcopy(cur["spec"].get("students") or []) if isinstance(r, dict)} if named else {}
         sync.apply(cur["spec"], ops)
+        if told is not None:
+            now_rows = {r.get("_id"): r for r in cur["spec"].get("students") or [] if isinstance(r, dict)}
+            pairs = [(was.get(i), copy.deepcopy(now_rows.get(i))) for i in named]
+            told.update(batch=batch, students=[p for p in pairs if p != (None, None)])
         cur["v"] += 1
         _log.append(dict(v=cur["v"], client=client, ops=ops))
         # the net for a stale or second tab, a head's tab and whole setups: put the Class Parents' lessons right and log it
@@ -266,9 +285,9 @@ _cache = dict(stamp=None, value=None)
 def published():
     """the published timetable: dict(meta, model, codes {normalised code: student id}) or None"""
     meta_path = os.path.join(PUB, "meta.json")
-    if not os.path.exists(meta_path): return None
-    stamp = os.path.getmtime(meta_path)
-    with _lock:
+    with _lock:                                   # both folder swaps hold _lock across their two renames: a whole folder is always seen
+        if not os.path.exists(meta_path): return None
+        stamp = os.path.getmtime(meta_path)
         if _cache["stamp"] != stamp:
             with open(os.path.join(PUB, "model.pkl"), "rb") as f: model = pickle.load(f)
             meta = read_json(meta_path, {})
@@ -308,7 +327,80 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spe
             os.replace(tmp, PUB)
             shutil.rmtree(old, ignore_errors=True)
             _cache.update(stamp=None, value=None)
+            _turns["publish"] += 1
         return m
+
+META_UNREADABLE = "The published meta.json could not be read."
+
+def _published_meta(meta_path, need_at=False):
+    """the published meta.json as a dict: FileNotFoundError when it is not there, ValueError when it cannot be read, is
+    not a dict or (need_at) has no published_at; the messages carry nothing of the file"""
+    if not os.path.exists(meta_path): raise FileNotFoundError("The published meta.json is not there.")
+    try:
+        with open(meta_path, encoding="utf-8") as f: meta = json.load(f)
+    except (OSError, ValueError): meta = None
+    if not isinstance(meta, dict) or need_at and not meta.get("published_at"): raise ValueError(META_UNREADABLE)
+    return meta
+
+def swap_model(model, **meta):
+    """put a new model in the published folder in place of the old one, with meta laid over meta.json (the caller
+    holds _publishing); nothing else in the folder changes. A meta.json that cannot be read is never written over:
+    the error goes out and nothing is written"""
+    meta_path = os.path.join(PUB, "meta.json")
+    meta0 = _published_meta(meta_path)
+    tmp, swapped = os.path.join(PUB, "model.pkl.tmp"), False
+    try:
+        with open(tmp, "wb") as f: pickle.dump(model, f)
+        os.replace(tmp, os.path.join(PUB, "model.pkl")); swapped = True
+        write_json(meta_path, {**meta0, **meta})
+    finally:
+        if os.path.exists(tmp): os.remove(tmp)
+        if swapped:                               # readers see the model on disk even when the meta write failed
+            with _lock:
+                _cache.update(stamp=None, value=None)
+                _turns["swap"] += 1
+
+def remake_files():
+    """make the files to download again from the published model as it is now and swap them in as a publish does; None
+    when nothing is published, True when the files are up to date (or a publish made its own meanwhile), False when a
+    student change arrived while they were made (files_behind stays and the caller runs it again). The export runs with
+    no lock held, so a student update never waits for it; only the copy and swap at the end take _publishing. If the
+    export fails its folder is removed, files_behind is left as it was and the error goes out."""
+    meta_path = os.path.join(PUB, "meta.json")
+    with _remaking:
+        with _lock:                               # a publish swaps folders under _lock: meta and model come from one folder
+            turns = dict(_turns)                  # read first: a swap after this is seen at the end, never missed
+            if not os.path.exists(meta_path): return None
+            meta0 = _published_meta(meta_path, need_at=True)   # unreadable or with no published_at: stop, nothing written
+            with open(os.path.join(PUB, "model.pkl"), "rb") as f: m = pickle.load(f)   # its own copy: export_all may change it
+        tmp, old = PUB + ".files", PUB + ".old"
+        shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
+        try:
+            out = export_all(m, tmp, log=lambda *a: None)
+            shutil.rmtree(os.path.join(tmp, "PDF", "Classes"), ignore_errors=True)   # as publish: single PDFs are in the zip and made on demand
+            for k in ("Teachers", "Rooms", "Students"): shutil.rmtree(os.path.join(tmp, "PDF", k), ignore_errors=True)
+            files = dict(excel=os.path.basename(out["excel"]), html=os.path.basename(out["html"]), zip=os.path.basename(out["pdf_zip"]), db=os.path.basename(out["db"]),
+                         books={os.path.basename(p).split(" - ")[0].lower(): os.path.relpath(p, tmp) for p in out["pdf_books"]})
+            with _publishing:
+                if not os.path.exists(meta_path): shutil.rmtree(tmp, ignore_errors=True); return None
+                meta = _published_meta(meta_path, need_at=True)   # raised: the folder is removed below and nothing is written
+                if _turns["publish"] != turns["publish"] or meta.get("published_at") != meta0.get("published_at"):
+                    shutil.rmtree(tmp, ignore_errors=True); return True   # a publish made its own files
+                for f in os.listdir(PUB):         # what the export does not make: the model, the setup and the timetable it was published from
+                    if f in ("model.pkl", "setup.xlsx") or f.startswith("timetable."): shutil.copy(os.path.join(PUB, f), os.path.join(tmp, f))
+                behind = _turns["swap"] != turns["swap"] or meta.get("students_at") != meta0.get("students_at")
+                write_json(os.path.join(tmp, "meta.json"), {**meta, "files": files, "files_at": now(), "files_behind": behind})
+                with _lock:
+                    shutil.rmtree(old, ignore_errors=True)
+                    os.replace(PUB, old)
+                    try: os.replace(tmp, PUB)
+                    except BaseException: os.replace(old, PUB); raise   # the published folder is never left missing
+                    shutil.rmtree(old, ignore_errors=True)
+                    _cache.update(stamp=None, value=None)
+                return not behind
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
 
 def codes_csv(model):
     buf = io.StringIO(); w = csv.writer(buf)

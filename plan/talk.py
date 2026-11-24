@@ -81,6 +81,13 @@ def _names(env, pub) -> Names:
     return Names(pub, env.people(), ((pub or {}).get("model") or {}).get("students"))
 
 
+def _stamp(pub) -> tuple:
+    """what a talk's names and checks were made from: (the published time, a hash of the published students); a student
+    saved on the Students step moves the second and not the first"""
+    import students                                     # here: it reads the store, which plan does not need otherwise
+    return _make.published_at(pub or {}), students.people_stamp(pub)
+
+
 def _exam_of(env, id):
     s = env.load(id) if isinstance(id, str) and id else None
     return s if isinstance(s, dict) and s.get("kind") in _schedules.KINDS else None
@@ -123,7 +130,7 @@ def open(owner, env, exam=None) -> Talk:
         if s is None:
             raise Refused(GONE)
     pub = env.pub()
-    talk = Talk(owner, _names(env, pub), _make.published_at(pub or {}))
+    talk = Talk(owner, _names(env, pub), _stamp(pub))
     if s is not None:
         talk.exam, talk.last_rev = s["id"], _schedules.rev_of(s)
         talk.add("sys", CARRY_ON.format(name=s.get("name") or "this exam"))        # the page's line only: the AI has its own note
@@ -269,15 +276,20 @@ def say(talk, env, text, pick=None, call=None):
     started = False
     try:
         pub = env.pub()
-        fresh = _make.published_at(pub or {})
+        fresh = _stamp(pub)
         names = _names(env, pub) if fresh != talk.stamp else None          # built outside the lock: it reads the timetable
         first = [] if talk.begun else _first_notes(talk, env, pub)
         with talk.lock:
             if names is not None:
-                talk.names, talk.stamp, talk.offered = names, fresh, {}
-                talk.add("sys", REPUBLISHED)
-                talk.notes.append("The timetable was published again: the codes of people start again from this message, "
-                                  "so a code in an earlier message may stand for someone else now.")
+                again = fresh[0] != talk.stamp[0]                         # published again; else only the students changed
+                moved = getattr(names, "_code", None) != getattr(talk.names, "_code", None)   # a new student's ID can move a teacher's code
+                talk.names, talk.stamp = names, fresh
+                if again: talk.add("sys", REPUBLISHED)
+                if again or moved:
+                    talk.offered = {}
+                    talk.notes.append(("The timetable was published again" if again else "The people on the timetable changed")
+                                      + ": the codes of people start again from this message, "
+                                      "so a code in an earlier message may stand for someone else now.")
             notes, talk.notes, talk.begun = first + talk.notes, [], True
             sent = talk.names.out(words, "typed")
             if notes:
@@ -525,7 +537,7 @@ def view(talk, env, after=0) -> dict:
         if s is not None:
             exam = dict(id=s.get("id"), name=s.get("name"), status=_approval.label(s, today), link=f"/exams/{s.get('id')}")
         key = (s.get("id"), _schedules.rev_of(s)) if s is not None else None
-        key = (key, _make.published_at(pub or {}), (xset or {}).get("saved_at"), str(today))
+        key = (key, _stamp(pub), (xset or {}).get("saved_at"), str(today))
         with talk.lock:
             kept = talk.checked
         if kept is not None and kept[0] == key:         # the full check is run again only when what it reads changed
