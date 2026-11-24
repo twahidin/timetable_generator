@@ -656,3 +656,6 @@ table.sv-grid td.clash small{display:none}
 .sv-foot{flex:none;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 td.sv-btns{white-space:nowrap}
 @media(max-width:899px){.sv-body{display:block;overflow:auto}.sv-bands,.sv-week{overflow:visible}.sv-week{margin-top:14px;overflow-x:auto}.card.sv-card{padding:12px}}
+/* the Students step's status line: the list against the published timetable */
+.sv-status p{margin:0 0 6px}.sv-status .issue{cursor:default}.sv-status .row{margin-top:6px}
+.sv-differ{margin:4px 0 8px;padding-left:20px;font-size:13px}.sv-differ li{margin:2px 0}
