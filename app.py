@@ -784,11 +784,28 @@ def _follow_students(told):
     """bring the students a save named up to date on the published timetable: {"outcome": ...}, {"error": ...} when that
     failed (the save itself stands; only the exception's type is printed), or None when there is nothing to say"""
     if not told.get("students"): return None
-    try: out = students.follow(told["students"], by(), told.get("batch"))
+    try:
+        out = students.follow(told["students"], by(), told.get("batch"))
+        return {"outcome": out, "status": students.status()} if out is not None else None
     except Exception as e:
         print(f"students.follow failed: {type(e).__name__}", file=sys.stderr)
         return {"error": STUDENTS_NOT_UPDATED}
-    return {"outcome": out} if out is not None else None
+
+@app.get("/api/students/published")
+@need("committee")
+def students_published():
+    return jsonify(students.status())
+
+@app.post("/api/students/update")
+@need("committee")
+def students_update():
+    """bring the whole student list into step with the published timetable"""
+    try: out = students.update_all(by())
+    except Exception as e:    # nothing was swapped in: the published timetable is as it was
+        print(f"students.update_all failed: {type(e).__name__}", file=sys.stderr)
+        return {"error": "The published timetable could not be updated. Nothing was changed."}, 409
+    if out is None: return {"error": "No timetable is published yet."}, 409
+    return jsonify(outcome=out, status=students.status())
 
 @app.get("/api/setup/copies")
 @need("committee")

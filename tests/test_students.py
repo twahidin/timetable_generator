@@ -221,6 +221,62 @@ def history_has_its_own_line_and_put_back_follows():
     assert len(history.read(kinds=[students.KIND], limit=10 ** 6)) == n0 + 2   # the save's line and the put back's
     assert all(e["kind"] != students.KIND for e in putback.gather(setup["id"])[1])   # not part of the save's unit
 
+@t
+def the_status_when_all_agree():
+    fresh(); s = students.status()
+    assert (s["published"], s["students"], s["listed"], s["same"], s["differ"], s["can_update"]) == (True, 3, 3, 3, [], False)
+
+@t
+def the_status_names_each_kind():
+    fresh(); set_students([PEOPLE[0] | dict(groups=["GA2"]), PEOPLE[1] | dict(groups=["NOPE"]), dict(id="S004", name="Devi Nair", **{"class": CB}, groups=[])])
+    s = students.status()
+    assert [(d["id"], d["kind"], d["why"]) for d in s["differ"]] == [("S002", "left", "group NOPE is not on the published timetable"), ("S001", "waiting", "not updated yet"),
+                                                                    ("S004", "waiting", "not updated yet"), ("S003", "extra", "on the published timetable but not on this list")]
+    assert s["counts"] == dict(change=1, add=1, remove=1) and s["can_update"] is True and s["same"] == 0
+
+@t
+def update_all_brings_the_list_into_step():
+    fresh(); set_students([PEOPLE[0] | dict(groups=["GA2"]), PEOPLE[1] | dict(groups=["NOPE"]), dict(id="S004", name="Devi Nair", **{"class": CB}, groups=[])])
+    r = c.post("/api/students/update").get_json()
+    assert r["outcome"]["text"] == "Published timetable brought into step with the list: 1 changed, 1 added, 1 removed."
+    assert pub_student("S001")["groups"] == ["GA2"] and pub_student("S004") and pub_student("S003") is None and pub_student("S002")["groups"] == ["GA2"]   # S002 left as published
+    assert r["status"]["counts"] == dict(change=0, add=0, remove=0) and [d["kind"] for d in r["status"]["differ"]] == ["left"]
+    n = len(history.read(limit=50)); c.post("/api/students/update"); assert len(history.read(limit=50)) == n   # nothing to do: nothing written
+
+@t
+def the_routes_are_the_committees():
+    for url, post in (("/api/students/published", False), ("/api/students/update", True)):
+        r = (NOSE.post if post else NOSE.get)(url); assert r.status_code == 401, url
+    # a head, a teacher and a student are refused: tests/test_routes.py's walk covers them once GUARDS lists the endpoints
+
+@t
+def with_nothing_published():
+    shutil.rmtree(store.PUB, ignore_errors=True); store._cache.update(stamp=None, value=None)
+    assert students.status() == dict(published=False) and c.post("/api/students/update").status_code == 409
+
+@t
+def blank_rows_are_ignored_by_status_and_update_all():
+    fresh(); set_students(PEOPLE + [dict(_id="blankrow02")])
+    s = students.status(); assert s["listed"] == 3 and s["differ"] == [] and not s["can_update"]
+    assert c.post("/api/students/update").get_json()["outcome"]["text"] == "" and len(store.published()["model"]["students"]) == 3
+
+@t
+def a_row_with_no_class_says_so():
+    fresh(); set_students([PEOPLE[0] | {"class": ""}] + PEOPLE[1:])
+    assert [(d["id"], d["kind"], d["why"]) for d in students.status()["differ"]] == [("S001", "left", "no class")]
+
+@t
+def the_route_reply_carries_the_status():
+    fresh(); j = change(["merge", "students", row_id("S001"), "groups", ["GA2"], ["GA1"]])
+    assert j["students"]["status"]["published"] is True and j["students"]["status"]["files_behind"] is True and j["students"]["status"]["can_update"] is False
+
+@t
+def two_students_updated_or_left_in_one_save():
+    fresh(); j = change(["set", "students", row_id("S001"), "name", "Aisha R"], ["set", "students", row_id("S002"), "name", "Ben K"])
+    assert j["students"]["outcome"]["text"] == "Published timetable updated for 2 students."
+    fresh(); j = change(["merge", "students", row_id("S001"), "groups", ["NOPE"], []], ["merge", "students", row_id("S002"), "groups", ["NOPE2"], []])
+    assert j["students"]["outcome"]["text"] == "Published timetable not changed for 2 students: their groups or classes are not on it."
+
 if __name__ == "__main__":
     for f in TESTS: f()
     print(f"{len(TESTS)} checks passed")

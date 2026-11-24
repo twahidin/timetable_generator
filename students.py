@@ -22,6 +22,7 @@ def why_not(row, model, counts):
     if not k: return "no student ID or name"
     if counts.get(k, 0) > 1: return "this ID is on the list twice"
     cls = str(row.get("class") or "")
+    if not cls.strip(): return "no class"
     if cls not in model["class_ix"]: return f"class {cls} is not on the published timetable"
     have = {L["group"] for L in model["lessons"]}
     missing = [str(g) for g in row.get("groups") or [] if str(g) not in have]
@@ -60,6 +61,21 @@ def _setup_copy(setup, changed, rows_now):
     out["students"] = rows
     return out
 
+def _commit(model, new_students, updated, added, removed, rows_now):
+    """put a new model (the old one is not changed) in the published folder when any student was updated, added or removed:
+    its setup rows kept in step, the checks worked out again, one swap_model (the caller holds store._publishing)"""
+    if not (updated or added or removed): return
+    changed = {str(s["id"]).strip() for s in updated + added + removed}
+    new = dict(model); new["students"] = new_students
+    if isinstance(model.get("setup"), dict): new["setup"] = _setup_copy(model["setup"], changed, rows_now)
+    if isinstance(model.get("checked_setup"), dict):
+        new["checked_setup"] = new["setup"] if model["checked_setup"] is model.get("setup") else _setup_copy(model["checked_setup"], changed, rows_now)
+    checks = E.check_model(new)
+    if new.get("choice_problems"): checks["problems"] = list(checks["problems"]) + list(new["choice_problems"])
+    checks["ok"] = not checks["problems"]
+    new["checks"] = checks
+    store.swap_model(new, students=len(new["students"]), ok=checks["ok"], problems=checks["problems"][:20], students_at=store.now(), files_behind=True)
+
 def follow(pairs, by, batch=None):
     """bring the students these (before, after) rows name up to date on the published timetable, reading the setup as
     it is now; None when nothing is published"""
@@ -91,17 +107,7 @@ def follow(pairs, by, batch=None):
         if removed:
             out = {id(s) for s in removed}
             new_students = [s for s in new_students if id(s) not in out]
-        if updated or added or removed:
-            changed = {str(s["id"]).strip() for s in updated + added + removed}
-            new = dict(model); new["students"] = new_students
-            if isinstance(model.get("setup"), dict): new["setup"] = _setup_copy(model["setup"], changed, rows_now)
-            if isinstance(model.get("checked_setup"), dict):
-                new["checked_setup"] = new["setup"] if model["checked_setup"] is model.get("setup") else _setup_copy(model["checked_setup"], changed, rows_now)
-            checks = E.check_model(new)
-            if new.get("choice_problems"): checks["problems"] = list(checks["problems"]) + list(new["choice_problems"])
-            checks["ok"] = not checks["problems"]
-            new["checks"] = checks
-            store.swap_model(new, students=len(new["students"]), ok=checks["ok"], problems=checks["problems"][:20], students_at=store.now(), files_behind=True)
+        _commit(model, new_students, updated, added, removed, rows_now)
         both = updated + added
         text = _text(both, removed, left, held)
         if text:
@@ -109,3 +115,66 @@ def follow(pairs, by, batch=None):
             except Exception as e: store._warn(e)   # the update is made: a history failure never undoes it
         return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
                     left=left, held=held, text=text)
+
+def _compare(model, setup_rows):
+    """the setup's student rows set against the published model: (rows_now by key, keys in list order, counts, left, waiting, extra)
+    where left is [(key, row, why)], waiting [(key, row, record, published index or None)], extra [published index];
+    blank rows are ignored and a repeated ID counts once"""
+    rows = [r for r in setup_rows if isinstance(r, dict) and key(r)]
+    counts = collections.Counter(key(r) for r in rows)
+    rows_now = collections.defaultdict(list)
+    for r in rows: rows_now[key(r)].append(r)
+    at = {str(s["id"]).strip(): i for i, s in enumerate(model["students"])}
+    left, waiting = [], []
+    for k, rs in rows_now.items():
+        why = why_not(rs[0], model, counts)
+        if why: left.append((k, rs[0], why)); continue
+        rec = record(rs[0])
+        if k not in at or model["students"][at[k]] != rec: waiting.append((k, rs[0], rec, at.get(k)))
+    extra = [i for k, i in at.items() if k not in rows_now]
+    return rows_now, left, waiting, extra
+
+def _setup_students():
+    rec = store.setup_record()
+    return ((rec or {}).get("spec") or {}).get("students") or []
+
+def status():
+    """the whole list against the published timetable; writes nothing"""
+    with store._publishing:
+        pub = store.published()
+        setup_rows = _setup_students() if pub is not None else []
+    if pub is None: return dict(published=False)
+    model = pub["model"]
+    rows_now, left, waiting, extra = _compare(model, setup_rows)
+    differ = ([dict(id=k, name=str(r.get("name") or ""), why=w, kind="left") for k, r, w in left]
+              + [dict(id=k, name=str(r.get("name") or ""), why="not updated yet", kind="waiting") for k, r, rec, i in waiting]
+              + [dict(id=str(model["students"][i]["id"]), name=str(model["students"][i]["name"]), why="on the published timetable but not on this list", kind="extra") for i in extra])
+    counts = dict(change=sum(1 for w in waiting if w[3] is not None), add=sum(1 for w in waiting if w[3] is None), remove=len(extra))
+    return dict(published=True, at=pub["meta"].get("published_at"), students=len(model["students"]), listed=len(rows_now),
+                same=len(rows_now) - len(left) - len(waiting), differ=differ[:10], differ_n=len(differ), counts=counts,
+                can_update=any(counts.values()), files_behind=bool(pub["meta"].get("files_behind")))
+
+def update_all(by):
+    """bring the whole list into step with the published timetable: students who can follow are updated or added,
+    published students not on the list are removed, students who cannot follow are left; None when nothing is published"""
+    with store._publishing:
+        pub = store.published()
+        if pub is None: return None
+        model = pub["model"]
+        rows_now, left, waiting, extra = _compare(model, _setup_students())
+        new_students = list(model["students"])
+        updated, added = [], []
+        for k, r, rec, i in waiting:
+            if i is None: new_students.append(rec); added.append(rec)
+            else: new_students[i] = rec; updated.append(rec)
+        removed = [model["students"][i] for i in extra]
+        gone = {id(s) for s in removed}
+        new_students = [s for s in new_students if id(s) not in gone]
+        _commit(model, new_students, updated, added, removed, rows_now)
+        text = ""
+        if updated or added or removed:
+            text = f"Published timetable brought into step with the list: {len(updated)} changed, {len(added)} added, {len(removed)} removed."
+            try: history.add(dict(kind=KIND, text=text, where="Students", of=None, **by))
+            except Exception as e: store._warn(e)
+        return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
+                    left=[dict(id=k, name=str(r.get("name") or ""), why=w) for k, r, w in left], held=0, text=text)

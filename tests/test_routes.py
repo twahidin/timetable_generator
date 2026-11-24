@@ -1,6 +1,6 @@
 """Plain-assert tests: every route checks a right, for every kind of session (accounts stage 1).
 .venv/bin/python tests/test_routes.py"""
-import datetime, hashlib, html, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
+import contextlib, datetime, hashlib, html, io, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
@@ -118,7 +118,9 @@ def walk(rules):
             need = set(A.app.view_functions[rule.endpoint]._need)
             url = re.sub(r"<(?:[^:<>]+:)?[^<>]+>", "x", rule.rule)
             for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
-                r = c.open(url, method=method, json={})
+                if url == "/api/students/update":    # the walk's fake published model cannot be checked: the route logs that, and says so
+                    with contextlib.redirect_stderr(io.StringIO()): r = c.open(url, method=method, json={})
+                else: r = c.open(url, method=method, json={})
                 if have & need:
                     assert not by_guard(r), (kind, method, url, r.status_code, r.headers.get("Location"), r.get_data(as_text=True)[:200])
                     assert r.status_code != 500, (kind, method, url)
@@ -351,6 +353,8 @@ GUARDS = {
     "relief_tg.unlink": ('relief.save',),
     "restore_setup": ('committee',),
     "status": ('setup',),
+    "students_published": ('committee',),
+    "students_update": ('committee',),
     "timetable": ('timetable',),
 }
 
