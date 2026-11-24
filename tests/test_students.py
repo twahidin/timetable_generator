@@ -277,6 +277,37 @@ def two_students_updated_or_left_in_one_save():
     fresh(); j = change(["merge", "students", row_id("S001"), "groups", ["NOPE"], []], ["merge", "students", row_id("S002"), "groups", ["NOPE2"], []])
     assert j["students"]["outcome"]["text"] == "Published timetable not changed for 2 students: their groups or classes are not on it."
 
+@t
+def a_failing_status_does_not_hide_the_update():
+    fresh(); real, err = students.status, sys.stderr
+    def boom(): raise KeyError("x")
+    students.status = boom; sys.stderr = io.StringIO()
+    try: j = change(["merge", "students", row_id("S001"), "groups", ["GA2"], ["GA1"]]); said = sys.stderr.getvalue()
+    finally: students.status = real; sys.stderr = err
+    assert said == "students.status failed: KeyError\n" and list(j["students"]) == ["outcome"] and j["students"]["outcome"]["updated"] == ["S001"]
+    assert sorted(pub_student("S001")["groups"]) == ["GA2", "GB1"]
+
+@t
+def no_setup_is_not_an_empty_list():
+    fresh(); real = store.setup_record
+    store.setup_record = lambda *a, **k: dict(v=1, spec=None)
+    try:
+        s = students.status(); r = c.post("/api/students/update").get_json(); n = len(history.read(kinds=[students.KIND], limit=10 ** 6))
+    finally: store.setup_record = real
+    assert (s["published"], s["listed"], s["same"], s["differ"], s["differ_n"], s["counts"], s["can_update"], s["no_setup"]) == (True, 0, 0, [], 0, dict(change=0, add=0, remove=0), False, True)
+    assert r["outcome"]["text"] == "" and len(store.published()["model"]["students"]) == 3
+
+@t
+def an_empty_list_removes_everybody():
+    fresh(); set_students([]); assert students.status()["counts"]["remove"] == 3
+    c.post("/api/students/update"); assert store.published()["model"]["students"] == []
+
+@t
+def a_repeated_id_is_left_once():
+    fresh(); set_students(PEOPLE + [PEOPLE[0] | dict(name="Aisha Two")])
+    s = students.status(); assert [(d["id"], d["kind"], d["why"]) for d in s["differ"]] == [("S001", "left", "this ID is on the list twice")]
+    c.post("/api/students/update"); assert pub_student("S001")["name"] == "Aisha Rahman" and len(store.published()["model"]["students"]) == 3
+
 if __name__ == "__main__":
     for f in TESTS: f()
     print(f"{len(TESTS)} checks passed")

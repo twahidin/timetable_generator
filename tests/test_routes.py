@@ -1,6 +1,6 @@
 """Plain-assert tests: every route checks a right, for every kind of session (accounts stage 1).
 .venv/bin/python tests/test_routes.py"""
-import contextlib, datetime, hashlib, html, io, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
+import datetime, hashlib, html, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
@@ -118,9 +118,7 @@ def walk(rules):
             need = set(A.app.view_functions[rule.endpoint]._need)
             url = re.sub(r"<(?:[^:<>]+:)?[^<>]+>", "x", rule.rule)
             for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
-                if url == "/api/students/update":    # the walk's fake published model cannot be checked: the route logs that, and says so
-                    with contextlib.redirect_stderr(io.StringIO()): r = c.open(url, method=method, json={})
-                else: r = c.open(url, method=method, json={})
+                r = c.open(url, method=method, json={})
                 if have & need:
                     assert not by_guard(r), (kind, method, url, r.status_code, r.headers.get("Location"), r.get_data(as_text=True)[:200])
                     assert r.status_code != 500, (kind, method, url)
@@ -153,8 +151,11 @@ def every_route_has_a_guard_and_the_guard_decides():
     from ttgen import export as E
     real = E.render_html, E.student_view, E.pdf_bytes          # the walk is about the guards: no page is made from the fake school
     E.render_html, E.student_view, E.pdf_bytes = (lambda *a, **k: "a page"), (lambda *a, **k: {}), (lambda *a, **k: b"%PDF-")
+    import students
+    real_s = students.update_all, students.status          # nor can the fake school be compared with a list
+    students.update_all, students.status = (lambda *a, **k: dict(text="")), (lambda *a, **k: dict(published=True))
     try: walk(rules)
-    finally: E.render_html, E.student_view, E.pdf_bytes = real
+    finally: E.render_html, E.student_view, E.pdf_bytes = real; students.update_all, students.status = real_s
 
 # every guarded endpoint and the rights that open it, written out: a new or changed route must be listed here on purpose
 GUARDS = {

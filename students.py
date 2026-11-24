@@ -135,8 +135,12 @@ def _compare(model, setup_rows):
     return rows_now, left, waiting, extra
 
 def _setup_students():
-    rec = store.setup_record()
-    return ((rec or {}).get("spec") or {}).get("students") or []
+    """the setup's student rows, or None when no setup is saved at all (not the same as an empty list)"""
+    spec = (store.setup_record() or {}).get("spec")
+    return None if spec is None else spec.get("students") or []
+
+def _left(k, row, why):
+    return dict(id=k, name=str(row.get("name") or ""), why=why)
 
 def status():
     """the whole list against the published timetable; writes nothing"""
@@ -145,8 +149,11 @@ def status():
         setup_rows = _setup_students() if pub is not None else []
     if pub is None: return dict(published=False)
     model = pub["model"]
+    if setup_rows is None:
+        return dict(published=True, at=pub["meta"].get("published_at"), students=len(model["students"]), listed=0, same=0, differ=[], differ_n=0,
+                    counts=dict(change=0, add=0, remove=0), can_update=False, files_behind=bool(pub["meta"].get("files_behind")), no_setup=True)
     rows_now, left, waiting, extra = _compare(model, setup_rows)
-    differ = ([dict(id=k, name=str(r.get("name") or ""), why=w, kind="left") for k, r, w in left]
+    differ = ([dict(_left(k, r, w), kind="left") for k, r, w in left]
               + [dict(id=k, name=str(r.get("name") or ""), why="not updated yet", kind="waiting") for k, r, rec, i in waiting]
               + [dict(id=str(model["students"][i]["id"]), name=str(model["students"][i]["name"]), why="on the published timetable but not on this list", kind="extra") for i in extra])
     counts = dict(change=sum(1 for w in waiting if w[3] is not None), add=sum(1 for w in waiting if w[3] is None), remove=len(extra))
@@ -161,7 +168,9 @@ def update_all(by):
         pub = store.published()
         if pub is None: return None
         model = pub["model"]
-        rows_now, left, waiting, extra = _compare(model, _setup_students())
+        setup_rows = _setup_students()
+        if setup_rows is None: return dict(updated=[], added=[], removed=[], left=[], held=0, text="")   # no setup saved: nothing to compare with
+        rows_now, left, waiting, extra = _compare(model, setup_rows)
         new_students = list(model["students"])
         updated, added = [], []
         for k, r, rec, i in waiting:
@@ -174,7 +183,7 @@ def update_all(by):
         text = ""
         if updated or added or removed:
             text = f"Published timetable brought into step with the list: {len(updated)} changed, {len(added)} added, {len(removed)} removed."
-            try: history.add(dict(kind=KIND, text=text, where="Students", of=None, **by))
+            try: history.add(dict(kind=KIND, text=text, where="Students", of=None, **by))   # no "of": no save made this line
             except Exception as e: store._warn(e)
         return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
-                    left=[dict(id=k, name=str(r.get("name") or ""), why=w) for k, r, w in left], held=0, text=text)
+                    left=[_left(k, r, w) for k, r, w in left], held=0, text=text)
