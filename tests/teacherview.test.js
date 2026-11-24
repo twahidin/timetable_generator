@@ -129,6 +129,15 @@ t("two rows of the old name: the name changes and nothing follows", () => {
   assert.deepStrictEqual(s.lessons[0].teachers, ["New Teacher 3", null]); assert.strictEqual(s.rules[0].target, "New Teacher 3");
   assert.ok(!("earlier_names" in s.teachers[0]));                               // the other row still has the name
 });
+t("a short name that was the name follows it; any other short name stays", () => {
+  const s = rspec(); s.teachers[0].short = "New Teacher 3";
+  TeacherView.rename(s, 0, "Mdm Lee"); assert.strictEqual(s.teachers[0].short, "Mdm Lee");
+  TeacherView.rename(s, 1, "Mr Arjun"); assert.strictEqual(s.teachers[1].short, "Arjun");          // a short name of its own is left
+  const u = rspec(); delete u.teachers[0].short; TeacherView.rename(u, 0, "Mdm Lee"); assert.ok(!("short" in u.teachers[0]));
+  const v = rspec(); v.teachers[0].short = "New Teacher 3"; v.teachers.push({ _id: "d", name: "New Teacher 3", short: "New Teacher 3" });
+  TeacherView.rename(v, 0, "Mdm Lee"); assert.deepStrictEqual([v.teachers[0].short, v.teachers[3].short], ["Mdm Lee", "New Teacher 3"]);   // only the renamed row's
+  const w = rspec(); w.teachers[0].short = "New Teacher 3"; assert.strictEqual(TeacherView.rename(w, 0, "arjun nair").error, "Arjun Nair is already a teacher."); assert.strictEqual(w.teachers[0].short, "New Teacher 3");   // refused: nothing changes
+});
 t("settle puts earlier names right whatever wrote them", () => {
   const s = rspec();
   s.teachers[0].earlier_names = ["Old A", "Old A", "", null, 7, "Arjun Nair", "Shared"];

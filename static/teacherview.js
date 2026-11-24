@@ -153,6 +153,7 @@ var TeacherView = (function () {
       o.earlier_names = o.earlier_names.filter(function (n) { return n !== was; });
     });
     t.earlier_names = earlier;
+    if (t.short === was) t.short = now;                       // a short name that was the name follows it
     t.name = now;
     settle(spec);
     return r;
