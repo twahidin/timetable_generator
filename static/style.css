@@ -461,9 +461,10 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdpop>span:first-child{font-weight:600;font-size:14px}
 .bdpop .bdwhy{background:#fff4e0;border-radius:8px;padding:6px 8px;font-size:12.5px}
 .bdpop button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px;font-size:13px;cursor:pointer}
-.bdpop [data-bdcancel],.bdpop [data-bdclose]{margin-left:auto}
-.bdpop [data-bddel],.bdpop [data-bddelgo]{color:#b4233b;border-color:#f0c4cc}
-.bdpop [data-bdyes],.bdpop [data-bdswap]{background:#2563eb;border-color:#2563eb;color:#fff}
+.bdpop [data-bdcancel]{margin-left:auto}
+.bdpop [data-bdyes],.bdpop [data-bdswap]{background:#2563eb;border-color:#2563eb;color:#fff}   /* only Swap and Yes are filled: Put it beside and Put it here anyway keep the plain look */
+.bdpop .bdcl{flex:1 0 100%;font-size:12.5px}   /* one collision of the drop box, led by its kind */
+.bdpop .bdcl b{display:inline-block;min-width:62px;color:#b4233b}
 .bdgrip{flex:0 0 10px;align-self:stretch;margin:0 -4px;cursor:col-resize;border-radius:6px;position:relative;touch-action:none}
 .bdgrip:after{content:"";position:absolute;left:3px;top:50%;width:4px;height:44px;margin-top:-22px;border-radius:2px;background:#b8c4d4}
 .bdgrip:hover,.bdgrip.on{background:#e3eaf4}
@@ -490,7 +491,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.sel{outline:2px solid var(--accent);outline-offset:-1px;z-index:2}
 .bdcard.fade{opacity:.25}
 .bdcell.ok{background:#d6f1e0;cursor:pointer}.bdcell.prefer{background:#fff0c2;cursor:pointer}.bdcell.no{background:#fbdcdc;cursor:not-allowed}.bdcell.na{background:#eceef2}
-.bdcell.ask{background:#dcebfa;cursor:pointer}   /* another lesson is there and a drop asks: swap, put it beside or push it out */
+.bdcell.ask{background:#dcebfa;cursor:pointer}   /* another lesson is there and a drop asks: swap, put it beside or put it here anyway */
 .bdcell.own{box-shadow:inset 0 0 0 2px var(--accent)}
 .bdcell.over{box-shadow:inset 0 0 0 3px var(--navy)}
 .bdrow.dim{opacity:.4}
@@ -529,17 +530,19 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 #bdSide.lift{outline:2px dashed var(--navy);outline-offset:-2px}#bdSide.lift .bdtdrop{display:block}
 .bdnone{flex:1 1 auto;margin:0}
 .bdlw{flex:0 0 100%;font-size:12px}.bdlw.crit{color:#8a1c1c}
-/* the Lesson tab: inside the panel's own scrolling body, so nothing it shows moves the rows */
-.bdles .bdlname{margin:0 0 4px}.bdles .bdlws{margin:0 0 6px}.bdles .bdlw{display:block;margin:0 0 2px}
-.bdlblk{border-top:1px solid var(--line);padding:4px 0 6px}
-.bdlhead{display:block;width:100%;text-align:left;font-size:12px;padding:2px 4px;margin:0}
+/* the page's lists (Teacher, Room): inside the panel's own scrolling body, so nothing it shows moves the rows */
+.akabout .aklists{border-top:1px solid var(--line);padding:4px 0 6px}
 .bdlh{margin:6px 0 2px;font-weight:600}
 .bdll{display:block;margin:0 0 4px}.bdll span{display:block}
 .bdll select{display:block;width:100%;max-width:100%;box-sizing:border-box;font-size:12px}
 .bdlnote{margin:0 0 4px}
 .bdlall{display:flex;gap:4px;align-items:center}
-/* the Ask tab: what it is about, a band's groups as chips, the starters (wrapping buttons), then each question asked and its options */
+/* the page (the Lesson or Empty period tab): what it is about, Lift out and Delete this lesson (or the delete question), a band's groups as chips, the starters (wrapping buttons), then each question asked and its options */
 .akabout .aktitle{margin:0 0 4px}.akabout .bdlws{margin:0 0 6px}.akabout .bdlw{display:block;margin:0 0 2px}
+.akdo{margin:0 0 6px;gap:6px}
+.akdo [data-bddel],.akdel [data-bddelgo]{color:#b4233b;border-color:#f0c4cc}
+.akdel{display:block;margin:0 0 6px;padding:8px;border:1px solid #f0c4cc;border-radius:8px}.akdel>span{display:block;margin:0 0 4px}.akdel>span:first-child{font-weight:600}
+.akdel .bdwhy{background:#fff4e0;border-radius:8px;padding:6px 8px;font-size:12.5px}.akdel .akdo{margin:0}
 .akchips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
 .akchip{padding:2px 8px;font-size:12px;border-radius:12px}.akchip.on{background:#eef3fb;border-color:var(--accent);font-weight:600}
 .akstart{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}.akstart button{padding:3px 8px;font-size:12px;text-align:left;white-space:normal}
@@ -548,7 +551,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .akopt .row{flex-wrap:wrap}.akopt .fxpre{margin-top:6px}   /* Show on the board, Preview and Apply wrap in the narrow panel; Before you apply under the option */
 .akentry.stale .akold{text-decoration:line-through;opacity:.6}   /* an answer for a timetable that has changed since */
 .akentry h4 .akagain{padding:2px 8px;font-size:12px;font-weight:600;text-align:left;white-space:normal}   /* a stale entry's heading: asks it again */
-.bdcell.psel{outline:2px solid var(--accent);outline-offset:-2px}   /* the empty period selected, for the line's Ask */
+.bdcell.psel{outline:2px solid var(--accent);outline-offset:-2px}   /* the empty period selected, for the Empty period page */
 @keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
 .bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
 #bdFoot{margin-top:12px}

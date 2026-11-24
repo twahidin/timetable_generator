@@ -217,17 +217,17 @@ var Board = (function () {
   /* what a drop on a place with another lesson offers this card (a lesson from the tray is never swapped), or null */
   function offers(card, s) {
     var a = asks(s); if (!a) return null;
-    return { swap: a.swap && !inTray(card), push: a.push, beside: a.beside };
+    return { swap: a.swap && !inTray(card), beside: a.beside, anyway: a.anyway };
   }
 
   /* the colour of each period of day d for the card: its slot's state, but "ask" where another lesson is and a drop there
-     offers a swap, a place beside or a push, and "na" where another lesson is and nothing can be done */
+     offers a swap, a place beside or putting it there anyway, and "na" where another lesson is and nothing can be done */
   function states(card, slots, d, NP) {
     var out = [], p, s, o;
     for (p = 0; p < NP; p++) {
       s = slot(card, slots, d, p); o = s && s.state !== "own" ? offers(card, s) : null;
       if (s && s.state !== "own" && Array.isArray(s.there) && s.there.length) { out.push("ask"); continue; }
-      out.push(o ? (o.swap || o.push || o.beside ? "ask" : "na") : s && s.state ? s.state : "");
+      out.push(o ? (o.swap || o.beside || o.anyway ? "ask" : "na") : s && s.state ? s.state : "");
     }
     return out;
   }
@@ -248,7 +248,7 @@ var Board = (function () {
     return t || slot(card, slots, d, p);
   }
 
-  /* a place a lesson can be put down on with nothing in the way to push out, even one that will clash (judged "no") */
+  /* a place a lesson can be put down on with no other lesson of its classes there, even one that will clash (judged "no") */
   function lands(s) {
     return !!s && !s.push && (s.state === "ok" || s.state === "prefer" || s.state === "no");
   }
@@ -258,18 +258,19 @@ var Board = (function () {
 
   function fits(j) { return !!j && (j.state === "ok" || j.state === "prefer"); }
 
-  /* what a drop on a place with another lesson asks: swap (the one lesson, allowed and clean or bending), push out, and
-     put it beside (the plain move or place, the other lessons left there, clean or bending; a slot from an older server
-     has no beside) */
+  /* what a drop on a place with another lesson asks: swap (the one lesson, allowed and clean or bending), put it beside
+     (the plain move or place, the other lessons left there, clean or bending; a slot from an older server has no beside),
+     and put it here anyway (that plain move or place collides, or breaks a rule: it is forced) */
   function asks(s) {
     if (!s || !s.push) return null;
-    return { swap: s.swap !== null && s.swap !== undefined && fits(s), push: s.push.state !== "na", beside: fits(s.beside) };
+    return { swap: s.swap !== null && s.swap !== undefined && fits(s), beside: fits(s.beside), anyway: !!s.beside && s.beside.state === "no" };
   }
 
   /* a forced change carries the sentence the page showed for the place, so the server keeps it only for that same reason */
   function force(out, why) { out.force = true; out.why = why || ""; return out; }
 
-  /* the fix a drop sends. how is "move" (default), "swap", "push" or "beside" (the plain move or place, never forced);
+  /* the fix a drop sends. how is "move" (default), "swap", "beside" (the plain move or place, never forced) or "anyway"
+     (the plain move or place, forced with the sentence of the place beside);
      with no how, a slot with a swap gives the swap, as before this stage. A lesson from the tray is placed, never swapped. */
   function fix(card, s, how) {
     var tray = card.d === null || card.d === undefined;
@@ -277,21 +278,15 @@ var Board = (function () {
     if (how === "swap" && !tray) return { kind: "swap", a: card.id, b: s.swap };
     var out = { kind: tray ? "place" : "move", id: card.id, d: s.d, p: s.p };
     if (how === "beside") return out;
-    if (how === "push") {
-      out.push = true;
-      if (s.push && s.push.state === "no") force(out, s.push.why);
-    } else if (forced(s)) force(out, s.why);
+    if (how === "anyway") return force(out, s.beside && s.beside.why);
+    if (forced(s)) force(out, s.why);
     return out;
   }
 
   /* the fix that puts a lesson the plan wants more of onto the board */
-  function addFix(short, s, how) {
+  function addFix(short, s) {
     var out = { kind: "add", key: short.key, d: s.d, p: s.p, n: short.n };
-    if (how === "push") {
-      out.push = true;
-      if (s.push && s.push.state === "no") force(out, s.push.why);
-    } else if (forced(s)) force(out, s.why);
-    return out;
+    return forced(s) ? force(out, s.why) : out;
   }
 
   /* the delete of a lesson as the page posts it: forced, with the judgement's sentence, when the judgement is "no" */
@@ -302,35 +297,28 @@ var Board = (function () {
 
   function liftFix(card) { return { kind: "lift", id: card.id }; }
 
-  function pushWords(out) {
-    var names = out.map(function (o) { return o.what; });
-    return names.length >= 3 ? "Push out " + names.length + " lessons" : "Push out " + names.join(" and ");
-  }
+  /* the words that lead a collision's line in the drop box, by its kind */
+  var CLASH = { teacher: "Teacher", class: "Class", students: "Students", room: "Room" };
 
-  /* names in a sentence: "a", "a and b", "a, b and c" */
-  function list(xs) { return xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]; }
-
-  /* what the page asks when a lesson is dropped where another lesson is */
+  /* what the page asks when a lesson is dropped where another lesson is: every collision of the plain move or place there
+     (the first 8, and how many more), or why it cannot simply go there, and the buttons */
   function question(card, s, board) {
-    var a = asks(s) || { swap: false, push: false }, out = s.push ? s.push.out || [] : [], mine = card.classes || [];
-    var text = card.what + " on " + board.days[s.d] + " period " + s.p + ": another lesson is there.";
-    var swap = null, push = null, beside = null, also = [];
+    var a = asks(s) || { swap: false, beside: false, anyway: false }, out = s.push ? s.push.out || [] : [];
+    var all = s.clashes || [], lines = all.slice(0, 8).map(function (c) { return { kind: CLASH[c.kind] || "", text: c.text }; });
+    var at = card.what + " on " + board.days[s.d] + " period " + s.p;
+    var text = lines.length ? at + " collides with:" : at + ": another lesson is there.";
+    var na = !!s.beside && s.beside.state === "na";   // not lesson time there: its sentence says why nothing but Cancel is offered, lines or not
+    var why = na ? s.beside.why || "" : lines.length ? "" : a.beside ? "Nothing collides." : (s.beside && s.beside.why) || "";
+    var swap = null, beside = null, also = [];
     if (a.swap) {
       var other = null;
       out.forEach(function (o) { if (other === null && o.id === s.swap) other = o; });
       swap = other ? "Swap with " + other.what : "Swap";
       also = (s.also || []).slice();
     }
-    if (a.push && out.length) {
-      push = pushWords(out);
-      out.forEach(function (o) {   // a band pushed out leaves other classes too: say which
-        var more = (o.classes || []).filter(function (c) { return mine.indexOf(c) < 0; });
-        if (more.length) also.push("This also takes it off " + list(more) + ".");
-      });
-      if (s.push.state === "no") also.push("It will still land with a problem: " + s.push.why);
-    }
     if (a.beside && out.length) beside = out.length > 1 ? "Put it beside them" : "Put it beside " + out[0].what;
-    return { text: text, also: also, swap: swap, push: push, beside: beside };
+    return { text: text, lines: lines, more: all.length - lines.length, why: why, also: also, swap: swap, beside: beside,
+             anyway: a.anyway ? "Put it here anyway" : null };
   }
 
   /* with the board, the "No class" row (cls "") also takes a card none of whose classes is in a level */
@@ -345,11 +333,7 @@ var Board = (function () {
     if (s.state === "own") return "This is where the lesson is now.";
     var tray = !!card && (card.d === null || card.d === undefined), go = tray ? "Place on " : "Move to ";
     var day = days[s.d], p = s.p, has = !tray && s.swap !== null && s.swap !== undefined;
-    if (s.push) {   // another lesson is there: what a drop offers, in this order
-      var o = offers(card, s), can = [o.swap ? "swap" : "", o.beside ? "put it beside" : "", o.push ? "push it out" : ""].filter(Boolean);
-      if (!can.length) return ("Another lesson is there and it cannot be moved out: " + (s.push.why || s.why || "")).trim();
-      return "Another lesson is there. Drop to " + (can.length < 2 ? can[0] : can.slice(0, -1).join(", ") + " or " + can[can.length - 1]) + ".";
-    }
+    if (s.push) return "Another lesson is there. Drop or click to see what can be done.";   // the drop box says the rest
     var text = has ? "Swap with the lesson on " + day + " period " + p + "."
       : s.state === "no" && s.why ? go + day + " period " + p + ". It lands with a problem: " + s.why
       : go + day + " period " + p + ".";
@@ -593,7 +577,7 @@ var Board = (function () {
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
-           lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
+           lands: lands, forced: forced, asks: asks, CLASH: CLASH, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
            teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet };
 })();

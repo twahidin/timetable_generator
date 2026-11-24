@@ -1,4 +1,4 @@
-/* The Ask tab: what a click on a lesson or an empty place asks the server, and what to show and send for each answer. Plain
+/* The page beside the board (step 8): what a click on a lesson or an empty place asks the server, and what to show and send for each answer. Plain
    functions, no page access, so they run under Node (tests/ask.test.js). Board is a page global, or board.js under Node. */
 var Ask = (function () {
   "use strict";
@@ -65,6 +65,12 @@ var Ask = (function () {
 
   /* the words and the style class for an option's state */
   function verdict(option) {
+    var f = option.fixes && option.fixes[0];
+    if (f && f.kind === "trade") {   /* a trade reads as a direct swap of two teachers' classes, or not */
+      if (option.state === "ok") return { text: "Direct swap", cls: "ok" };
+      if (option.state === "prefer") return { text: "Direct swap, bends a rule", cls: "prefer" };
+      return { text: "Not a direct swap", cls: "no" };
+    }
     if (option.state === "ok") return { text: "Clean", cls: "ok" };
     if (option.state === "prefer") return { text: "Bends a rule", cls: "prefer" };
     return { text: "Lands with a problem", cls: "no" };
@@ -95,7 +101,25 @@ var Ask = (function () {
     return f.kind === "swap" ? f.a : null;
   }
 
+  /* the side panel's tab for what the page is about */
+  function tabLabel(sub) { return sub.kind === "place" ? "Empty period" : "Lesson"; }
+
+  /* what the page about sub holds: Lift out (a lesson on the timetable), Delete this lesson and the lists (a lesson), and the group the
+     lists are for (the one chosen, else the first row's); a place, a lesson gone (card null) or an entry of step 5's list holds none */
+  function parts(sub, card) {
+    if (sub.kind === "place" || !card || card.entry) return { lift: false, del: false, lists: false, group: null };
+    var rows = card.rows || [], g = sub.group !== null && sub.group !== undefined ? sub.group : rows.length ? rows[0].group : null;
+    return { lift: onTimetable(card), del: true, lists: true, group: g === undefined ? null : g };
+  }
+
+  /* the line under a lesson's name: its day and period (and time), or "Not placed" (and where it was); a band's number of groups */
+  function where(card, day, time, was) {
+    var n = (card.rows || []).length, grp = card.band ? " · " + n + " group" + (n === 1 ? "" : "s") : "";
+    if (!onTimetable(card)) return "Not placed" + (was ? " (" + was + ")" : "") + grp;
+    return day + " period " + card.p + (time ? " (" + time + ")" : "") + grp;
+  }
+
   return { ofCard: ofCard, ofPlace: ofPlace, pointable: pointable, empty: empty, groups: groups, starters: starters, query: query, verdict: verdict,
-           send: send, stale: stale, target: target };
+           send: send, stale: stale, target: target, tabLabel: tabLabel, parts: parts, where: where };
 })();
 if (typeof module !== "undefined") module.exports = Ask;

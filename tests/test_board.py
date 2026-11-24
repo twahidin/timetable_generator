@@ -588,10 +588,11 @@ def test_the_place_route_and_the_slots_route_agree_with_the_draft():
     fresh(); s = draft.slots(PLAIN_ID)["slots"]; x = next(x for x in s if x["there"]); d, p = x["d"], x["p"]
     assert x["there"][0]["id"] == OTHER_ID and (d, p) == O0 and x["swap"] == OTHER_ID
     r = c.get(f"/api/draft/place?id={PLAIN_ID}&d={d}&p={p}"); j = r.get_json()
-    assert r.status_code == 200 and j == draft.place(PLAIN_ID, d, p) and set(j) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} and j["push"]["out"] == x["there"] and j["beside"]["state"] in ("ok", "prefer", "no", "na")
+    assert r.status_code == 200 and j == draft.place(PLAIN_ID, d, p) and set(j) == {"d", "p", "state", "why", "swap", "also", "push", "beside", "clashes"} and j["push"]["out"] == x["there"] and j["beside"]["state"] in ("ok", "prefer", "no", "na")
     assert {k: j[k] for k in x if k != "there"} == {k: x[k] for k in x if k != "there"}
+    assert isinstance(j["clashes"], list) and all(isinstance(y, dict) and set(y) == {"kind", "text"} for y in j["clashes"])   # every collision there, with the other lessons left there
     free = next(y for y in s if y["there"] is None); j = c.get(f"/api/draft/place?id={PLAIN_ID}&d={free['d']}&p={free['p']}").get_json()
-    assert j["push"] is None and j["beside"] is None and j["state"] == free["state"]
+    assert j["push"] is None and j["beside"] is None and j["clashes"] is None and j["state"] == free["state"]
     say = lambda url, code, text: (lambda r: r.status_code == code and r.get_json() == {"error": text})(c.get(url))
     assert say("/api/draft/place", 400, "Say which lesson.") and say(f"/api/draft/place?d=0&p=0", 400, "Say which lesson.")
     for q in ("", "&d=0", "&p=0", "&d=x&p=0", "&d=0&p=1.5", "&d=&p=", "&d=0&p="): assert say(f"/api/draft/place?id={PLAIN_ID}{q}", 400, "Say which place."), q

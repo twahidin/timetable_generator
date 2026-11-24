@@ -4215,7 +4215,7 @@ async function bdLoad() {   // the board again for the draft the page has; with 
   const gen = ++BD.gen, up = S.draft.upload_id || null, air = b.drag !== null || !!b.wait, other = b.up !== undefined && b.up !== up;   // up: the upload the board is for (undefined: none yet)
   b.sig = bdSig(S.draft); b.up = up;
   if (b.ask || b.del) toast("The timetable changed. Ask again.");
-  if (other) { b.sel = null; b.note = ""; b.about = null; b.place = null; if (air) b.lost = true; }   // lesson ids restart with each upload: the old id may now be another lesson (the Ask tab's too)
+  if (other) { b.sel = null; b.note = ""; b.about = null; b.place = null; if (air) b.lost = true; }   // lesson ids restart with each upload: the old id may now be another lesson (the open page's too)
   b.slots = null; b.slotsFor = null; b.asking = null; b.ask = null; b.del = null; b.failFor = null; b.hv = "";   // the slots belong to the draft they were asked on; their colours go at once
   if (air) { b.changed = true; b.pt = b.lost ? BDWHY.gone : BDWHY.changed; bdOver(null); } else { b.drag = null; b.pt = ""; }
   bdPaint(); if (air) { bdLineDraw(); bdWant(); }   // in the air: the dragged card's slots for the new draft are fetched at once
@@ -4227,11 +4227,12 @@ async function bdLoad() {   // the board again for the draft the page has; with 
   if (b.drag !== null || b.wait) { b.next = got; return; }   // a redraw would end the drag: drawn when it ends
   bdTake(got); bdDraw(); bdWant(); bdReveal();
   if (b.show && b.data) bdShowWarning(b.show.key, b.show.stay);   // step 9's Show on step 8, waiting for the board
+  if (b.sel !== null && !b.about && !bdEntry(b.sel)) { const c = bdCard(b.sel); if (c && !c.entry) akOpen(Ask.ofCard(c, null), false); }   // step 9's Show on step 8 on a lesson not placed (bdShowTray before the board was in): its page is there to open, the panel keeps its tab
 }
 function bdShowTray(id) {   // step 9's "Show on step 8" on a lesson not placed: it is selected in the tray and the board scrolled into view, once the board is in
   const b = S.board; if (!b) return;
   b.sel = id; b.ask = null; b.del = null; b.note = ""; b.step = null; b.place = null; b.reveal = true; b.side = "tray";
-  if (b.data && !b.loading) { if (!bdCard(id)) b.sel = null; else bdLessonOpen(id, false); bdDraw(); bdWant(); bdReveal(); }   // the tray stays shown; the Lesson tab is there to open
+  if (b.data && !b.loading) { const c = bdCard(id); if (!c) b.sel = null; else akOpen(Ask.ofCard(c, null), false); bdDraw(); bdWant(); bdReveal(); }   // the tray stays shown; the lesson's page is there to open
 }
 function bdReveal() {
   const b = S.board; if (!b || !b.reveal || !b.data) return;
@@ -4250,7 +4251,7 @@ function bdTake(j) {   // a fetched board becomes the one shown (j.fail: it coul
   if (b.sel !== null && !bdCard(b.sel)) b.sel = null;
   if (b.place && !Ask.empty(j, b.place)) b.place = null;   // a lesson came into the empty period selected
   if (!Board.finds(j).some(o => o.value === b.find)) b.find = "";
-  if (bdLessonOn(b)) bdLessonFetch();   // a change (this page's or a colleague's): the selected lesson's choices again
+  if (b.about && b.about.les && bdCard(b.about.les.id)) bdLessonFetch();   // a change (this page's or a colleague's): the page's lesson's choices again
 }
 function bdNext() {   // a drag has ended: the board that came during it is drawn, or the draft's lists and marks that changed during it
   const b = S.board; if (!b) return false;
@@ -4283,7 +4284,7 @@ function bdPieces(row, d, b, hit, warned) {   // warned: the open warnings by le
   });
   return st.join("");
 }
-function bdTrayHTML(b, hit) {   // the Not placed tray beside the rows: the lessons lifted or pushed out, a group per first class, each saying where it was
+function bdTrayHTML(b, hit) {   // the Not placed tray beside the rows: the lessons lifted out or not placed, a group per first class, each saying where it was
   const d = b.data, gs = Board.tray(d);
   const body = gs.length ? gs.map(g => `<div class="bdtgrp"><b>${esc(g.cls || "No class")}</b>${g.cards.map(c => {
     const ln = Board.lines(c, d), was = bdWas(d, c), pal = bdPal(d, ln);
@@ -4334,13 +4335,12 @@ function bdHTML() {   // the timetable card: the board with its side panel, the 
     + `<div class="bdgrip" id="bdGrip" role="separator" aria-orientation="vertical" aria-label="Drag to make the side panel wider or narrower" title="Drag to make the side panel wider or narrower. Double-click: back to its usual width."></div>${bdSideHTML(b, hit, parts)}</div>`
     + `<div class="bdpop" id="bdPop" role="dialog" aria-live="polite" hidden></div>` + tail;
 }
-/* the side panel beside the board (under it on a narrow window): three tabs, and a fourth, Lesson, while a lesson is selected by a click
-   (bdLessonOpen), and Ask while it is about something (akOpen), four or five tabs on two rows; the one chosen kept while step 8 is open; with none chosen,
+/* the side panel beside the board (under it on a narrow window): three tabs, and a fourth while the board is about something (akOpen):
+   Lesson or Empty period, the page about what was last pointed at; the one chosen kept while step 8 is open; with none chosen,
    Not placed while lessons wait, else Warnings. It is as tall as the board and scrolls inside itself, so the rows never move. The whole
    panel takes a card dragged from the board as a lift, whatever tab is showing. */
 function bdSideTab(b) {
-  bdLessonSync(b);
-  if (b.side === "ask" && !b.about) b.side = null;   // Ask only while it is about something
+  if (b.side === "ask" && !b.about) b.side = null;   // the page only while it is about something
   if (b.side) return b.side;
   const n = b.data ? (b.data.unplaced || []).length : (S.draft && S.draft.unplaced) || 0;
   return n ? "tray" : "warn";
@@ -4348,9 +4348,9 @@ function bdSideTab(b) {
 function bdSideHTML(b, hit, parts) {
   const d = b.data, j = S.draft, tab = bdSideTab(b), ws = (j && j.warnings) || [];
   const nU = d ? (d.unplaced || []).length : (j && j.unplaced) || 0, nW = j ? (j.open ?? Draft.counts(ws).open) : 0, nC = j ? Draft.batches(j.fixes || []).length : 0;   // the entries the list shows (fixes made together are one)
-  const all = [["tray", "Not placed", nU], ["warn", "Warnings", nW], ["changes", "Changes", nC]].concat(b.lesson ? [["lesson", "Lesson", null]] : [], b.about ? [["ask", "Ask", null]] : []);   // Lesson only while its lesson is selected (bdSideTab); Ask while it is about something
+  const all = [["tray", "Not placed", nU], ["warn", "Warnings", nW], ["changes", "Changes", nC]].concat(b.about ? [["ask", Ask.tabLabel(b.about.sub), null]] : []);   // the page while it is about something
   const tabs = all.map(([k, l, n]) => `<button role="tab" class="bdstab${k === tab ? " on" : ""}" data-bdside="${k}" aria-selected="${k === tab}">${esc(l)}${n === null ? "" : ` ${n}`}</button>`).join("");
-  const body = tab === "lesson" ? bdLessonHTML(b) : tab === "ask" ? akHTML(b) : tab === "tray" ? (d ? bdTrayHTML(b, hit) : `<p class="muted small">Loading the timetable…</p>`) : tab === "warn" ? parts.warns : parts.changes;
+  const body = tab === "ask" ? akHTML(b) : tab === "tray" ? (d ? bdTrayHTML(b, hit) : `<p class="muted small">Loading the timetable…</p>`) : tab === "warn" ? parts.warns : parts.changes;
   const w = bdSideW();
   return `<div id="bdSide" data-tab="${tab}"${all.length > 3 ? ` class="two"` : ""}${w ? ` style="width:${w}px;flex-basis:${w}px"` : ""}><div class="bdstabs" role="tablist">${tabs}</div><p class="bdtdrop">Drop here to lift it out.</p><div class="bdsbody">${body}</div></div>`;
 }
@@ -4361,26 +4361,9 @@ function bdSideDraw() {   // the panel alone (a tab chosen, the draft's lists ch
   if (BD.dragEl && el.contains(BD.dragEl)) { b.redraw = true; return; }   // a card of the tray is in the air: drawn when it lands
   const at = bdSideAt(); fxKeep(() => { el.outerHTML = bdSideHTML(b, bdHitSet(b), bdParts()); bdSideBack(at); }); bdPaint();
 }
-/* the Lesson tab: the selected lesson's teachers and room chosen from lists, with "None"; a band has a block per group. b.lesson = {id, back
-   (the tab open before it, shown again when the selection closes), order (its groups, the row it was clicked on first in the Teachers or
-   Rooms rows), open (the blocks shown open: the first three), got (by group: GET /api/draft/lesson's answer, "loading" or "fail"), all (by
-   group: "all this group's lessons" ticked, for the next room choice), n (the fetch round: an answer of an older round is dropped)} */
-const bdLessonOn = b => !!(b && b.lesson && b.sel === b.lesson.id && bdCard(b.lesson.id));
-function bdLessonSync(b) {   // the tab goes with its lesson: once that lesson is not selected (closed, another selected, gone) the tab open before it is shown again
-  if (!b.lesson || bdLessonOn(b)) return;
-  if (b.side === "lesson") b.side = b.lesson.back;
-  b.lesson = null;
-}
-function bdLessonOpen(id, show) {   // a click, a counter's step or Show me selected lesson id: its tab, shown unless show is false; a step 5 entry has none
-  const b = S.board, c = bdCard(id); if (!b || !c || c.entry) return;
-  const back = b.lesson && b.side === "lesson" ? b.lesson.back : b.side, f = b.from, by = bdBy(), rows = c.rows || [];
-  const first = by !== "class" && f && f.id === c.id && f.by === by ? Board.of(c, f) : [];
-  const order = first.concat(rows.filter(r => !first.includes(r))).map(r => r.group);
-  b.lesson = { id, back, order, open: {}, got: {}, all: {}, n: 0 };
-  order.slice(0, 3).forEach(g => { b.lesson.open[g] = true; });
-  if (show) b.side = "lesson";
-  bdLessonFetch();
-}
+/* the page's lists (S.board.about.les): the lesson's teachers and room chosen from lists, with "None", for one group at a time (a band's chip
+   chooses it). les = {id, group, got (GET /api/draft/lesson's answer, "loading" or "fail"), all (by group: "all this group's lessons"
+   ticked, for the next room choice), n (the fetch round: an answer of an older round is dropped)} */
 async function bdQuiet(url) {   // a GET whose failure the page says itself: the answer, or null
   try {
     const r = await fetch(url), j = await r.json().catch(() => null);
@@ -4388,30 +4371,15 @@ async function bdQuiet(url) {   // a GET whose failure the page says itself: the
     return r.ok ? j : null;
   } catch (e) { return null; }
 }
-function bdLessonFetch(one) {   // the open blocks' choices, a new round (one: that group alone, in this round, when its block is opened)
-  const b = S.board, L = b && b.lesson; if (!L) return;
-  if (!one) { L.n++; L.got = {}; }
-  const n = L.n;
-  (one ? [one] : L.order.filter(g => L.open[g])).forEach(g => {
-    L.got[g] = "loading";
-    bdQuiet(`/api/draft/lesson?id=${encodeURIComponent(L.id)}&group=${encodeURIComponent(g)}`).then(j => {
-      if (S.board !== b || b.lesson !== L || L.n !== n || !bdLessonOn(b)) return;   // another lesson, another round, or the selection closed
-      L.got[g] = j && Array.isArray(j.teachers) && Array.isArray(j.rooms) ? j : "fail"; bdSideDraw();
-    });
+function bdLessonFetch() {   // the chosen group's choices, a new round; an answer of an older round, of another lesson or group, or for a page moved on is dropped
+  const b = S.board, A = b && b.about, L = A && A.les; if (!L) return;
+  const n = ++L.n, g = L.group;
+  if (g === null || g === undefined) { L.got = "fail"; return; }
+  L.got = "loading";
+  bdQuiet(`/api/draft/lesson?id=${encodeURIComponent(L.id)}&group=${encodeURIComponent(g)}`).then(j => {
+    if (S.board !== b || b.about !== A || A.les !== L || L.n !== n || A.card !== L.id || !bdCard(L.id)) return;
+    L.got = j && Array.isArray(j.teachers) && Array.isArray(j.rooms) ? j : "fail"; bdSideDraw();
   });
-}
-function bdLessonHTML(b) {
-  const L = b.lesson, c = bdCard(L.id), d = b.data, rows = c.rows || [], band = !!c.band || rows.length > 1;
-  const was = bdInTray(c) ? bdWas(d, c) : "", where = bdInTray(c) ? `Not placed${was ? ` (${was})` : ""}` : `${(d.days || [])[c.d] || ""} period ${c.p}`;
-  const ws = bdLineWarnings(c, Infinity), blocks = L.order.map(g => { const r = rows.find(x => x.group === g); return r ? bdLessonBlock(L, r, band) : ""; }).join("");
-  return `<div class="bdles"><p class="bdlname"><b>${esc(c.what)}</b><br><span class="muted">${esc(where)}</span></p>${ws ? `<div class="bdlws">${ws}</div>` : ""}${blocks}</div>`;
-}
-function bdLessonBlock(L, r, band) {   // one group's lists (a plain lesson's one block has no heading); a band's closed block is its heading alone
-  const g = r.group, open = !!L.open[g], j = L.got[g];
-  const head = band ? `<button class="bdlhead" data-bdlopen="${esc(g)}" aria-expanded="${open}">${open ? "▾" : "▸"} ${esc(g)} · ${esc(r.subject || "")}</button>` : "";
-  if (band && !open) return `<div class="bdlblk">${head}</div>`;
-  const body = j === "fail" ? `<p class="bdwhy">${esc(BDWHY.lessonFailed)}</p>` : j && typeof j === "object" ? bdLessonLists(L, r, j) : `<p class="muted">Loading…</p>`;
-  return `<div class="bdlblk">${head}${body}</div>`;
 }
 function bdLessonLists(L, r, j) {   // a list a teacher, one more to add a teacher, the count a change of teacher touches; the room's list and its tick box
   const g = esc(r.group), ts = r.teachers || [], p = Board.people(j), v = Board.venues(j), dis = FX.busy ? " disabled" : "";
@@ -4454,7 +4422,7 @@ function bdLessonRoom(c, r, j, v, all) {   // the room list's choice ("None" ask
   }
   bdLessonPost(c, fix, "");
 }
-/* a choice of the Lesson tab is posted; who: the busy teacher or room the person said yes to. The server then refuses with its own sentence
+/* a choice of the page's lists is posted; who: the busy teacher or room the person said yes to. The server then refuses with its own sentence
    (it knows the reason): when that names who as busy, the fix goes again forced with that sentence, without asking twice; any other
    refusal is said, and the list goes back (the board is fetched again). A room for all the group's lessons is never forced: refused because
    the room is in use, it was at another of the group's lessons (this one's was free), and the page says so. The lesson stays selected and
@@ -4467,7 +4435,7 @@ async function bdLessonPost(c, fix, who) {
     if (Board.busyRefusal(s, who, fix.kind)) { why = s; return true; }   // only "{who} is teaching ... then." or "{who} is in use then."
     return ruled(s);
   };
-  const done = ok => { if (ok && S.board === b && b.lesson && b.lesson.id === c.id) { b.lesson.all = {}; bdSideDraw(); } };   // the tick box is for one change
+  const done = ok => { const L = S.board === b && b.about ? b.about.les : null; if (ok && L && L.id === c.id) { L.all = {}; bdSideDraw(); } };   // the tick box is for one change
   let ok = await bdSend("/api/draft/fix", fix, c, false, { stay: true, refused });
   if (other !== null) { toast(other); if (S.board === b) bdLoad(); return; }   // the list goes back
   if (why !== null && S.board === b) ok = await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why }), c, false, { stay: true, refused: ruled });
@@ -4496,38 +4464,22 @@ const bdLastFix = () => { const l = S.draft && S.draft.fixes; return l && l.leng
 function bdLineHTML() {   // the one-line status under the green box: where a dragged lesson would land or what the board waits for, else the last change
   const b = S.board; if (!b || !b.data) return "";
   if (b.pt) return `<span>${esc(b.pt)}</span>`;
+  const c = b.sel !== null ? bdCard(b.sel) : null;
+  if (c && c.entry) {   // an entry of "Step 5 asks for these" has no page: the line says what it is
+    const s = c.entry, t = `${s.name} · ${s.n} period${s.n === 1 ? "" : "s"} · has ${s.have} of ${s.want}${bdBy() === "class" ? "" : ` ${BDWHY.switch}`}`;
+    return `<span title="${esc(t)}">${esc(t)}</span>`;
+  }
   return b.note ? `<span title="${esc(b.note)}">${esc(b.note)}</span>` : "";
 }
-function bdPopHTML() {   // the pop-out beside where the pointer was last pressed: a yes or no question, else the swap question, else the delete question, else the selected lesson, else the empty period clicked; "" when there is nothing to ask or do
+function bdPopHTML() {   // the pop-out beside where the pointer was last pressed: a yes or no question, else the drop question; "" when there is nothing to ask
   const b = S.board, d = b.data; if (!d) return "";
-  const c = b.sel !== null ? bdCard(b.sel) : null, day = x => (d.days || [])[x] || "";
   if (b.ask && b.ask.yes) {   // a yes or no question (bdYesNo): its sentence, small lines under it, the question itself, its Yes and Cancel
     const a = b.ask, dis = FX.busy ? " disabled" : "";
     return `<span>${esc(a.text)}</span>${(a.also || []).map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${a.ask ? `<span class="bdq">${esc(a.ask)}</span>` : ""}<button data-bdyes="1"${dis}>${esc(a.yes)}</button><button data-bdcancel="1">Cancel</button>`;
   }
-  if (b.ask) {   // a lesson dropped where another is: Swap, Put it beside, Push out, Cancel, as the place allows
+  if (b.ask) {   // a lesson dropped where another is: what collides there (or why it cannot simply go there), then Swap, Put it beside, Put it here anyway, Cancel, as the place allows
     const q = b.ask.q, dis = FX.busy ? " disabled" : "";
-    return `<span>${esc(q.text)}</span>${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.push ? `<button data-bdpush="1"${dis}>${esc(q.push)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
-  }
-  const k = b.del ? bdCard(b.del.id) : null;
-  if (k) {   // "Delete this lesson" asks first, saying why when the delete is a "no": step 5 asks for the lesson, or the rule it breaks
-    const no = b.del.j.state === "no", dis = FX.busy ? " disabled" : "";
-    const why = b.del.j.why ? esc(b.del.j.why) : "", said = !no ? "" : b.del.j.plan ? `<span class="bdwhy">Step 5 asks for this lesson.</span>${why ? `<span class="muted small">${why}</span>` : ""}` : why ? `<span class="bdwhy">${why}</span>` : "";   // "Step 5 asks" only when the plan is the reason
-    return `<span>${esc(`Delete ${k.what}?`)}</span>${said}<button data-bddelgo="1"${dis}>Delete</button><button data-bdcancel="1">Cancel</button>`;
-  }
-  if (c) {
-    const n = (c.rows || []).length, grp = c.band ? ` · ${n} group${n === 1 ? "" : "s"}` : "";
-    const why = c.why ? `<span class="bdwhy">${esc(c.why)}</span>` : "", del = `<button data-bddel="1"${FX.busy ? " disabled" : ""}>Delete this lesson</button>`;
-    const sw = bdBy() === "class" ? "" : `<span class="bdwhy">${esc(BDWHY.switch)}</span>`;   // a lesson of the tray or of step 5's list is placed from the Classes rows only
-    if (c.entry) { const s = c.entry; return `<span>${esc(s.name)} · ${s.n} period${s.n === 1 ? "" : "s"} · has ${s.have} of ${s.want}</span>${sw}<button data-bdclose="1">Cancel</button>`; }
-    if (bdInTray(c)) { const was = bdWas(d, c); return `<span>${esc(c.what)} · Not placed${was ? ` (${esc(was)})` : ""}${grp}</span>${sw}<button data-bdask="1">Ask</button>${del}<button data-bdclose="1">Cancel</button>`; }   // its warnings are in the Lesson tab
-    const time = ((d.times || [])[c.p] || [])[0];
-    return `<span>${esc(c.what)} · ${esc(day(c.d))} period ${c.p}${time ? ` (${esc(time)})` : ""}${grp}</span>${why}
-      <button data-bdask="1">Ask</button><button data-bdlift="1"${FX.busy ? " disabled" : ""}>Lift out</button>${del}<button data-bdclose="1">Cancel</button>`;
-  }
-  if (b.place) {   // an empty period clicked with no lesson selected: where it is, then Ask and Close
-    const pl = b.place, time = ((d.times || [])[pl.p] || [])[0];
-    return `<span>${esc(akRowName(pl))} · ${esc(day(pl.d))} period ${pl.p}${time ? ` (${esc(time)})` : ""} · empty</span><button data-bdask="1">Ask</button><button data-bdclose="1">Cancel</button>`;
+    return `<span>${esc(q.text)}</span>${q.lines.map(l => `<span class="bdcl">${l.kind ? `<b>${esc(l.kind)}</b> ` : ""}${esc(l.text)}</span>`).join("")}${q.more ? `<span class="muted small">and ${q.more} more</span>` : ""}${q.why ? `<span class="${q.why === "Nothing collides." ? "muted small" : "bdwhy"}">${esc(q.why)}</span>` : ""}${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.anyway ? `<button data-bdanyway="1"${dis}>${esc(q.anyway)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
   }
   return "";
 }
@@ -4543,11 +4495,14 @@ function bdHowHTML() {   // how to change the timetable: always in the same plac
   return `<div class="bdhow${shut ? " shut" : ""}" id="bdHow"><button class="bdhowx" data-bdhow="1">${shut ? "Show" : "Hide"}</button><b>How to change the timetable</b><ul>
     <li><b>Move a lesson:</b> drag it to another time on its row, or click it and then click a place.</li>
     <li><b>Colours:</b> ${sw("ok")}green is clean, ${sw("prefer")}amber bends a rule, ${sw("no")}red lands with a problem, ${sw("ask")}blue has another lesson there and asks, ${sw("na")}grey cannot take it.</li>
-    <li><b>Ask:</b> right-click a lesson or an empty period, or press Ask, to see what can be done there.</li>
+    <li><b>Ask:</b> click a lesson or an empty period; its questions are on the right.</li>
     <li><b>Whole cycle:</b> click a name at the left.</li>
-    <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc closes the pop-out.</li></ul></div>`;
+    <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc lets go of the lesson.</li></ul></div>`;
 }
-function bdLineDraw() { const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); bdPopDraw(); }
+function bdLineDraw() {
+  const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); bdPopDraw();
+  if (S.board && !S.board.del && $("#bdSide .akdel")) bdSideDraw();   // the delete question withdrawn elsewhere (a box asked, a drag, a change sent): the page's two buttons again
+}
 function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the air or a drop waits, and when there is nothing in it; else placed beside where the pointer was last pressed
   const pop = $("#bdPop"), box = $("#bdBox"), b = S.board; if (!pop || !box) return;
   const html = b && b.data && b.drag === null && !b.wait ? bdPopHTML() : "";
@@ -4596,7 +4551,7 @@ document.addEventListener("dblclick", e => {
 });
 function bdBusy() {   // a post starts or ends: the board's buttons that post follow it, without a redraw
   const box = $("#bdBox"); if (!box) return;
-  box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdpush], [data-bdyes], [data-bdlift], [data-bddel], [data-bddelgo], [data-bdlt], [data-bdlr], [data-bdlall]").forEach(x => { x.disabled = FX.busy; });
+  box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdanyway], [data-bdyes], [data-bdlift], [data-bddel], [data-bddelgo], [data-bdlt], [data-bdlr], [data-bdlall]").forEach(x => { x.disabled = FX.busy; });
 }
 const BDST = ["own", "ok", "prefer", "no", "na", "ask"];
 function bdPaint() {   // the cells and the strip of every row take the state of the card selected or pressed, and the cards it can be swapped with get an outline (classes only, so a drag in the air is not cancelled); rows it cannot be dropped on are dimmed
@@ -4691,8 +4646,7 @@ function bdJudge(c, s) {   // what a click or a drop on place s does: act "ask" 
   if (!s) return { why: "none" };
   if (s.state === "own") return { why: "own" };
   if (c.entry && bdTaken(c, s)) return { why: "taken" };   // a lesson of step 5's list is added only where its classes are free
-  const a = bdAsks(c, s);
-  if (a) { const q = Board.question(c, s, S.board.data); return (a.swap && q.swap) || (a.beside && q.beside) || (a.push && q.push) ? { act: "ask" } : { why: "stuck" }; }
+  if (bdAsks(c, s)) return { act: "ask" };   // another lesson is there: the box says what collides and what can be done (Cancel only when nothing can)
   if (bdThere(s)) return { act: "fetch" };   // another lesson is there and what can be done is judged on request (bdPlace)
   if (Board.lands(s)) return { act: "move" };
   return { why: "slot" };
@@ -4706,7 +4660,6 @@ function bdWhyText(a, drag) {
   if (a.why === "class") return drag ? BDWHY.class : BDWHY.classClick;
   if (a.why === "own") return Board.tell(a.slot, S.board.data.days);
   if (a.why === "slot") return a.slot.why || BDWHY.none;
-  if (a.why === "stuck") return `Another lesson is there and it cannot be moved out: ${(a.slot.push && a.slot.push.why) || a.slot.why || ""}`.trim();
   return BDWHY[a.why] || BDWHY.none;
 }
 /* hand: {from, to} when the place is on another teacher's (or room's) row than the one the lesson was taken from: the change of time
@@ -4716,7 +4669,7 @@ function bdAct(c, a, drag, end, hand) {   // a judged place: ask, make the chang
   const b = S.board;
   if (a.act === "fetch") { bdAskPlace(c, a.slot, drag, end, hand); return; }
   if (a.act === "ask") { b.ask = { id: c.id, slot: a.slot, q: Board.question(c, a.slot, b.data), hand: hand || null }; b.del = null; bdLineDraw(); return; }
-  bdTimeThen(c, c.entry ? Board.addFix(c.entry, a.slot, "move") : Board.fix(c, a.slot, "move"), hand);
+  bdTimeThen(c, c.entry ? Board.addFix(c.entry, a.slot) : Board.fix(c, a.slot, "move"), hand);
 }
 function bdTry(c, at, drag, end, hand) { bdAct(c, bdSlotAt(c, at), drag, end, hand); }   // a change of time: a place was clicked or dropped on
 const BD_STOP = {};   // a wait that ended without an answer to go on with (said already, or the step was left)
@@ -4730,7 +4683,7 @@ async function bdHold(text, pr, end, late) {   // the board takes no other chang
   if (gen !== BD.gen) { toast(BDWHY.gone); return BD_STOP; }   // another draft came meanwhile: the answer was for the old one
   return r;
 }
-async function bdPlace(card, d, p) {   // the one slot at (d, p) for the card with its push out and place beside judged (GET /api/draft/place), or null with the server's sentence said
+async function bdPlace(card, d, p) {   // the one slot at (d, p) for the card with what collides there and its place beside judged (GET /api/draft/place), or null with the server's sentence said
   const j = await fxGet(`/api/draft/place?id=${encodeURIComponent(card.id)}&d=${encodeURIComponent(d)}&p=${encodeURIComponent(p)}`);
   return j && typeof j.state === "string" ? j : null;
 }
@@ -4765,9 +4718,9 @@ function bdGo(c, at, drag, end) {   // a place clicked or dropped on: along the 
   if (at.d === c.d && at.p === c.p) { bdHandAsk(c, hand.from, hand.to, null, end, false); return; }
   bdTry(c, at, drag, end, hand);
 }
-function bdTimeThen(c, fix, hand) {   // a change of time; with hand, the hand-over is asked after it: a plain clean move waits for the answer and both go as one batch; a forced move, a swap or a push is made first on its own
+function bdTimeThen(c, fix, hand) {   // a change of time; with hand, the hand-over is asked after it: a plain clean move waits for the answer and both go as one batch; a forced move or a swap is made first on its own
   if (!hand) { bdSend("/api/draft/fix", fix, c); return; }
-  if (fix.kind === "move" && !fix.force && !fix.push) { bdHandAsk(c, hand.from, hand.to, fix); return; }
+  if (fix.kind === "move" && !fix.force) { bdHandAsk(c, hand.from, hand.to, fix); return; }
   bdSend("/api/draft/fix", fix, c).then(ok => { if (ok) bdHandNext(c.id, hand); });
 }
 async function bdHandNext(id, hand) {   // the change of time was made: once the board has it, the hand-over is asked
@@ -4837,8 +4790,8 @@ async function bdSend(url, body, c, keep, o) {
     const r = await postTry(url, body), j = r.j || null;
     if (S.board !== b) { if (j) await fxAfter(j); return !!j; }
     if (j) {
-      b.sel = (keep || (o && o.stay)) && c ? c.id : null; b.held = null; b.pt = ""; b.hv = "";   // o.stay: a change made in the Lesson tab, which stays open on its lesson
-      if (keep || (body && body.push)) b.side = "tray";   // a lift or a push: the lesson is shown where it now waits
+      b.sel = (keep || (o && o.stay)) && c ? c.id : null; b.held = null; b.pt = ""; b.hv = "";   // o.stay: a change made from the page's lists or answers, the lesson staying selected
+      if (keep) b.side = "tray";   // a lift: the lesson is shown where it now waits
       const l = (j.fixes || []), last = l.length ? l[l.length - 1] : null, batch = last && last.batch ? l.filter(f => f.batch === last.batch) : last ? [last] : [];
       b.note = undoing ? (was ? `Undone: ${was.text || ""}` : "") : o && o.note ? o.note : batch.map(f => f.text || "").filter(Boolean).join(" ");   // fixes made together are said together
       ok = true;
@@ -4873,45 +4826,44 @@ function bdClick(b) {   // true when the click was the board's
     const shut = !bdHowShut(); try { if (shut) localStorage.setItem(BDHOW, "closed"); else localStorage.removeItem(BDHOW); } catch (e) { }
     const h = $("#bdHow"); if (h) { h.classList.toggle("shut", shut); b.textContent = shut ? "Show" : "Hide"; } bdPopDraw(); return true;
   }
-  if (d.bdclose !== undefined) { bd.sel = null; bd.place = null; bd.ask = null; bd.del = null; bdDraw(); bdWant(); return true; }
-  if (d.bdask !== undefined) {   // the line's Ask: about the lesson selected (from the row it was clicked on), else the empty period selected
-    const c = bd.sel !== null ? bdCard(bd.sel) : null;
-    if (c && !c.entry) akOpen(Ask.ofCard(c, bd.from && bd.from.id === c.id ? bd.from : null)); else if (!c && bd.place) akOpen(Ask.ofPlace(bd.place));
-    return true;
-  }
   if (akClick(b)) return true;
   if (d.bdundo !== undefined) { bdUndo(); return true; }
-  if (d.bdcancel !== undefined) { const a = bd.ask; bd.ask = null; bd.del = null; bdLineDraw(); if (a && a.lesson) bdSideDraw(); return true; }   // a question about a list's choice: the list goes back to what the lesson has
-  if (d.bddel !== undefined) {   // "Delete this lesson": the question, from the delete's judgement that came with the lesson's slots
-    const c = bd.sel !== null ? bdCard(bd.sel) : null; if (!c || c.entry) return true;
+  if (d.bdcancel !== undefined) { const a = bd.ask, x = bd.del; bd.ask = null; bd.del = null; bdLineDraw(); if ((a && a.lesson) || x) bdSideDraw(); return true; }   // a question about a list's choice: the list goes back to what the lesson has; the delete question: the page's two buttons again
+  if (d.bddel !== undefined) {   // the page's "Delete this lesson": the question, from the delete's judgement that comes with the lesson's slots (fetched once when it is not here yet)
+    const A = bd.about, c = A && A.card !== null ? bdCard(A.card) : null; if (!c || c.entry) return true;
+    const ask = j => {
+      if (!j) { toast(BDWHY.delWait); return; }
+      if (j.state === "na") { toast(j.why || BDWHY.none); return; }
+      bd.ask = null; bd.del = { id: c.id, j }; bdLineDraw(); bdSideDraw();
+    };
     const j = bdDelOf(c.id);
-    if (!j) { toast(BDWHY.delWait); bdWant(); return true; }
-    if (j.state === "na") { toast(j.why || BDWHY.none); return true; }
-    bd.ask = null; bd.del = { id: c.id, j }; bdLineDraw(); return true;
+    if (j) ask(j);
+    else { const gen = BD.gen; bdSlotsP(c.id).then(() => { if (S.board === bd && gen === BD.gen && bd.about === A && A.card === c.id && !bd.ask && bd.drag === null && !bd.wait) ask(bdDelOf(c.id)); }); }   // a late judgement never withdraws an open question, nor acts during a drag or a waiting drop
+    return true;
   }
   if (d.bddelgo !== undefined) {   // the delete is forced when its judgement was "no", with the sentence shown (the server keeps it only for that same reason)
-    const x = bd.del, c = x && bdCard(x.id); if (!c) return true;
+    const x = bd.del, c = x && bdCard(x.id); if (!c) { bdSideDraw(); return true; }   // the question is gone: the page again
     bdSend("/api/draft/fix", Board.deleteFix(c, x.j), c); return true;
   }
-  if (d.bdswap !== undefined || d.bdpush !== undefined || d.bdbeside !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
-    const a = bd.ask, c = a && bdCard(a.id), how = d.bdswap !== undefined ? "swap" : d.bdbeside !== undefined ? "beside" : "push";
+  if (d.bdswap !== undefined || d.bdbeside !== undefined || d.bdanyway !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
+    const a = bd.ask, c = a && bdCard(a.id), how = d.bdswap !== undefined ? "swap" : d.bdbeside !== undefined ? "beside" : "anyway";
     if (c) bdTimeThen(c, Board.fix(c, a.slot, how), a.hand); return true;   // dropped on another teacher's or room's row: the hand-over is asked after it
   }
-  if (d.bdlift !== undefined) { const c = bd.sel !== null ? bdCard(bd.sel) : null; if (c && !bdInTray(c)) bdSend("/api/draft/fix", Board.liftFix(c), c, true); return true; }
+  if (d.bdlift !== undefined) { const A = bd.about, c = A && A.card !== null ? bdCard(A.card) : null; if (c && !c.entry && !bdInTray(c)) bdSend("/api/draft/fix", Board.liftFix(c), c, true); return true; }   // the page's lesson, lifted out: then selected in Not placed
   if (d.bdcount !== undefined) { bdStep(d.bdcount); return true; }
   if (d.bdwarn !== undefined) { bd.side = "warn"; bdSideDraw(); const el = $("#bdSide"); if (el) el.scrollIntoView({ block: "nearest" }); return true; }   // the counter opens the panel's Warnings
   if (d.bdside !== undefined) { bd.side = d.bdside; bdSideDraw(); return true; }
   if (d.bdshow !== undefined) { bdShowWarning(d.bdshow, false); return true; }
-  if (d.bdlopen !== undefined) {   // a band's group in the Lesson tab: opened (its choices fetched) or closed
-    const L = bd.lesson, g = d.bdlopen; if (!L) return true;
-    if (L.open[g]) delete L.open[g]; else { L.open[g] = true; bdLessonFetch(g); }
-    bdSideDraw(); return true;
-  }
   if (d.card !== undefined && b.classList.contains("swap") && bd.sel !== null && Number(d.card) !== bd.sel) {   // a lesson that can be swapped with the selected one: the same question a drop gives
     const c = bdCard(bd.sel), t = c && bd.slotsFor === c.id ? Board.target(bd.slots, Number(d.card)) : null;
     if (t) { if (FX.busy) toast(BDWHY.busy); else bdAct(c, Object.assign({ slot: t }, bdJudge(c, t)), false); return true; }
   }
-  if (d.card !== undefined) { const id = bdId(b), row = b.closest(".bdrow"); bd.sel = bd.sel === id ? null : id; bd.place = null; bd.from = row ? Object.assign(bdRowData(row), { id }) : null; bd.ask = null; bd.del = null; bd.note = ""; bd.held = null; if (bd.sel !== null) bdLessonOpen(bd.sel, true); bdDraw(); bdWant(); return true; }   // a click that selects opens the Lesson tab
+  if (d.card !== undefined) {   // a click that selects shows the lesson's page; a second click lets go (the tab open before it again); an entry of step 5's list has no page
+    const id = bdId(b), row = b.closest(".bdrow"), c = bdCard(id);
+    bd.sel = bd.sel === id ? null : id; bd.place = null; bd.from = row ? Object.assign(bdRowData(row), { id }) : null; bd.ask = null; bd.del = null; bd.note = ""; bd.held = null;
+    if (c && !c.entry) { if (bd.sel !== null) akOpen(Ask.ofCard(c, bd.from)); else akBack(bd); }
+    bdDraw(); bdWant(); return true;
+  }
   return false;
 }
 function bdStep(k) {   // a counter's click: the next card it counts is selected and shown (its day, or its class's cycle), and the cards it does not count fade
@@ -4920,7 +4872,7 @@ function bdStep(k) {   // a counter's click: the next card it counts is selected
   bd.step = k; bd.sel = c.id; bd.place = null; bd.ask = null; bd.del = null; bd.note = ""; bd.held = null;
   if (bdBy() !== "class") bd.mode = { kind: "day", d: bd.mode.d };   // the counters step through the Classes rows
   if (!bdInTray(c)) bdGoTo(c);
-  bdLessonOpen(c.id, true);
+  akOpen(Ask.ofCard(c, null));
   bdDraw(); bdWant();
   const el = $("#bdBox") && $("#bdBox").querySelector(`.bdcard[data-card="${c.id}"]`); if (el) el.scrollIntoView({ block: "nearest", inline: "center" });
 }
@@ -4959,7 +4911,7 @@ function bdShowTeacher(a, stay) {   // a warning about a teacher: Teachers rows 
   const mine = d.cards.filter(x => x.d === day && Board.of(x, row).length > 0 && covers(x)).sort((x, y) => x.p - y.p);
   const c = mine.find(marked) || (a.p !== null && a.p !== undefined ? mine[0] : null) || null;
   b.sel = c ? c.id : null;
-  if (c) { b.from = { cls: "", by, name: a.teacher, id: c.id }; bdLessonOpen(c.id, !stay); }
+  if (c) { b.from = { cls: "", by, name: a.teacher, id: c.id }; akOpen(Ask.ofCard(c, b.from), !stay); }
   return c;
 }
 /* a warning's "Show me" (stay false), or step 9's Show on step 8 / Find it on step 8 (stay true: the panel stays on Warnings with the
@@ -4974,7 +4926,7 @@ function bdShowWarning(key, stay) {
   const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key), a = w ? bdWhere(w, b.data) : null;
   let c = a && a.id !== null ? bdCard(a.id) : null;
   if (a) { b.ask = null; b.del = null; b.note = ""; b.step = null; b.held = null; b.place = null; }
-  if (c) { b.sel = c.id; if (!bdInTray(c)) bdGoTo(c); else if (!stay) b.side = "tray"; bdLessonOpen(c.id, !stay); }   // with stay the panel keeps Warnings; the Lesson tab is there to open
+  if (c) { b.sel = c.id; if (!bdInTray(c)) bdGoTo(c); else if (!stay) b.side = "tray"; akOpen(Ask.ofCard(c, null), !stay); }   // with stay the panel keeps Warnings; the lesson's page is there to open
   else if (a && a.teacher) c = bdShowTeacher(a, stay);
   else if (a) { b.sel = null; b.mode = { kind: "cycle", cls: a.cls, d: a.d !== null ? a.d : b.mode.d }; }
   bdDraw(); bdWant();
@@ -4992,14 +4944,16 @@ function bdShowWarning(key, stay) {
   if (li && stay) y.scrollTop += li.getBoundingClientRect().top - y.getBoundingClientRect().top - y.clientHeight / 3;   // inside the panel: the page does not move for it
 }
 const bdBreak = (row, p) => { const x = row && row.querySelector(`.bdcell[data-p="${p}"]`); return !!x && x.classList.contains("brk"); };   // period p of that row is a break (its cell or its mark)
-function bdCellClick(e) {   // a click on a place of the board: with a card selected the lesson goes there when it may; with none, an empty period is selected (a second click clears it)
+function bdCellClick(e) {   // a click on a place of the board: with a card selected the lesson goes there when it may; with none, an empty period is marked and its page shown (a second click lets go of it)
   const cell = e.target.closest && e.target.closest(".bdcell, .bdmark"), b = S.board; if (!cell || !b || !b.data) return false;
   const c = b.sel !== null ? bdCard(b.sel) : null; if (b.wait) return true;
   const at = bdPlaceAt(cell.closest(".bdrow"), Number(cell.dataset.p), null);
   if (!c) {
     if (bdBreak(cell.closest(".bdrow"), cell.dataset.p) || !Ask.empty(b.data, at) || !Ask.pointable(at)) return true;   // a break is not selected, nor a period of the No teacher or No room row
     const p = b.place, same = !!p && p.by === at.by && p.cls === at.cls && p.name === at.name && p.d === at.d && p.p === at.p;
-    b.place = same ? null : { cls: at.cls, by: at.by, name: at.name, d: at.d, p: at.p }; bdLineDraw(); bdPaint(); return true;
+    b.place = same ? null : { cls: at.cls, by: at.by, name: at.name, d: at.d, p: at.p };
+    if (b.place) akOpen(Ask.ofPlace(at)); else { akBack(b); bdSideDraw(); }
+    bdLineDraw(); bdPaint(); return true;
   }
   if (FX.busy) { toast(BDWHY.busy); return true; }
   bdGo(c, at, false); return true;
@@ -5050,7 +5004,6 @@ document.addEventListener("dragstart", e => {
   const q = row ? bdPeriodAt(row, e.clientX) : c.p; b.grab = row ? Board.grab(c, q < 0 ? c.p : q) : 0;   // a card from the tray is held by its start
   e.dataTransfer.setData("text/plain", "bd:" + c.id); e.dataTransfer.effectAllowed = "move";
   bdWant(); bdLineDraw();
-  if (b.lesson && !bdLessonOn(b)) bdSideDraw();   // another lesson is taken up: the Lesson tab of the one selected before closes (back to the tab before it); with a tray card in the air bdSideDraw leaves the panel for the drag's end (b.redraw), so the dragged element stays in the page
 });
 const bdOffText = c => bdInTray(c) ? BDWHY.offTray : BDWHY.off;   // a card in the air over the timetable card but off its row and the panel
 const bdAirText = b => b.lost ? BDWHY.gone : b.slotsFor === b.drag ? "" : b.changed ? BDWHY.changed : BDWHY.working;   // the line while the dragged card's slots are not here
@@ -5085,7 +5038,7 @@ document.addEventListener("dragover", e => {   // over a place: the cells it wou
   const key = `${row.dataset.row}|${row.dataset.d}|${p}|${o ? o.id : ""}|${a.slot ? a.slot.state : a.why}`;
   if (key === b.hv) return;
   b.hv = key; bdOver(row, o ? o.p : p, o || c); bdTrayLit(false);
-  b.pt = a.slot && a.why !== "stuck" && a.why !== "taken" ? bdTell(a.slot, c) : wait ? bdAirText(b) : bdWhyText(a, true);
+  b.pt = a.slot && a.why !== "taken" ? bdTell(a.slot, c) : wait ? bdAirText(b) : bdWhyText(a, true);
   if (hand && (a.slot || wait)) b.pt = `${b.pt} ${bdHandHint(hand, false)}`.trim();
   bdLineDraw();
 });
@@ -5163,14 +5116,14 @@ function bdPointed() {   // the place of the board under the pointer now -> {cls
   return row && p >= 0 ? Object.assign(bdRowData(row), { d: Number(row.dataset.d), p }) : null;
 }
 const bdInField = e => !!(e.target.isContentEditable || (e.target.closest && e.target.closest("input, select, textarea, [contenteditable]")));
-document.addEventListener("change", e => {   // the Lesson tab: a list's choice is acted on at once; the tick box is kept for the next room choice
+document.addEventListener("change", e => {   // the page's lists: a list's choice is acted on at once; the tick box is kept for the next room choice
   const el = e.target, ds = el.dataset || {}, b = S.board;
   if (ds.bdlt === undefined && ds.bdlr === undefined && ds.bdlall === undefined) return;
-  if (!bdLessonOn(b)) { if (b) bdSideDraw(); return; }   // a list of a lesson no longer selected: the panel is drawn for the selection as it is
-  const L = b.lesson;
+  const A = b && b.about, L = A && A.les, c = L && A.card === L.id ? bdCard(L.id) : null;
+  if (!c) { if (b) bdSideDraw(); return; }   // a list of a lesson the page is no longer about (or gone): the panel is drawn as it is
   if (ds.bdlall !== undefined) { L.all[ds.bdlall] = el.checked; return; }
   el.blur();   // the keys (Escape, Ctrl or Cmd+Z) are the board's again at once
-  const c = bdCard(L.id), g = ds.bdlt !== undefined ? ds.bdlt : ds.bdlr, r = (c.rows || []).find(x => x.group === g), j = L.got[g];
+  const g = ds.bdlt !== undefined ? ds.bdlt : ds.bdlr, r = (c.rows || []).find(x => String(x.group) === g), j = String(L.group) === g ? L.got : null;   // only the chosen group's answer
   if (FX.busy || b.wait || b.drag !== null || !r || !j || typeof j !== "object") { if (FX.busy) toast(BDWHY.busy); bdSideDraw(); return; }   // the list goes back
   if (el.value === "pick") return;
   if (ds.bdlt !== undefined) bdLessonTeacher(c, r, j, Number(ds.i), el.value); else bdLessonRoom(c, r, j, el.value, !!L.all[g]);
@@ -5179,7 +5132,7 @@ document.addEventListener("keydown", e => {   // Escape clears the board's selec
   const b0 = S.board; if (e.key === "Escape" && b0 && b0.drag !== null) bdLostDrag();
   const b = S.board; if (e.key !== "Escape" || !b || b.wait || (b.sel === null && !b.ask && !b.del && !b.place)) return;   // a waiting drop (a moment) is not cancelled by it
   if (bdInField(e)) return;
-  e.preventDefault(); b.sel = null; b.place = null; b.ask = null; b.del = null; bdDraw(); bdWant();
+  e.preventDefault(); b.sel = null; b.place = null; b.ask = null; b.del = null; akBack(b); bdDraw(); bdWant();   // let go: the tab open before the page again
 });
 document.addEventListener("keydown", e => {   // Ctrl+X / Cmd+X lifts the selected lesson out (then selected in the tray); Ctrl+V / Cmd+V puts the selected lesson of the tray where the pointer is, as a click there; in a field, or with no card selected, the browser's own cut and paste
   if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
@@ -5194,12 +5147,15 @@ document.addEventListener("keydown", e => {   // Ctrl+X / Cmd+X lifts the select
   if (!m || !Board.onRow(c, m, b.data)) { toast(BDWHY.paste); return; }
   bdTry(c, Object.assign({}, m, { over: null }), false);   // in the Teachers or Rooms rows: "Switch to Classes rows to place it."
 });
-/* the Ask tab beside the board: what a right-click (or the line's Ask) pointed at, its starter questions and the answers, each a list of checked
-   options. S.board.about = {sub (Ask.ofCard or Ask.ofPlace; a band's group chosen from its chips sets sub.group), card (its id, or null for a
-   place), pick (the band's groups are offered as chips: pointed at on a class's row or in the tray), log (the questions asked, newest last:
-   {sub, title, q, label, got ("loading", "fail" or the answer), stamp}), n (the Clear round: an answer of an older round is dropped), pre (an
-   option's preview open under it: {at: "{i}.{k}", got: "loading" or POST /api/draft/preview's answer}, or null; a new draft clears it)}. Selecting
-   cards does not change it; pointing again does, and the log stays until Clear. Everything in an answer is text from the server: esc() everywhere. */
+/* the page beside the board (the side panel's Lesson or Empty period tab): what a click or a right-click last pointed at, Lift out and
+   Delete this lesson, its warnings, a band's groups as chips, its starter questions, the chosen group's lists and the answers, each a list
+   of checked options. S.board.about = {sub (Ask.ofCard or Ask.ofPlace; a band's group chosen from its chips sets sub.group), card (its id, or
+   null for a place), pick (the band's groups are offered as chips: pointed at on a class's row or in the tray), log (the questions asked,
+   newest last: {sub, title, q, label, got ("loading", "fail" or the answer), stamp}), n (the Clear round: an answer of an older round is
+   dropped), pre (an option's preview open under it: {at: "{i}.{k}", got: "loading" or POST /api/draft/preview's answer}, or null; a new draft
+   clears it), back (the side tab open before the page was shown, shown again on letting go), les (the lists' state for the chosen group, see
+   bdLessonFetch; null for a place)}. Pointing again changes it, and the log stays until Clear. Everything in an answer is text from the
+   server: esc() everywhere. */
 const akRowName = pl => pl.by === "class" ? pl.cls || pl.name : pl.name || (pl.by === "teacher" ? "No teacher" : "No room");   // a place's row as the line names it
 const akAtRow = (pl, rd, day) => pl.by === rd.by && pl.d === day && (pl.by === "class" ? pl.cls === rd.cls : pl.name === rd.name);   // the place is on that row (on its day)
 const akSame = (a, b) => a.kind === b.kind && (a.kind === "place" ? a.by === b.by && a.name === b.name && a.d === b.d && a.p === b.p : a.id === b.id && a.teacher === b.teacher);   // the same thing pointed at (a band's group aside)
@@ -5213,14 +5169,20 @@ function akTitle(b) {   // the tab's heading: the title of the last answer about
   if (sub.kind === "place") return `${akRowName({ by: sub.by, cls: sub.name, name: sub.name })} · ${(d.days || [])[sub.d] || ""} period ${sub.p} · empty`;
   const c = bdCard(sub.id); return c ? c.what : `Lesson ${sub.id}`;
 }
-const akWithdraw = b => { if (b.ask && b.ask.ak) { b.ask = null; bdLineDraw(); } };   // the line's "Apply anyway?" from the Ask tab goes when the tab moves on: pointed elsewhere, Clear, another question
-function akOpen(sub) {   // the Ask tab is about sub now (the log stays), shown
+const akWithdraw = b => { if (b.ask && b.ask.ak) { b.ask = null; bdLineDraw(); } };   // the line's "Apply anyway?" from the Lesson or Empty period page goes when that page moves on: pointed elsewhere, Clear, another question
+function akOpen(sub, show = true) {   // the page is about sub now (the log stays), shown unless show is false; an entry of step 5's list has no page
   const b = S.board; if (!b || !sub) return;
-  if (!b.about) b.about = { sub: null, card: null, pick: false, log: [], n: 0, pre: null };
+  const c = sub.kind === "lesson" ? bdCard(sub.id) : null; if (c && c.entry) return;
+  if (!b.about) b.about = { sub: null, card: null, pick: false, log: [], n: 0, pre: null, back: null, les: null };
   const A = b.about; A.sub = sub; A.card = sub.kind === "lesson" ? sub.id : null; A.pick = sub.kind === "lesson" && (sub.group === null || sub.group === undefined);
-  akWithdraw(b); b.side = "ask"; bdSideDraw();
-  const y = $("#bdSide .bdsbody"); if (y) y.scrollTop = 0;   // its heading and starters first
+  if (show && b.side !== "ask") A.back = b.side;
+  const pt = Ask.parts(sub, c);
+  A.les = pt.lists ? { id: sub.id, group: pt.group, got: {}, all: {}, n: 0 } : null;
+  if (A.les) bdLessonFetch();
+  b.del = null; akWithdraw(b); if (show) b.side = "ask"; bdSideDraw();   // a delete question goes with what the page was about
+  const y = show && $("#bdSide .bdsbody"); if (y) y.scrollTop = 0;   // its heading and starters first
 }
+function akBack(b) { if (b.side === "ask") b.side = b.about ? b.about.back || null : null; }   // let go of what the page is about: the tab open before it is shown again; the page's tab stays in the row
 async function akGet(url) {   // GET /api/draft/about: the answer; {error: the server's sentence} when it refused; null when it could not be reached or said nothing
   try {
     const r = await fetch(url), j = await r.json().catch(() => null);
@@ -5245,20 +5207,34 @@ async function akAsk(q, from) {   // a starter asked about what the tab is about
   if (ok) { if (j.title) e.title = j.title; if (j.stamp) e.stamp = j.stamp; }
   bdSideDraw(); fxReveal(akEntryEl(A.log.indexOf(e)));
 }
-const akPreOff = () => { const A = S.board && S.board.about; if (A) A.pre = null; };   // a new draft: the Ask tab's preview was of the timetable before it
+const akPreOff = () => { const A = S.board && S.board.about; if (A) A.pre = null; };   // a new draft: the page's preview was of the timetable before it
 const akEntryEl = i => $(`#bdSide .akentry[data-akentry="${i}"]`);
-function akHTML(b) {   // the tab: what it is about, the lesson's warnings, a band's groups, the starters, the log, Clear
-  const A = b.about, sub = A.sub, c = A.card !== null ? bdCard(A.card) : null, title = akTitle(b);
-  const ws = c && !c.entry ? bdLineWarnings(c, Infinity) : "", gs = A.pick && c ? Ask.groups(c) : [], gone = akGone(b, sub);
+function akHTML(b) {   // the page: what it is about, Lift out and Delete this lesson (or the delete question), the lesson's warnings, a band's groups, the starters, the chosen group's lists, the log, Clear
+  const A = b.about, sub = A.sub, d = b.data || {}, c = A.card !== null ? bdCard(A.card) : null, title = akTitle(b), gone = akGone(b, sub), pt = Ask.parts(sub, c), dis = FX.busy ? " disabled" : "";
+  let head = `<p class="aktitle">${gone ? esc(title) : `<b>${esc(title)}</b>`}</p>`;   // a place's row, day and period; a deleted lesson's sentence
+  if (c && !gone) {
+    const tray = bdInTray(c), day = tray ? "" : (d.days || [])[c.d] || "", time = tray ? "" : ((d.times || [])[c.p] || [])[0] || "", was = tray ? bdWas(d, c) : "";
+    head = `<p class="aktitle"><b>${esc(c.what)}</b><br><span class="muted">${esc(Ask.where(c, day, time, was))}</span></p>`;
+  }
+  let acts = "";
+  if (c && b.del && b.del.id === A.card) {   // "Delete this lesson" asks first, saying why when the delete is a "no": step 5 asks for the lesson, or the rule it breaks
+    const j = b.del.j, no = j.state === "no", why = j.why ? esc(j.why) : "";
+    const said = !no ? "" : j.plan ? `<span class="bdwhy">Step 5 asks for this lesson.</span>${why ? `<span class="muted small">${why}</span>` : ""}` : why ? `<span class="bdwhy">${why}</span>` : "";   // "Step 5 asks" only when the plan is the reason
+    acts = `<div class="akdel"><span>${esc(`Delete ${c.what}?`)}</span>${said}<div class="row akdo"><button data-bddelgo="1"${dis}>Delete</button><button data-bdcancel="1">Cancel</button></div></div>`;
+  } else if (pt.lift || pt.del) acts = `<div class="row akdo">${pt.lift ? `<button data-bdlift="1"${dis}>Lift out</button>` : ""}${pt.del ? `<button data-bddel="1"${dis}>Delete this lesson</button>` : ""}</div>`;
+  const ws = c && !c.entry ? bdLineWarnings(c, Infinity) : "", gs = A.pick && c ? Ask.groups(c) : [];
   const on = gs.length ? String(sub.group !== null && sub.group !== undefined ? sub.group : gs[0].group) : "";
   const chips = gs.length ? `<div class="akchips">${gs.map(g => `<button class="akchip${String(g.group) === on ? " on" : ""}" data-akgroup="${esc(g.group)}" aria-pressed="${String(g.group) === on}">${esc(g.label)}</button>`).join("")}</div>` : "";
   const starts = gone ? "" : `<div class="akstart">${Ask.starters(sub, c).map(s => `<button data-akq="${esc(s.q)}">${esc(s.label)}</button>`).join("")}</div>`;   // a deleted lesson: nothing to ask
-  const log = A.log.map((e, i) => akEntryHTML(e, i, title)).join("");
-  return `<div class="akabout"><p class="aktitle">${gone ? esc(title) : `<b>${esc(title)}</b>`}</p>${ws ? `<div class="bdlws">${ws}</div>` : ""}${chips}${starts}${log}${A.log.length ? `<div class="row"><button data-akclear="1">Clear</button></div>` : ""}</div>`;
+  let lists = "";
+  const L = A.les, r = pt.lists && L && L.id === c.id ? (c.rows || []).find(x => String(x.group) === String(L.group)) : null;
+  if (r) lists = `<div class="aklists">${L.got === "fail" ? `<p class="bdwhy">${esc(BDWHY.lessonFailed)}</p>` : L.got && typeof L.got === "object" && Array.isArray(L.got.teachers) ? bdLessonLists(L, r, L.got) : `<p class="muted">Loading…</p>`}</div>`;
+  const log = A.log.map((e, i) => akEntryHTML(e, i, sub)).join("");
+  return `<div class="akabout">${head}${acts}${ws ? `<div class="bdlws">${ws}</div>` : ""}${chips}${starts}${lists}${log}${A.log.length ? `<div class="row"><button data-akclear="1">Clear</button></div>` : ""}</div>`;
 }
-function akEntryHTML(e, i, title) {   // one question of the log and its answer; once the timetable has changed: struck through, with no buttons but its heading, which asks it again
+function akEntryHTML(e, i, sub) {   // one question of the log and its answer (about another thing than the page's: its title after it); once the timetable has changed: struck through, with no buttons but its heading, which asks it again
   const a = e.got, old = akStale(e), label = old && !akGone(S.board, e.sub) ? `<button class="akagain" data-akagain="${i}">${esc(e.label)}</button>` : esc(e.label);
-  const head = `<h4>${label}${e.title && e.title !== title ? ` <span class="muted">· ${esc(e.title)}</span>` : ""}</h4>`;
+  const head = `<h4>${label}${e.title && !akSame(e.sub, sub) ? ` <span class="muted">· ${esc(e.title)}</span>` : ""}</h4>`;
   let body;
   if (a === "loading") body = `<p class="muted small">Working it out…</p>`;
   else if (a === "fail" || !a || typeof a !== "object") body = `<p class="issue small">${e.why ? esc(e.why) : "That could not be worked out. Ask again."}</p>`;   // the server's own sentence when it refused
@@ -5296,7 +5272,7 @@ async function akPreview(id) {   // Preview: what the option would do, under it,
   if (j) pre.got = j; else A.pre = null;
   bdSideDraw(); fxReveal($("#bdSide .akopt .fxpre"));
 }
-function akApply(id) {   // Apply: the option sent with the mark of the timetable it was made for, the selection left as it is; Apply anyway asks first (the Ask tab's question: ak), with the option's sentence and then the problem's
+function akApply(id) {   // Apply: the option sent with the mark of the timetable it was made for, the selection left as it is; Apply anyway asks first (the page's question: ak), with the option's sentence and then the problem's
   const b = S.board, A = b && b.about, e = A && A.log[Number(String(id).split(".")[0])], o = akOption(id); if (!e || !o) return;
   if (akStale(e)) { toast(BDWHY.again); bdSideDraw(); return; }   // the page caught up meanwhile
   const s = Ask.send(o, e.stamp); if (!s) return;
@@ -5313,21 +5289,20 @@ function akOption(id) {   // "2.0": the log's third entry, its first option
   const A = S.board && S.board.about, [i, k] = String(id).split(".").map(Number), e = A && A.log[i];
   return e && e.got && typeof e.got === "object" ? (e.got.options || [])[k] || null : null;
 }
-function akShow(o) {   // "Show on the board": the option's lesson selected and shown, as Show me does; the Ask tab stays on what it is about
+function akShow(o) {   // "Show on the board": the option's lesson selected and shown, as Show me does; the page stays on what it is about
   const b = S.board, t = o ? Ask.target(o) : null, c = t !== null ? bdCard(t) : null;
   if (!c) { toast(BDWHY.again); return; }
   b.sel = c.id; b.ask = null; b.del = null; b.note = ""; b.step = null; b.held = null; b.place = null; b.from = null;
-  if (!bdInTray(c)) bdGoTo(c);
-  bdLessonOpen(c.id, false);   // the Lesson tab is there to open
+  if (!bdInTray(c)) bdGoTo(c);   // the page stays on what it is about
   bdDraw(); bdWant();
   const box = $("#bdBox"), els = box ? [...box.querySelectorAll(`.bdmain:not(.bdold) .bdcard[data-card="${c.id}"]`)] : [];
   if (els[0]) els[0].scrollIntoView({ block: "nearest", inline: "center" });
   els.forEach(x => x.classList.add("flash")); setTimeout(() => els.forEach(x => x.classList.remove("flash")), 1200);
 }
-function akClick(el) {   // true when the click was the Ask tab's
+function akClick(el) {   // true when the click was on the Lesson or Empty period page
   const d = el.dataset, b = S.board, A = b && b.about; if (!A) return false;
   if (d.akq !== undefined) { akAsk(d.akq); return true; }
-  if (d.akgroup !== undefined) { A.sub = Object.assign({}, A.sub, { group: d.akgroup }); bdSideDraw(); return true; }
+  if (d.akgroup !== undefined) { A.sub = Object.assign({}, A.sub, { group: d.akgroup }); if (A.les) { A.les.group = d.akgroup; bdLessonFetch(); } bdSideDraw(); return true; }   // a band's chip: that group's questions and lists
   if (d.akshow !== undefined) { akShow(akOption(d.akshow)); return true; }
   if (d.akagain !== undefined) { const e = A.log[Number(d.akagain)]; if (e) akAsk(e.q, e); return true; }
   if (d.akpre !== undefined) { akPreview(d.akpre); return true; }
@@ -5337,17 +5312,27 @@ function akClick(el) {   // true when the click was the Ask tab's
   return false;
 }
 const akCovering = (data, at) => data.cards.find(c => c.d === at.d && c.p <= at.p && at.p < c.p + bdLen(c) && bdInRow(c, at)) || null;   // the lesson of that row covering the period
-document.addEventListener("contextmenu", e => {   // a right-click on a lesson (on the board or in the tray) or a period of the board asks about it; anywhere else, or with a card in the air, the browser's own menu
+function akPoint(c, row) {   // a right-click on lesson c (row: the row it was on, or null): it is selected, as a click that selects does (never let go), and its page shown
+  const b = S.board;
+  b.sel = c.id; b.from = row ? Object.assign(bdRowData(row), { id: c.id }) : null; b.place = null; b.ask = null; b.del = null; b.note = ""; b.held = null;
+  akOpen(Ask.ofCard(c, row ? bdRowData(row) : null)); bdDraw(); bdWant();
+}
+document.addEventListener("contextmenu", e => {   // a right-click on a lesson (on the board or in the tray) or a period of the board shows its page; anywhere else, or with a card in the air, the browser's own menu
   const b = S.board, t = e.target; if (!b || !b.data || b.drag !== null || b.wait || !t.closest || !t.closest("#bdBox") || t.closest(".bdold")) return;
   const el = t.closest(".bdcard");
   if (el) {
     const c = bdCard(bdId(el)); if (!c || c.entry) return;   // an entry of "Step 5 asks for these" is not a lesson yet
-    const row = el.closest(".bdrow"); e.preventDefault(); akOpen(Ask.ofCard(c, row ? bdRowData(row) : null)); return;
+    e.preventDefault(); akPoint(c, el.closest(".bdrow")); return;
   }
   const cell = t.closest(".bdcell, .bdmark"), row = cell && cell.closest(".bdrow"); if (!row || bdBreak(row, cell.dataset.p)) return;   // a break takes no lesson: nothing to ask
   const at = bdPlaceAt(row, Number(cell.dataset.p), null);
-  if (Ask.empty(b.data, at)) { if (Ask.pointable(at)) { e.preventDefault(); akOpen(Ask.ofPlace(at)); } return; }   // the No teacher and No room rows: nothing to ask of an empty period there
-  const c = akCovering(b.data, at); if (c) { e.preventDefault(); akOpen(Ask.ofCard(c, bdRowData(row))); }   // under a card's edge: that lesson
+  if (Ask.empty(b.data, at)) {   // the No teacher and No room rows: nothing to ask of an empty period there
+    if (!Ask.pointable(at)) return;
+    e.preventDefault();
+    if (b.sel === null) { b.place = { cls: at.cls, by: at.by, name: at.name, d: at.d, p: at.p }; bdLineDraw(); bdPaint(); }   // marked as a click marks it; with a lesson selected the selection stays and nothing is marked
+    akOpen(Ask.ofPlace(at)); return;
+  }
+  const c = akCovering(b.data, at); if (c) { e.preventDefault(); akPoint(c, row); }   // under a card's edge: that lesson
 });
 /* which configuration (the workbook's id) the timetable was made from, against the setup's version now */
 function configLine(j, link) {

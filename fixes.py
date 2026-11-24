@@ -329,6 +329,58 @@ class Busy:
                 if h != "TBC" and any(s in own or any(f(("r", s, d, q), ignore) for q in Q) for s in self.rooms(h)): return f"{h} is in use then.", None
         return None, None
 
+    def whys(self, rows, d, p, n, ignore=(), name=None):
+        """every collision of these rows in periods p .. p+n-1 of day d, the lessons with ids in ignore set aside -> [dict(kind, text)],
+        kind "teacher", "class", "students" or "room", in _why's order of kinds and finding what it finds: empty exactly when clash is
+        None, and what clash names first is in the first line. One line a teacher and lesson, a lesson in the way (all the classes it
+        shares, named by name(lesson id); default what() of its first row), and a room. _why's walk is repeated here, collecting
+        instead of returning, so that _why and its sentences (the judgement and the forcing rest on them) stay as they are"""
+        ignore, Q, out = set(ignore), range(p, p + n), []; name = name or (lambda i: what(self.ids[i][0]))
+        every = lambda key: [y for y in self.at.get(key, ()) if y["id"] not in ignore]
+        line = lambda kind, text: out.append(dict(kind=kind, text=text))
+        seen = set()
+        for x in rows if d not in (self.m.get("double") or ()) else ():   # a day the setup lets a teacher take two lessons at once
+            for t in x["teachers"]:
+                for q in Q:
+                    for y in every(("t", t, d, q)):
+                        if (t, y["id"]) not in seen: seen.add((t, y["id"])); line("teacher", f"{t} is teaching {what(y)} then.")
+        cls = {}   # a lesson in the way -> the classes it shares with the rows, in the order met
+        for x in rows:
+            for c in x["classes"]:
+                for q in Q:
+                    for y in every(("c" if x["group"] == ENTIRE else "w", c, d, q)):
+                        got = cls.setdefault(y["id"], [])
+                        if c not in got: got.append(c)
+        for i, cs in cls.items():
+            line("class", f"{cs[0]} has {name(i)} then." if len(cs) == 1 else f"{', '.join(cs[:-1])} and {cs[-1]} have {name(i)} then.")
+        named = set(cls)
+        if hit := self.band_clash(rows, d, p, n, ignore | named):
+            line("students", f"{hit[0]} has the {block_label(hit[1]['block'], hit[1]['level'])} band then, and every student of {hit[0]} is in one of the two."); named.add(hit[1]["id"])
+        def students(k, who, y):
+            if y["id"] not in named: named.add(y["id"]); line("students", _students(k, who, y))
+        for x in rows:
+            pairs = [(c, g, k) for c in x["classes"] for g, k in self.cgroups.get(c, {}).items()] if x["group"] == ENTIRE else \
+                [(x["group"], g, k) for g, k in self.share.get(x["group"], {}).items()]
+            for q in Q:
+                for who, g, k in pairs:
+                    for y in every(("g", g, d, q)): students(k, who, y)
+                if x["group"] != ENTIRE:
+                    for c, k in self.gcls.get(x["group"], {}).items():
+                        for y in every(("w", c, d, q)): students(k, x["group"], y)
+        mine = collections.Counter(x["room"] for x in rows if not _no_room(x["room"]))
+        own = collections.Counter()   # as _why counts: a row in a combined venue stands on each of its rooms
+        for room, k in mine.items():
+            for s in self.rooms(room): own[s] += k
+        rooms = []
+        for room in mine:
+            if any(sum(y["id"] not in ignore for y in self.at.get(("r", s, d, q), ())) + own[s] > self.m["room_cap"].get(s, 1) or every(("h", s, d, q)) for s in self.rooms(room) for q in Q):
+                rooms.append(room)
+        for x in rows:
+            for h in _split_list(x.get("rain")):
+                if h != "TBC" and h not in rooms and any(s in own or any(every(("r", s, d, q)) for q in Q) for s in self.rooms(h)): rooms.append(h)
+        for room in rooms: line("room", f"{room} is in use then.")
+        return out
+
     def clash(self, rows, d, p, n, ignore=()):
         """the first reason these rows cannot be in periods p .. p+n-1 of day d, the lessons with ids in ignore set aside, or None"""
         return self._why(rows, d, p, n, ignore)[0]
@@ -516,9 +568,11 @@ def _placer(m, spec, days, lesson_id, pool, extras, ctx):
     def listed(i): return dict(id=i, what=name(i), classes=_classes(b.ids[i]), groups=len(b.ids[i]))
     def at(d, p):
         there = {y["id"]: y for k in cls for q in range(p, min(p + n, m["NP"])) for y in b.at.get(("c", k, d, q), ()) if y["id"] != lesson_id}
-        ids = sorted(there); push = beside = None; judged = lambda **k: _pick(judge(m, spec, days, dict(go, d=d, p=p, **k), c, pool))
-        if ids and extras is True: push = dict(**judged(out=ids), out=[listed(i) for i in ids]); beside = judged()
-        more = dict(push=push, beside=beside) if extras is True else dict(there=[listed(i) for i in ids] if ids else None) if extras == "who" else {}
+        ids = sorted(there); push = beside = clashes = None; judged = lambda **k: _pick(judge(m, spec, days, dict(go, d=d, p=p, **k), c, pool))
+        if ids and extras is True:
+            push = dict(**judged(out=ids), out=[listed(i) for i in ids]); beside = judged()
+            clashes = b.whys([dict(x) for x in rows], d, p, n, ignore={lesson_id}, name=name)   # every collision of the plain move or place, the others left there
+        more = dict(push=push, beside=beside, clashes=clashes) if extras is True else dict(there=[listed(i) for i in ids] if ids else None) if extras == "who" else {}
         if mine and ids and extras == "who": return dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more)
         if mine or not there: return dict(d=d, p=p, **(beside or judged()), swap=None, also=[], **more)
         y = next(iter(there.values()))
@@ -529,23 +583,24 @@ def _placer(m, spec, days, lesson_id, pool, extras, ctx):
     return bool(mine), a, at
 
 def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
-    """every (d, p) of the week(s) judged -> [dict(d, p, state, why, swap, also, push, beside)]. For a lesson on the timetable, every
+    """every (d, p) of the week(s) judged -> [dict(d, p, state, why, swap, also, push, beside, clashes)]. For a lesson on the timetable, every
     (d, p) but its own: an empty stretch of its classes as a move, a stretch where exactly one other lesson of the same length
     starts as a swap, anything else occupied "na". For a lesson in the pool (the rows of the lessons not placed), every (d, p)
     as a place, swap always None. push: where other lessons of its classes are, those lessons (in id order) and how the move
     or place is judged once they are pushed out, dict(state, why, out=[dict(id, what, classes, groups)]): what as named() says
     it (a band by its band's name), classes all its classes, groups how many rows; None where there are none. beside:
     where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
-    None where there are none. extras=False (draft.options, the helper, the typed request: they read only state, why, swap and also)
-    leaves push and beside out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). extras="who" (the
+    None where there are none. clashes: where other lessons of its classes are, every collision of that plain move or place,
+    Busy.whys' [dict(kind, text)] with lessons named as push.out names them; None where there are none. extras=False (draft.options, the helper, the typed request: they read only state, why, swap and also)
+    leaves push, beside and clashes out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). extras="who" (the
     board's): the keys of False and there: None where no other lesson of its classes is, else those lessons as push.out lists them,
     and no push or beside judged (see place); a lesson in the pool is "na" ("Another lesson is there.") where there is one. ctx: see judge"""
     mine, a, at = _placer(m, spec, days, lesson_id, pool, extras, ctx)
     return [at(d, p) for d in range(len(days)) for p in range(m["NP"]) if mine or (d, p) != (a["d"], a["p"])]
 
 def place(m, spec, days, lesson_id, d, p, pool=(), ctx=None):
-    """the one slot at (d, p) with everything slots(extras=True) gives it -> dict(d, p, state, why, swap, also, push, beside); push and
-    beside are None where no other lesson of the lesson's classes is. ValueError for an unknown lesson, or a place outside the days or periods"""
+    """the one slot at (d, p) with everything slots(extras=True) gives it -> dict(d, p, state, why, swap, also, push, beside, clashes);
+    push, beside and clashes are None where no other lesson of the lesson's classes is. ValueError for an unknown lesson, or a place outside the days or periods"""
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (d, p)) or not 0 <= d < len(days) or not 0 <= p < m["NP"]: raise ValueError("That is outside the day.")
     return _placer(m, spec, days, lesson_id, pool, True, ctx)[2](d, p)
 
