@@ -152,7 +152,9 @@ def each_reason_leaves_the_record_alone():
 
 @t
 def a_blank_row_is_never_published():
-    fresh(); change(["add", "students", dict(_id="blankrow01"), ""]); assert pub_student("None") is None and len(store.published()["model"]["students"]) == 3
+    fresh(); n = len(history.read(kinds=[students.KIND]))
+    j = change(["add", "students", dict(_id="blankrow01"), ""]); assert pub_student("None") is None and len(store.published()["model"]["students"]) == 3
+    assert j["students"]["outcome"]["left"] == [] and j["students"]["outcome"]["text"] == "" and len(history.read(kinds=[students.KIND])) == n
 
 @t
 def a_whole_replacement_updates_nothing():

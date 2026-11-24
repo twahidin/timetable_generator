@@ -78,7 +78,7 @@ def follow(pairs, by, batch=None):
         at = {str(s["id"]).strip(): i for i, s in enumerate(model["students"])}
         new_students = list(model["students"])
         updated, added, removed, left, made = [], [], [], [], set()
-        order = list(dict.fromkeys(keys)) + sorted(may_remove - set(keys))   # the rows after the save first, then the old keys
+        order = [k for k in list(dict.fromkeys(keys)) + sorted(may_remove - set(keys)) if k]   # the rows after the save first, then the old keys; a blank row is ignored
         for k in order:
             if k in rows_now:
                 row = rows_now[k][0]; why = why_not(row, model, counts)
