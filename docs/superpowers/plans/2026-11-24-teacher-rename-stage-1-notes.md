@@ -11,6 +11,7 @@ For whoever builds stages 2 and 3 (the account, reliefs and exam duties follow t
 - Toasts stay as long as their length needs (3200 ms up to 60 characters, plus 45 ms per character, at most 12000 ms), so the long rename sentence can be read.
 - History shows "earlier_names" in a page word (`FIELD_WORDS` in `static/history.js`), so the raw key never shows; the stored `field` is unchanged.
 - The suites were run by the controller on the final code, once, not by each task.
+- The short name follows a rename only when it was exactly the name (a count on the school's real setup: 14 of 103 teachers have a short name equal to their name).
 
 ## Known limits
 
@@ -22,6 +23,7 @@ For whoever builds stages 2 and 3 (the account, reliefs and exam duties follow t
 - History stores the field as the key `earlier_names`; only the page's word differs.
 - Toasts now stay longer when long, for every toast, not only this one.
 - Minor, left as is: `uses` matches a name exactly as stored, spaces included; the handler and `rename()` each clean the new name (two copies of one rule); `fixes.apply` works the rename map out again.
+- The workbook's own extra sheets (sheets a school adds to its setup workbook, which the app keeps and writes back) are never rewritten, so a teacher's old name stays there.
 - Not built: the account (role, committees, username, password, Telegram link), reliefs and exam duties still stay under the old name; the new name needs a new code slip.
 
 ## Checked in a browser
@@ -36,8 +38,12 @@ By the controller, with real clicks and typing, on a scratch copy of the seconda
 - As a head with the shared heads code: only provisional teachers' boxes are enabled; a blocked rename was refused with the sentence, box back, nothing saved; an unblocked head rename carried.
 - End to end: a made-up Lessons workbook naming the old name uploaded with no warning or fix problem; a teacher change made on step 8, then the teacher renamed on step 4: the card read the new name and step 8 drew.
 
+## Checked on the school's real setup (counts only)
+
+- Renaming each of 103 teachers in turn changed exactly the rows that named them (708 group places, 64 form-teacher places, 15 rules, no mismatch).
+- With the newest real timetable as the draft (1026 lessons), step 8's counts were the same before and after a rename (2140 warnings, 0 critical); without the earlier name kept there, 13 more warnings.
+
 ## Not checked
 
 - A head signed in as a person with departments (only the shared heads code was tried).
 - A narrow window; dark mode.
-- The real school's setup: the controller checks it by counts before the pull request.
