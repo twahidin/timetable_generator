@@ -79,7 +79,7 @@ def _commit(model, new_students, updated, added, removed, rows_now):
     new["checks"] = checks
     store.swap_model(new, students=len(new["students"]), ok=checks["ok"], problems=checks["problems"][:20], students_at=store.now(), files_behind=True)
     try: schedule_files()
-    except Exception as e: print("the files to download could not be scheduled (" + type(e).__name__ + ")", file=sys.stderr)   # the update is made
+    except Exception as e: print("warning: the files to download could not be scheduled (" + type(e).__name__ + ")", file=sys.stderr)   # the update is made
 
 def _files_run():
     """the one background thread: waits until FILES_WAIT seconds have passed since the last change, remakes the files,

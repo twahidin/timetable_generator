@@ -285,9 +285,9 @@ _cache = dict(stamp=None, value=None)
 def published():
     """the published timetable: dict(meta, model, codes {normalised code: student id}) or None"""
     meta_path = os.path.join(PUB, "meta.json")
-    if not os.path.exists(meta_path): return None
-    stamp = os.path.getmtime(meta_path)
-    with _lock:
+    with _lock:                                   # both folder swaps hold _lock across their two renames: a whole folder is always seen
+        if not os.path.exists(meta_path): return None
+        stamp = os.path.getmtime(meta_path)
         if _cache["stamp"] != stamp:
             with open(os.path.join(PUB, "model.pkl"), "rb") as f: model = pickle.load(f)
             meta = read_json(meta_path, {})

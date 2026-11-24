@@ -344,12 +344,16 @@ def a_publish_during_the_remake_wins():
     from ttgen import export as E; real = E.export_all; seen = {}
     def slow(m, out, **kw):
         r = real(m, out, **kw)
-        if not seen: seen["x"] = 1; time.sleep(1.1); store.export_all = real; publish(); store.export_all = slow
+        if not seen:
+            seen["x"] = 1; set_students([dict(PEOPLE[2], name="Chen New")])   # the publish carries a name the remake's model does not
+            store.export_all = real; publish(); store.export_all = slow; seen["turns"] = dict(store._turns)
         return r
     store.export_all = slow
     try: assert students.files_now() is True
     finally: store.export_all = real
-    assert "files_behind" not in store.published()["meta"] or store.published()["meta"]["files_behind"] is False
+    meta = store.published()["meta"]
+    assert "files_at" not in meta and "files_behind" not in meta and "students_at" not in meta   # the publish's own meta.json stands
+    assert pub_student("S003")["name"] == "Chen New" and pub_student("S002") is None and store._turns == seen["turns"]
 
 @t
 def a_failed_remake_leaves_the_files_behind():
@@ -361,6 +365,28 @@ def a_failed_remake_leaves_the_files_behind():
     finally: store.export_all = real
     assert store.published()["meta"]["files_behind"] is True and sorted(os.listdir(store.PUB)) == before
     assert [d for d in os.listdir(os.path.dirname(store.PUB)) if d.startswith("published.")] == []
+
+@t
+def a_reader_never_sees_the_folder_mid_swap():
+    fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
+    import threading
+    real = os.replace; between, done, got = threading.Event(), threading.Event(), {}
+    def reader():
+        between.wait(5)
+        try: got["v"] = store.published()
+        except Exception as e: got["e"] = e
+        done.set()
+    def rename(a, b):
+        real(a, b)
+        if a == store.PUB and not between.is_set():   # the published folder has just moved aside
+            between.set(); done.wait(0.5)             # the reader blocks on _lock, so it is not done yet
+    th = threading.Thread(target=reader, daemon=True); th.start()
+    os.replace = rename
+    try: assert students.files_now() is True
+    finally: os.replace = real
+    th.join(5)
+    assert between.is_set() and done.is_set() and "e" not in got, got
+    assert got["v"] is not None and pub_student("S002")["name"] == "Ben K" and got["v"]["meta"]["published_at"]
 
 @t
 def the_thread_runs_after_the_wait_and_after_a_restart():
