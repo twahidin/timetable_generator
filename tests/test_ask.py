@@ -425,6 +425,24 @@ def test_teachers_department_first_and_the_sentence():
         assert a["text"] == f"No one in {DEPT} is free to take {what}. 2 teachers outside {DEPT} are free.", a["text"]
         assert [o["who"]["name"] for o in a["options"]] == OUT, a
 
+def test_teachers_a_broken_rule_goes_last():
+    m, spec, days, pool = now(); seen, back = recorded()
+    try: plain = ask.teachers(m, spec, days, pool, lesson(LESSON))
+    finally: back()
+    names = [o["who"]["name"] for o in plain["options"]]; asked = [fx[0]["teachers"][0] for fx in seen]
+    assert len(names) >= 3 and not any(o["state"] == "no" for o in plain["options"]), plain["options"]
+    assert names == [t for t in asked if t in names], (names, asked)   # with no "no": fixes.choices' order, as judged
+    real, n = ask.check, [0]
+    def first_no(*a, **k):   # the first free teacher's change would break a rule
+        o = real(*a, **k); n[0] += 1
+        return dict(o, state="no", apply="anyway") if o is not None and n[0] == 1 else o
+    ask.check = first_no
+    try: a = ask.teachers(m, spec, days, pool, lesson(LESSON))
+    finally: ask.check = real
+    got = [o["who"]["name"] for o in a["options"]]
+    assert got == names[1:] + names[:1], (got, names)   # last among the options shown; the others keep their order
+    assert a["options"][-1]["state"] == "no" and a["more"] == plain["more"] and len(got) == len(names), a
+
 def test_teachers_sentence_without_a_department():
     with fresh(all_busy_but(OUT[:1])) as (m, spec, days, pool):
         bare = dict(spec, subjects=[dict(s, dept="") if s["subject"] == SUBJ else s for s in spec["subjects"]]); assert fixes._on_card(bare, SUBJ)[1] == ""

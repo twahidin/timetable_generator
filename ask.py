@@ -151,7 +151,8 @@ def teachers(m, spec, days, pool, sub):
     """who could take the lesson's row (sub["group"], default the first) in place of sub["teacher"] (else its first teacher; none: added) -> answer.
     Only the free teachers (fixes.choices' free: on no other lesson at any lesson of the row's key), in fixes.choices' order (step 5's teachers of the key,
     teachers on the subject or its step 3 card, the subject's department, anyone), judged through check until MOST options are made (more: the free teachers
-    not reached); a free teacher whose change breaks or bends a rule is listed as check judges it. A busy teacher is never an option. When no teacher of the
+    not reached); among the options made, one whose change breaks a rule (state "no") comes after all the others (a stable sort: "prefer" keeps its place,
+    the cut at MOST and more are unchanged). A busy teacher is never an option. When no teacher of the
     first three kinds is free the sentence says so: "No one in {department} is free to take {what}." (the step 3 card's department; with none on the card
     "No one who teaches {subject} is free to take {what}."), then how many outside the department are (with none: how many other teachers are)"""
     sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
@@ -174,6 +175,7 @@ def teachers(m, spec, days, pool, sub):
         if len(out) >= MOST: break
         reached += 1
         if o := one(t): out.append(o)
+    out.sort(key=lambda o: o["state"] == "no")   # stable: a teacher whose change breaks a rule after the others shown, the order kept otherwise
     what = fixes.what(row)
     if not free: text = f"No other teacher is free to take {what}."
     elif near: text = f"{_plural(len(free), 'teacher is', 'teachers are')} free to take {what}."

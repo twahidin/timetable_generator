@@ -12,6 +12,7 @@ Plan: `docs/superpowers/plans/2026-11-24-step8-one-page-panel.md`.
 - Sentences on the page must be true. So "No one in {dept} is free to take {what}. n teachers outside {dept} are free." (with no department: "No one who teaches {subject} is free to take {what}. n other teachers are free."), not "from another department".
 - Esc on the delete question also lets go of the lesson (as the old pop-out did). A person would not be hurt.
 - Right-click under a card's edge also selects. Right-click now selects the lesson and never lets go of it.
+- "Who else could teach it?" order. The spec said a teacher who bends or breaks a rule is listed after the clean ones. Built as: department order first (the lead's "all within the same department first"), and only a teacher who would break a rule ("Apply anyway") goes after the others shown. "Bends a rule" keeps its place in department order.
 
 ## Known limits
 
