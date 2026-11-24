@@ -41,7 +41,9 @@ on (NEW_WAIT); in the team's window alone and claimed once as late is; never of 
 morning time (the morning message counts it). The teacher who was away hears gone, as anyone told of a relief no longer theirs.
 covered:{absent}:{ckey}:{ack at}, Who covers you, to the teacher who is away, once an acknowledgement of a lesson of theirs: it names
 the relief teacher, whom they may see in the app from then on; never of a backup (exams), nor when the teacher who is away is the
-relief teacher. A relief moved and acknowledged by another is told anew; one moved before it went is dropped.
+relief teacher. A relief moved and acknowledged by another is told anew; one moved before it went is dropped. It is made, and goes,
+only from the earliest send-out time to before the evening work time (work_eve), on any day (GATES: _covered_may); one acknowledged
+outside that is told at the next earliest send-out time, if it is still so then (the app shows the name from the acknowledgement on).
 unlinked:{name}:{date}:{member}, the blocked-bot alert, to each of the team but name, once: Telegram refused a message to name
 because they blocked the bot, and the sender unlinked them and noted it (links.note_alert, one a person a day, with what was
 refused in plain words: refused); made only in the first team window at or after it was found (hours.team_window: at once in it,
@@ -79,7 +81,8 @@ stopped, again, kept): in school hours for its lesson (hours.teacher_open: from 
 cut-off's minute of a school day; on the lesson's own day from the earliest send-out time), while the lesson is not over. To the
 team: ask and askpick in the team's window (hours.team_open: a duty day, from the morning time to before the cut-off), or on the
 lesson's own day from the cut-off until it starts; the team's copy of cancelled in their window; the blocked-bot alert in the
-first of their windows after it was found. The others go at any hour,
+first of their windows after it was found. To the teacher who is away, Who covers you from the earliest send-out time to before
+the evening work time, on any day (to midnight when that is not after it). The others go at any hour,
 each named in ANY_HOUR with why (the late request, Relief needed again and the morning message keep the team's window by
 rules of their own, since none is made again). due does not make one outside its hours, and still_true drops one queued that is still waiting when its
 hours end (an outage, a pause Telegram asked for): due makes it again, under the same key, when they come, if it is still true
@@ -911,11 +914,20 @@ def _lesson_may(now, settings, pub, ref):
     return _teacher_may(now, settings, pub, ref.get("date") or str(ref.get("ends") or "")[:10], ref.get("ends"))
 
 
+def _covered_may(now, settings, pub, ref):
+    """Who covers you goes from the earliest send-out time to before the evening work time, on any day (to midnight when work_eve
+    is not after send_from)"""
+    h, t = _hours.of(settings), _fill._when(now).time()
+    return h.send_from <= t and (t < h.work_eve or h.work_eve <= h.send_from)
+
+
 # GATES[kind](now, settings, pub, its ref) -> whether a message of that kind may be made, and may go, now. A kind not here goes at
 # any hour, and is in ANY_HOUR with why. A later kind adds its line here, or to ANY_HOUR (a test holds every kind of CHECKS to one)
 GATES = {**{kind: _lesson_may for kind in TEACHER_KINDS}, "ask": _ask_may, "askpick": _ask_may,
          "cancelled": lambda now, settings, pub, ref: not ref.get("team") or _team_may(now, settings, pub),     # the team's copy alone
-         "unlinked": lambda now, settings, pub, ref: _team_may(now, settings, pub)}          # the blocked-bot alert: made again in its window (_unlinked)
+         "unlinked": lambda now, settings, pub, ref: _team_may(now, settings, pub),          # the blocked-bot alert: made again in its window (_unlinked)
+         "covered": _covered_may}                       # Who covers you: from send_from (06:45) to before work_eve (18:00), any day; an acknowledgement
+                                                        # outside that is told at the next send_from, if still so (the lead's answer 2, 24 Nov)
 ANY_HOUR = ("planned",                          # to the absent teacher: they need the evening to set work (call 9)
             "remind",                           # to the absent teacher, at remind_at the school day before (call 9)
             "officer",                          # to the reporting officer, at once (call 9)
@@ -924,8 +936,6 @@ ANY_HOUR = ("planned",                          # to the absent teacher: they ne
             "morning",                          # the morning message: made only from the morning time, claimed once a day, dropped at the cut-off
             "late",                             # the late request keeps the team's window by its own rule (_late, _late_true): it is never made again once
                                                 # dropped, so it must not be dropped as GATES' kinds are while nothing is published (a publish swaps folders)
-            "covered",                          # Who covers you: goes when the relief teacher acknowledges, at whatever hour (in the app in the
-                                                # evening too), to the teacher who is away, whom the quiet rule does not cover (call 13)
             "needed",                           # Relief needed again: as late, the team's window by its own rule (_needed, _needed_true), never made again
             "work",                             # Please set work: to the teacher who is away, at work_eve (18:00) and work_day (07:00) on purpose; the
                                                 # quiet rule is for the relief team and the relief teachers (the spec's "on purpose")

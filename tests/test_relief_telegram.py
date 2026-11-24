@@ -8938,14 +8938,15 @@ def who_covers_you_goes_once_to_the_absent_teacher_after_that_acknowledgement():
         assert json.loads(r["ref"]) == dict(id=i, absent=EVE, ckey=K5, who=SAM, at=ack, date="2026-10-13", ends="2026-10-13T11:30:00+08:00")
         at("09:10"); give(i, K5, MAYA); swept(); assert len(outs("covered")) == 1, "moved: nothing until the new one acknowledges"
         on_cover(MAYA, i, K5, "acknowledge"); swept(); assert said(EVE)[-1] == COVERED_K5.replace(SAM, MAYA) and len(outs("covered", EVE)) == 2, "told of the new one"
-        assert "covered" in TE.ANY_HOUR and "covered" not in TE.GATES and TE.CHECKS["covered"] is TE._covered_true and "covered:" in TE.TOLD
+        assert "covered" in TE.GATES and "covered" not in TE.ANY_HOUR and TE.CHECKS["covered"] is TE._covered_true and "covered:" in TE.TOLD
 
 @t
 def who_covers_you_is_not_said_when_it_is_not_so():
     with school(EVE, SAM, MAYA):
         i = absent(by=HUGO); give(i, K5, SAM); swept(); CV.acknowledge(i, K5, SAM); TE.sweep(); r, = outs("covered")
         item_ = lambda: dict(r, ref=json.loads(r["ref"]))
-        at("22:00"); assert TE.still_true(item_()) is True, "at any hour: an acknowledgement falls in the day"
+        at("22:00"); assert TE.still_true(item_()) is False, "the evening: it waits for the morning"
+        at("06:45", 13); assert TE.still_true(item_()) is True, "the morning: an acknowledgement falls in the day"
         at("09:05"); give(i, K5, MAYA); assert TE.still_true(item_()) is False and send() == 0 and outs("covered")[0]["state"] == "dropped" and COVERED_K5 not in said(EVE), "taken back before it went"
         CV.acknowledge(i, K5, MAYA); TE.sweep(); r, = outs("covered", EVE)[1:]; at("11:30", 13); assert TE.still_true(item_()) is False and send() == 0, "the lesson is over"
         at("10:00", 13); assert TE.still_true(item_()) is True
@@ -9379,6 +9380,65 @@ def the_morning_message_leaves_out_a_team_member_away_the_whole_day():
         absent(teacher=EVE, dates=("2026-10-14",)); absent(teacher=RUTH); FL.run(); ticked_m("06:30"); assert morning_to() == sorted([EVE, LEE, TEAM]), "tomorrow"
     with record(EVE, **ON_TEAM), record(RUTH, **ON_TEAM), school(EVE, RUTH):              # everyone on duty away the whole day: all get it
         absent(); absent(teacher=RUTH); FL.run(); ticked_m("06:30"); assert morning_to() == [EVE, RUTH], "a message nobody gets is worse"
+
+def covered_states(): return [r["state"] for r in outs("covered")]
+
+@t
+def who_covers_you_waits_for_the_morning_when_acknowledged_in_the_evening():
+    with school(EVE, SAM):                                                                 # acknowledged at 21:00 on Monday, a school day, for Tuesday's lesson
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); at("21:00"); CV.acknowledge(i, K5, SAM); swept()
+        assert told_of("covered") == [] and [x for x in dues() if x["kind"] == "covered"] == [], "not made at 21:00"
+        at("06:44", 13); swept(); assert told_of("covered") == []
+        at("06:45", 13); swept(); r, = outs("covered")
+        assert (r["key"], r["state"], r["text"]) == (f"covered:{EVE}:{K5}:2026-10-12T21:00:00+08:00", "sent", COVERED_K5), "its key holds the acknowledgement's time"
+        for hm in ("06:46", "09:00", "10:29"): at(hm, 13); swept()
+        assert covered_states() == ["sent"] and said(EVE).count(COVERED_K5) == 1, "once"
+    for hm, held in (("10:00", False), ("17:59", False), ("18:00", True)):
+        with school(EVE, SAM):
+            i = absent(by=HUGO); give(i, K5, SAM); swept(); at(hm); CV.acknowledge(i, K5, SAM); swept()
+            assert told_of("covered") == ([] if held else [("covered", EVE)]), hm
+            at("06:44", 13); swept(); assert told_of("covered") == ([] if held else [("covered", EVE)]), hm
+            at("06:45", 13); swept(); assert told_of("covered") == [("covered", EVE)] and said(EVE).count(COVERED_K5) == 1, hm
+    with school(EVE, SAM, since="2026-10-09T08:00:00+08:00"):                              # told on Friday, acknowledged on Saturday at 09:00
+        at("10:00", 9); i = absent(by=HUGO); give(i, K5, SAM); swept(); assert len(said(SAM)) == 1
+        at("09:00", 10); CV.acknowledge(i, K5, SAM); swept(); assert told_of("covered") == [("covered", EVE)] and said(EVE).count(COVERED_K5) == 1, "any day: at once"
+
+@t
+def who_covers_you_taken_back_in_the_night_is_never_told():
+    for why, back in (("a request to change", lambda i: CV.ask_change(i, K5, "A parent meeting", SAM)), ("the relief moved", lambda i: give(i, K5, MAYA))):
+        with school(EVE, SAM, MAYA):
+            i = absent(by=HUGO); give(i, K5, SAM); swept(); at("21:00"); CV.acknowledge(i, K5, SAM); swept(); at("22:00"); back(i); swept()
+            for hm in ("06:45", "07:00", "10:00"): at(hm, 13); swept()
+            assert told_of("covered") == [] and COVERED_K5 not in said(EVE), why
+
+@t
+def who_covers_you_of_an_early_lesson_goes_before_it():
+    m = SCHOOL["model"]; old = dict(m["school"])
+    try:
+        with school(EVE, SAM):
+            m["school"].update(start_time="06:30")                                         # P3-P5 from 07:30
+            i = absent(by=HUGO); give(i, K2, SAM); swept(); at("21:00"); CV.acknowledge(i, K2, SAM); swept(); assert told_of("covered") == []
+            at("06:45", 13); swept(); r, = outs("covered"); assert r["state"] == "sent" and "1C Science · P3–P5 (07:30)" in r["text"], r["text"]
+    finally: m["school"].clear(); m["school"].update(old)
+
+@t
+def who_covers_you_queued_before_the_evening_and_held_up_is_made_again_in_the_morning():
+    with school(EVE, SAM):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); at("17:59"); CV.acknowledge(i, K5, SAM); TE.sweep(); assert covered_states() == ["queued"]
+        at("18:00"); send(); assert covered_states() == ["dropped"] and COVERED_K5 not in said(EVE), "its hours ended while it waited"
+        swept(); at("23:00"); swept(); at("06:44", 13); swept(); assert covered_states() == ["dropped"], "not made again in the evening or the night"
+        at("06:45", 13); swept(); assert covered_states() == ["sent"] and said(EVE).count(COVERED_K5) == 1, "made again, under the same key, and goes once"
+        at("07:00", 13); swept(); assert covered_states() == ["sent"] and said(EVE).count(COVERED_K5) == 1
+
+@t
+def who_covers_you_keeps_the_morning_to_the_evening_work_time():
+    assert "covered" in TE.GATES and "covered" not in TE.ANY_HOUR and TE.GATES["covered"] is TE._covered_may
+    may = lambda hm, **times: TE._covered_may(t_(13, hm), dict(times=times), SCHOOL, {})
+    assert [may(hm) for hm in ("00:00", "06:44", "06:45", "17:59", "18:00", "23:59")] == [False, False, True, True, False, False]
+    assert [may(hm, send_from="07:00", work_eve="20:30") for hm in ("06:59", "07:00", "20:29", "20:30")] == [False, True, True, False], "the settings' times"
+    for eve in ("06:00", "07:00"):                                                         # the wrong order: from the earliest send-out time to midnight
+        assert [may(hm, send_from="07:00", work_eve=eve) for hm in ("06:59", "07:00", "18:00", "23:59")] == [False, True, True, True], eve
+    assert [TE._covered_may(t_(17, hm), {}, SCHOOL, {}) for hm in ("06:44", "06:45", "17:59", "18:00")] == [False, True, True, False], "a Saturday too"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
