@@ -9358,5 +9358,27 @@ def relief_rights_on_telegram_come_from_the_timetable_committee_tick():
             assert {"relief", "relief.save", "relief.settings"} <= links.rights_of(504) and "relief.team" not in links.rights_of(504) and links.chat_of(EXE) == 504
         assert "relief" not in links.rights_of(504) and links.chat_of(EXE) is None
 
+# ---- Send-out, the lead's answers (24 Nov) ----
+def morning_to(): return sorted(r["name"] for r in outs("morning"))
+MORNING_AWAY = "Away: Ms Evelyn Koh (whole day) · Ms Ruth Goh (whole day)"
+
+@t
+def the_morning_message_leaves_out_a_team_member_away_the_whole_day():
+    with record(RUTH, **ON_TEAM), school(TEAM, LEE, RUTH):                                # a team of three, Ruth away the whole day today
+        absent(); absent(teacher=RUTH); FL.run(); ticked_m("06:30")
+        assert morning_to() == [LEE, TEAM] and sorted(r["key"] for r in outs("morning")) == [f"morning:2026-10-13:{n}" for n in (LEE, TEAM)], morning_to()
+        a, b = [r["text"] for r in outs("morning")]
+        assert a == b and a.split("\n")[1] == "2 absences · 3 lessons to cover" and a.split("\n")[-1] == MORNING_AWAY, "her own absence is still counted and named"
+        assert tgdb.get_state("morning_last") == datetime.date(2026, 10, 13).toordinal(), "the day is claimed as before"
+    for what, made in (("periods only", lambda: (absent(), absent(teacher=RUTH, periods=[6, 6]))),
+                       ("cancelled", lambda: (absent(), change_record(absent(teacher=RUTH), lambda r: r.update(cancelled=dict(at=clock.now, by=RUTH, why="Made up."))))),
+                       ("an exam's backup", lambda: (absent(), change_record(absent(teacher=RUTH), lambda r: r.update(exams=dict(id="made-up", kind="exam")))))):
+        with record(RUTH, **ON_TEAM), school(TEAM, LEE, RUTH):
+            made(); FL.run(); ticked_m("06:30"); assert morning_to() == [LEE, RUTH, TEAM], what
+    with record(EVE, **ON_TEAM), school(TEAM, LEE, EVE):                                  # Eve on the team, away the whole of tomorrow
+        absent(teacher=EVE, dates=("2026-10-14",)); absent(teacher=RUTH); FL.run(); ticked_m("06:30"); assert morning_to() == sorted([EVE, LEE, TEAM]), "tomorrow"
+    with record(EVE, **ON_TEAM), record(RUTH, **ON_TEAM), school(EVE, RUTH):              # everyone on duty away the whole day: all get it
+        absent(); absent(teacher=RUTH); FL.run(); ticked_m("06:30"); assert morning_to() == [EVE, RUTH], "a message nobody gets is worse"
+
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
