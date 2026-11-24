@@ -76,16 +76,16 @@ t("an_optional_band_is_marked", () => {
 t("open_puts_a_group_outside_the_class_under_other", () => {
   const spec = fixture(), s = stu(spec, "S5"), p = SV.open(spec, CODES, s, {});
   assert.deepStrictEqual(p, { cls: "3B", band: { [ENG]: "3EL1", [HUM]: "", [OPA]: "", "Sec 3 Music Elective": "" }, other: ["3HIS2", "3OLD1"],
-    was: ["3EL1", "3HIS2", "3OLD1"], exemptWas: {} });
+    was: ["3EL1", "3HIS2", "3OLD1"], exemptWas: {}, dropped: [] });
   assert.deepStrictEqual(SV.groupsOf(p), ["3EL1", "3HIS2", "3OLD1"]);
   const v = SV.view(spec, CODES, skeleton(), s, p);
   assert.deepStrictEqual(v.other.slice(0, 2), [
-    { code: "3CCA1", subject: "Robotics", teacher: "Mrs Lee", room: "Lab", n: 1, size: 20, full: false, over: false, clash: "", on: false, was: false, off: false, why: "" },
-    { code: "3HIS2", subject: "History", teacher: "Mdm Wong", room: "Hist Rm 2", n: 1, size: 30, full: false, over: false, clash: "", on: true, was: true, off: false, why: "not a group of class 3B" }]);
+    { code: "3CCA1", subject: "Robotics", teacher: "Mrs Lee", room: "Lab", n: 1, size: 20, full: false, over: false, clash: "", on: false, was: false, off: false, why: "", dropped: false },
+    { code: "3HIS2", subject: "History", teacher: "Mdm Wong", room: "Hist Rm 2", n: 1, size: 30, full: false, over: false, clash: "", on: true, was: true, off: false, why: "not a group of class 3B", dropped: false }]);
 });
 t("a_group_no_longer_on_step_5_stays_ticked", () => {
   const spec = fixture(), s = stu(spec, "S5"), v = SV.view(spec, CODES, skeleton(), s, SV.open(spec, CODES, s, {}));
-  assert.deepStrictEqual(v.other[2], { code: "3OLD1", subject: "Literature", teacher: "Mr Yeo", room: "3B", n: 1, size: null, full: false, over: false, clash: "", on: true, was: true, off: false, why: "not on step 5" });
+  assert.deepStrictEqual(v.other[2], { code: "3OLD1", subject: "Literature", teacher: "Mr Yeo", room: "3B", n: 1, size: null, full: false, over: false, clash: "", on: true, was: true, off: false, why: "not on step 5", dropped: false });
   assert.deepStrictEqual(SV.apply(s, SV.open(spec, CODES, s, {})), { groups: ["3EL1", "3HIS2", "3OLD1"] });
   const gone = SV.view(spec, CODES, null, s, SV.open(spec, CODES, s, {})).other[2];   // with no skeleton: no subject known
   assert.deepStrictEqual([gone.code, gone.subject, gone.teacher, gone.why], ["3OLD1", "", "", "not on step 5"]);
@@ -234,7 +234,7 @@ t("a_new_student_with_no_class", () => {
   assert.deepStrictEqual(SV.bands(spec, CODES, ""), { bands: [], other: [] });
   assert.deepStrictEqual(SV.bands(spec, CODES, "9Z"), { bands: [], other: [] });
   const p = SV.open(spec, CODES, fresh, {});
-  assert.deepStrictEqual(p, { cls: "", band: {}, other: [], was: [], exemptWas: {} });
+  assert.deepStrictEqual(p, { cls: "", band: {}, other: [], was: [], exemptWas: {}, dropped: [] });
   assert.deepStrictEqual(SV.view(spec, CODES, skeleton(), fresh, p), { bands: [], other: [], cells: [], summary: "Nothing changed.", asks: [], changed: false });
   const q = copy(p); q.cls = "3B"; const v = SV.view(spec, CODES, skeleton(), fresh, q);
   assert.deepStrictEqual(v.bands.map(b => [b.band, b.pick]), [[ENG, ""], [HUM, ""], [OPA, ""], ["Sec 3 Music Elective", ""]]);
@@ -254,5 +254,80 @@ t("nothing_is_changed_in_place", () => {
   const was = copy([spec, sk, chen, p, CODES]);
   SV.view(spec, CODES, sk, chen, p); SV.apply(chen, p); SV.groupsOf(p); SV.clashes(sk, "3B", ["3EL2", "3GEO1"]);
   assert.deepStrictEqual([spec, sk, chen, p, CODES], was);
+});
+const ivan = () => ({ id: "S7", name: "Ivan Tan", class: "3B", groups: ["3EL2", "3HIS1", "3MUS1"] });
+const jia = () => ({ id: "S8", name: "Jia Wei", class: "3C", groups: ["3EL1", "3HIS2"] });
+t("a_class_change_drops_a_band_the_new_class_lacks", () => {
+  const spec = fixture(), s = ivan(); spec.students.push(s);
+  const p = SV.open(spec, CODES, s, {}), before = copy(p), q = SV.setClass(spec, CODES, p, "3C", {});
+  assert.deepStrictEqual(p, before);
+  assert.deepStrictEqual(q, { cls: "3C", band: { [ENG]: "3EL2", [HUM]: "3HIS1", [OPA]: "" }, other: [], was: ["3EL2", "3HIS1", "3MUS1"], exemptWas: {}, dropped: ["3MUS1"] });
+  assert.deepStrictEqual(SV.groupsOf(q), ["3EL2", "3HIS1"]); assert.deepStrictEqual(SV.apply(s, q), { groups: ["3EL2", "3HIS1"] });
+  const v = SV.view(spec, CODES, skeleton(), s, q);
+  assert.deepStrictEqual(v.other.find(o => o.code === "3MUS1"), { code: "3MUS1", subject: "Music", teacher: "Ms Ng", room: "", n: 0, size: null, full: false, over: false,
+    clash: "", on: false, was: true, off: true, why: "not a group of class 3C", dropped: true });
+  assert.deepStrictEqual(v.bands.map(b => b.band), [ENG, HUM, OPA]);
+  assert.deepStrictEqual(v.asks, []);   // a dropped group off the timetable asks nothing
+  assert.strictEqual(v.summary, "Moves to class 3C. Leaves 3MUS1 Music. 2 lessons change. No clash.");
+  assert.deepStrictEqual(v.cells.filter(c => c.code === "").map(c => [c.d, c.p, c.room, c.state]), [[0, 0, "3C", "same"], [2, 0, "3B", "gone"], [3, 6, "3B", "gone"]]);
+  const k = SV.keep(q, "3MUS1"), kv = SV.view(spec, CODES, skeleton(), s, k);
+  assert.deepStrictEqual([k.other, k.dropped], [["3MUS1"], []]); assert.deepStrictEqual(q.dropped, ["3MUS1"]);
+  const m = kv.other.find(o => o.code === "3MUS1"); assert.deepStrictEqual([m.on, m.dropped, m.why, m.n], [true, false, "not a group of class 3C", 1]);
+  assert.deepStrictEqual(SV.apply(s, k), { groups: ["3EL2", "3HIS1", "3MUS1"] });
+  assert.deepStrictEqual(SV.setClass(spec, CODES, q, "3B", {}).band["Sec 3 Music Elective"], "3MUS1");   // back to 3B: it comes back
+});
+t("a_class_change_drops_a_group_of_the_old_class_only", () => {
+  const spec = fixture(), s = jia(); spec.students.push(s);
+  const p = SV.open(spec, CODES, s, {}); assert.strictEqual(p.band[HUM], "3HIS2");
+  const q = SV.setClass(spec, CODES, p, "3B", {}), v = SV.view(spec, CODES, skeleton(), s, q);
+  assert.deepStrictEqual([q.band[HUM], q.dropped], ["", ["3HIS2"]]);
+  assert.strictEqual(band(v, HUM).pick, ""); assert.ok(band(v, HUM).options.every(o => !o.on));
+  const h = v.other.find(o => o.code === "3HIS2"); assert.deepStrictEqual([h.on, h.was, h.dropped, h.why, h.n], [false, true, true, "not a group of class 3B", 1]);
+  assert.deepStrictEqual(v.asks, ["No Sec 3 Humanities group is chosen."]);
+  assert.strictEqual(v.summary, "Moves to class 3B. Leaves 3HIS2 History. 4 lessons change. No clash.");
+  assert.deepStrictEqual(v.cells.filter(c => c.code === "3HIS2").map(c => c.state), ["gone", "gone"]);
+  assert.deepStrictEqual(SV.apply(s, q), { groups: ["3EL1"] });
+  const e = SV.setClass(spec, CODES, p, "3B", { [HUM]: true }); assert.strictEqual(e.band[HUM], SV.EXEMPT);
+  const old = copy(p); old.cls = "3B"; const ov = SV.view(spec, CODES, skeleton(), s, old);   // old picks handed in as they were
+  assert.strictEqual(band(ov, HUM).pick, ""); assert.deepStrictEqual(ov.asks, ["No Sec 3 Humanities group is chosen."]);
+  assert.strictEqual(ov.other.find(o => o.code === "3HIS2").dropped, true);
+  const iv = ivan(), ip = copy(SV.open(spec, CODES, iv, {})); ip.cls = "3C";
+  assert.strictEqual(SV.view(spec, CODES, skeleton(), iv, ip).other.find(o => o.code === "3MUS1").dropped, true);
+});
+t("drop_unticks_a_group_outside_the_class", () => {
+  const spec = fixture(), farah = stu(spec, "S5"), p = SV.open(spec, CODES, farah, {}), q = SV.drop(p, "3HIS2");
+  assert.deepStrictEqual([q.other, q.dropped, p.other], [["3OLD1"], ["3HIS2"], ["3HIS2", "3OLD1"]]);
+  const h = SV.view(spec, CODES, skeleton(), farah, q).other.find(o => o.code === "3HIS2");
+  assert.deepStrictEqual([h.on, h.dropped, h.why], [false, true, "not a group of class 3B"]);
+  assert.deepStrictEqual(SV.apply(farah, q), { groups: ["3EL1", "3OLD1"] });
+  assert.deepStrictEqual(SV.apply(farah, SV.keep(q, "3HIS2")), { groups: ["3EL1", "3HIS2", "3OLD1"] });
+});
+t("a_second_group_of_a_band_says_so", () => {
+  const spec = fixture(), s = { id: "S7", name: "Ivan Tan", class: "3B", groups: ["3HIS1", "3GEO1"] }, p = SV.open(spec, CODES, s, {});
+  assert.deepStrictEqual([p.band[HUM], p.other], ["3HIS1", ["3GEO1"]]);
+  const o = SV.view(spec, CODES, skeleton(), s, p).other.find(x => x.code === "3GEO1");
+  assert.deepStrictEqual([o.on, o.why, o.dropped], [true, "a second group of Sec 3 Humanities", false]);
+});
+t("two_whole_class_lessons_clash_as_one_pair", () => {
+  const sk = skeleton(); sk.classes["3B"].whole = [[0, 5, 1, "MA", "3B"], [0, 5, 1, "CCE", "3B"], [4, 0, 1, "CCE", "3B"], [4, 0, 1, "MA", "3B"]];
+  const spec = fixture(), aisha = stu(spec, "S1");
+  assert.deepStrictEqual(SV.view(spec, CODES, sk, aisha, SV.open(spec, CODES, aisha, {})).asks, ["CCE clashes on Mon period 6 with MA."]);
+  assert.strictEqual(SV.view(spec, CODES, sk, aisha, withBand(SV.open(spec, CODES, aisha, {}), HUM, "3GEO2")).summary,
+    "Moves from 3HIS1 History to 3GEO2 Geography. 4 lessons change. 1 clash.");
+});
+t("a_group_already_had_off_the_timetable_asks_nothing", () => {
+  const spec = fixture(), chen = stu(spec, "S3"); chen.groups.push("3DRA1");
+  const v = SV.view(spec, CODES, skeleton(), chen, SV.open(spec, CODES, chen, {}));
+  assert.strictEqual(opt(v, OPA, "3DRA1").off, true);
+  assert.deepStrictEqual(v.asks, ["3GEO1 clashes on Tue period 4 with 3EL2 English.", "3GEO1 clashes on Thu period 7 with CCE."]);
+});
+t("a_size_below_one_is_no_size", () => {
+  const spec = fixture(); spec.lessons[3].students = -5; spec.lessons[4].students = 0;
+  assert.deepStrictEqual(SV.bands(spec, CODES, "3B").bands[1].groups.map(x => x.size), [null, null, null]);
+  const chen = stu(spec, "S3"), v = SV.view(spec, CODES, skeleton(), chen, SV.open(spec, CODES, chen, {}));
+  assert.deepStrictEqual([opt(v, HUM, "3HIS1").size, opt(v, HUM, "3HIS1").full], [40, false]);
+  assert.deepStrictEqual([opt(v, HUM, "3GEO1").size, opt(v, HUM, "3GEO1").over], [null, false]);
+  const sk = skeleton(); sk.groups["3GEO2"].seats = -1;
+  assert.strictEqual(opt(SV.view(spec, CODES, sk, chen, SV.open(spec, CODES, chen, {})), HUM, "3GEO2").size, null);
 });
 console.log(`${n} cases passed`);
