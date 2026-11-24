@@ -4089,9 +4089,9 @@ function bdPopHTML() {   // the pop-out beside where the pointer was last presse
     const a = b.ask, dis = FX.busy ? " disabled" : "";
     return `<span>${esc(a.text)}</span>${(a.also || []).map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${a.ask ? `<span class="bdq">${esc(a.ask)}</span>` : ""}<button data-bdyes="1"${dis}>${esc(a.yes)}</button><button data-bdcancel="1">Cancel</button>`;
   }
-  if (b.ask) {   // a lesson dropped where another is: Swap, Put it beside, Push out, Cancel, as the place allows
+  if (b.ask) {   // a lesson dropped where another is: what collides there (or why it cannot simply go there), then Swap, Put it beside, Put it here anyway, Cancel, as the place allows
     const q = b.ask.q, dis = FX.busy ? " disabled" : "";
-    return `<span>${esc(q.text)}</span>${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.push ? `<button data-bdpush="1"${dis}>${esc(q.push)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
+    return `<span>${esc(q.text)}</span>${q.lines.map(l => `<span class="bdcl"><b>${esc(l.kind)}</b> ${esc(l.text)}</span>`).join("")}${q.more ? `<span class="muted small">and ${q.more} more</span>` : ""}${q.why ? `<span class="bdwhy">${esc(q.why)}</span>` : ""}${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.anyway ? `<button data-bdanyway="1"${dis}>${esc(q.anyway)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
   }
   return "";
 }
@@ -4160,7 +4160,7 @@ document.addEventListener("dblclick", e => {
 });
 function bdBusy() {   // a post starts or ends: the board's buttons that post follow it, without a redraw
   const box = $("#bdBox"); if (!box) return;
-  box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdpush], [data-bdyes], [data-bdlift], [data-bddel], [data-bddelgo], [data-bdlt], [data-bdlr], [data-bdlall]").forEach(x => { x.disabled = FX.busy; });
+  box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdanyway], [data-bdyes], [data-bdlift], [data-bddel], [data-bddelgo], [data-bdlt], [data-bdlr], [data-bdlall]").forEach(x => { x.disabled = FX.busy; });
 }
 const BDST = ["own", "ok", "prefer", "no", "na", "ask"];
 function bdPaint() {   // the cells and the strip of every row take the state of the card selected or pressed, and the cards it can be swapped with get an outline (classes only, so a drag in the air is not cancelled); rows it cannot be dropped on are dimmed
@@ -4255,8 +4255,7 @@ function bdJudge(c, s) {   // what a click or a drop on place s does: act "ask" 
   if (!s) return { why: "none" };
   if (s.state === "own") return { why: "own" };
   if (c.entry && bdTaken(c, s)) return { why: "taken" };   // a lesson of step 5's list is added only where its classes are free
-  const a = bdAsks(c, s);
-  if (a) { const q = Board.question(c, s, S.board.data); return (a.swap && q.swap) || (a.beside && q.beside) || (a.push && q.push) ? { act: "ask" } : { why: "stuck" }; }
+  if (bdAsks(c, s)) return { act: "ask" };   // another lesson is there: the box says what collides and what can be done (Cancel only when nothing can)
   if (bdThere(s)) return { act: "fetch" };   // another lesson is there and what can be done is judged on request (bdPlace)
   if (Board.lands(s)) return { act: "move" };
   return { why: "slot" };
@@ -4270,7 +4269,6 @@ function bdWhyText(a, drag) {
   if (a.why === "class") return drag ? BDWHY.class : BDWHY.classClick;
   if (a.why === "own") return Board.tell(a.slot, S.board.data.days);
   if (a.why === "slot") return a.slot.why || BDWHY.none;
-  if (a.why === "stuck") return `Another lesson is there and it cannot be moved out: ${(a.slot.push && a.slot.push.why) || a.slot.why || ""}`.trim();
   return BDWHY[a.why] || BDWHY.none;
 }
 /* hand: {from, to} when the place is on another teacher's (or room's) row than the one the lesson was taken from: the change of time
@@ -4294,7 +4292,7 @@ async function bdHold(text, pr, end, late) {   // the board takes no other chang
   if (gen !== BD.gen) { toast(BDWHY.gone); return BD_STOP; }   // another draft came meanwhile: the answer was for the old one
   return r;
 }
-async function bdPlace(card, d, p) {   // the one slot at (d, p) for the card with its push out and place beside judged (GET /api/draft/place), or null with the server's sentence said
+async function bdPlace(card, d, p) {   // the one slot at (d, p) for the card with what collides there and its place beside judged (GET /api/draft/place), or null with the server's sentence said
   const j = await fxGet(`/api/draft/place?id=${encodeURIComponent(card.id)}&d=${encodeURIComponent(d)}&p=${encodeURIComponent(p)}`);
   return j && typeof j.state === "string" ? j : null;
 }
@@ -4329,9 +4327,9 @@ function bdGo(c, at, drag, end) {   // a place clicked or dropped on: along the 
   if (at.d === c.d && at.p === c.p) { bdHandAsk(c, hand.from, hand.to, null, end, false); return; }
   bdTry(c, at, drag, end, hand);
 }
-function bdTimeThen(c, fix, hand) {   // a change of time; with hand, the hand-over is asked after it: a plain clean move waits for the answer and both go as one batch; a forced move, a swap or a push is made first on its own
+function bdTimeThen(c, fix, hand) {   // a change of time; with hand, the hand-over is asked after it: a plain clean move waits for the answer and both go as one batch; a forced move or a swap is made first on its own
   if (!hand) { bdSend("/api/draft/fix", fix, c); return; }
-  if (fix.kind === "move" && !fix.force && !fix.push) { bdHandAsk(c, hand.from, hand.to, fix); return; }
+  if (fix.kind === "move" && !fix.force) { bdHandAsk(c, hand.from, hand.to, fix); return; }
   bdSend("/api/draft/fix", fix, c).then(ok => { if (ok) bdHandNext(c.id, hand); });
 }
 async function bdHandNext(id, hand) {   // the change of time was made: once the board has it, the hand-over is asked
@@ -4402,7 +4400,7 @@ async function bdSend(url, body, c, keep, o) {
     if (S.board !== b) { if (j) await fxAfter(j); return !!j; }
     if (j) {
       b.sel = (keep || (o && o.stay)) && c ? c.id : null; b.held = null; b.pt = ""; b.hv = "";   // o.stay: a change made from the page's lists or answers, the lesson staying selected
-      if (keep || (body && body.push)) b.side = "tray";   // a lift or a push: the lesson is shown where it now waits
+      if (keep) b.side = "tray";   // a lift: the lesson is shown where it now waits
       const l = (j.fixes || []), last = l.length ? l[l.length - 1] : null, batch = last && last.batch ? l.filter(f => f.batch === last.batch) : last ? [last] : [];
       b.note = undoing ? (was ? `Undone: ${was.text || ""}` : "") : o && o.note ? o.note : batch.map(f => f.text || "").filter(Boolean).join(" ");   // fixes made together are said together
       ok = true;
@@ -4456,8 +4454,8 @@ function bdClick(b) {   // true when the click was the board's
     const x = bd.del, c = x && bdCard(x.id); if (!c) return true;
     bdSend("/api/draft/fix", Board.deleteFix(c, x.j), c); return true;
   }
-  if (d.bdswap !== undefined || d.bdpush !== undefined || d.bdbeside !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
-    const a = bd.ask, c = a && bdCard(a.id), how = d.bdswap !== undefined ? "swap" : d.bdbeside !== undefined ? "beside" : "push";
+  if (d.bdswap !== undefined || d.bdbeside !== undefined || d.bdanyway !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
+    const a = bd.ask, c = a && bdCard(a.id), how = d.bdswap !== undefined ? "swap" : d.bdbeside !== undefined ? "beside" : "anyway";
     if (c) bdTimeThen(c, Board.fix(c, a.slot, how), a.hand); return true;   // dropped on another teacher's or room's row: the hand-over is asked after it
   }
   if (d.bdlift !== undefined) { const A = bd.about, c = A && A.card !== null ? bdCard(A.card) : null; if (c && !c.entry && !bdInTray(c)) bdSend("/api/draft/fix", Board.liftFix(c), c, true); return true; }   // the page's lesson, lifted out: then selected in Not placed
@@ -4649,7 +4647,7 @@ document.addEventListener("dragover", e => {   // over a place: the cells it wou
   const key = `${row.dataset.row}|${row.dataset.d}|${p}|${o ? o.id : ""}|${a.slot ? a.slot.state : a.why}`;
   if (key === b.hv) return;
   b.hv = key; bdOver(row, o ? o.p : p, o || c); bdTrayLit(false);
-  b.pt = a.slot && a.why !== "stuck" && a.why !== "taken" ? bdTell(a.slot, c) : wait ? bdAirText(b) : bdWhyText(a, true);
+  b.pt = a.slot && a.why !== "taken" ? bdTell(a.slot, c) : wait ? bdAirText(b) : bdWhyText(a, true);
   if (hand && (a.slot || wait)) b.pt = `${b.pt} ${bdHandHint(hand, false)}`.trim();
   bdLineDraw();
 });
@@ -4780,7 +4778,7 @@ function akTitle(b) {   // the tab's heading: the title of the last answer about
   if (sub.kind === "place") return `${akRowName({ by: sub.by, cls: sub.name, name: sub.name })} · ${(d.days || [])[sub.d] || ""} period ${sub.p} · empty`;
   const c = bdCard(sub.id); return c ? c.what : `Lesson ${sub.id}`;
 }
-const akWithdraw = b => { if (b.ask && b.ask.ak) { b.ask = null; bdLineDraw(); } };   // the line's "Apply anyway?" from the Ask tab goes when the tab moves on: pointed elsewhere, Clear, another question
+const akWithdraw = b => { if (b.ask && b.ask.ak) { b.ask = null; bdLineDraw(); } };   // the line's "Apply anyway?" from the Lesson or Empty period page goes when that page moves on: pointed elsewhere, Clear, another question
 function akOpen(sub, show = true) {   // the page is about sub now (the log stays), shown unless show is false; an entry of step 5's list has no page
   const b = S.board; if (!b || !sub) return;
   const c = sub.kind === "lesson" ? bdCard(sub.id) : null; if (c && c.entry) return;
@@ -4910,7 +4908,7 @@ function akShow(o) {   // "Show on the board": the option's lesson selected and 
   if (els[0]) els[0].scrollIntoView({ block: "nearest", inline: "center" });
   els.forEach(x => x.classList.add("flash")); setTimeout(() => els.forEach(x => x.classList.remove("flash")), 1200);
 }
-function akClick(el) {   // true when the click was the Ask tab's
+function akClick(el) {   // true when the click was on the Lesson or Empty period page
   const d = el.dataset, b = S.board, A = b && b.about; if (!A) return false;
   if (d.akq !== undefined) { akAsk(d.akq); return true; }
   if (d.akgroup !== undefined) { A.sub = Object.assign({}, A.sub, { group: d.akgroup }); if (A.les) { A.les.group = d.akgroup; bdLessonFetch(); } bdSideDraw(); return true; }   // a band's chip: that group's questions and lists
