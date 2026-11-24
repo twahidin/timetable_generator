@@ -1,7 +1,7 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
-import copy, hashlib, json, os, re, secrets, shutil, threading, uuid
+import copy, hashlib, json, os, re, secrets, shutil, sys, threading, uuid
 from ttgen.export import ENTIRE, PALETTE, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
@@ -324,6 +324,11 @@ def publish():
         sp, tp = paths()
         store.publish(sp, tp, source=meta.get("source"), spec=rec["spec"], log=lambda *x: None, edit=fixes.editor(fl, {}),
                       extra=dict(compared_v=j["setup_version"], open=j["open"], left=left, decisions={k: d["answer"] for k, d in decisions.items()}, fixes=list(texts)))
+        try:                          # a student save that landed after the setup was read above is put back on (nobody is removed)
+            import students
+            students.catch_up()
+        except Exception as e:        # the publish is made: this never fails or undoes it
+            print(f"students.catch_up failed: {type(e).__name__}", file=sys.stderr)
         store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), published_fixes=len(fl)))
         return dict(j, published=True)
 

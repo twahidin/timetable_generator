@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, compare, draft, history, putback, refit, refit_plan, store, sync, typed, versions
+import access, checks, compare, draft, history, putback, refit, refit_plan, store, students, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
@@ -766,14 +766,63 @@ def post_setup_changes():
         sync.head_prepare(ops, depts)    # a teacher a head adds is provisional, in one of their departments
         split = lambda spec, o: sync.head_split(spec, o, depts)
     since = _int(body.get("since"))
-    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split, by=by())
+    told = {}
+    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split, by=by(), told=told)
     except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
     reply = _changes_reply(since, client, v)
     if mine is not None: reply["mine"] = mine    # the version of the sender's own ops: the page applies patches below it first and above it last
     if refused: reply["refused"] = [dict(i=i, why=why) for i, why in refused]
+    said = _follow_students(told)
+    if said: reply["students"] = said
     return reply
+
+STUDENTS_NOT_UPDATED = "The published timetable was not updated. Press Update the published timetable on the Students step."
+
+def _follow_students(told):
+    """bring the students a save named up to date on the published timetable: {"outcome": ...}, {"error": ...} when that
+    failed (the save itself stands; only the exception's type is printed), or None when there is nothing to say"""
+    if not told.get("students"): return None
+    try: out = students.follow(told["students"], by(), told.get("batch"))
+    except Exception as e:
+        print(f"students.follow failed: {type(e).__name__}", file=sys.stderr)
+        return {"error": STUDENTS_NOT_UPDATED}
+    if out is None: return None
+    try: return {"outcome": out, "status": students.status()}
+    except Exception as e:    # the update is made: only the status line is missing
+        print(f"students.status failed: {type(e).__name__}", file=sys.stderr)
+        return {"outcome": out}
+
+@app.get("/api/students/published")
+@need("committee")
+def students_published():
+    return jsonify(students.status())
+
+@app.get("/api/students/skeleton")
+@need("committee")
+def students_skeleton():
+    k = students.skeleton()
+    if k is None: return {"error": "No timetable is published yet."}, 404
+    return _gz(jsonify(k))
+
+@app.post("/api/students/update")
+@need("committee")
+def students_update():
+    """bring the whole student list into step with the published timetable. expect: the counts {change, add, remove}
+    the member was asked about (an older page sends none); when they no longer hold nothing is written"""
+    body = request.get_json(force=True, silent=True)
+    expect = None
+    if isinstance(body, dict) and "expect" in body:
+        e = body["expect"]
+        if not (isinstance(e, dict) and all(type(e.get(k)) is int for k in ("change", "add", "remove"))):
+            return {"error": "Check the numbers and press Update again."}, 400
+        expect = {k: e[k] for k in ("change", "add", "remove")}
+    out = students.update_all(by(), expect=expect)
+    if out is None: return {"error": "No timetable is published yet."}, 409
+    if out.get("changed"):
+        return {"error": "The list or the published timetable changed. Check the numbers and press Update again.", "status": students.status()}, 409
+    return jsonify(outcome=out, status=students.status())
 
 @app.get("/api/setup/copies")
 @need("committee")
@@ -1381,7 +1430,8 @@ def pub_info():
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
                 files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []),
                 choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""),
-                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
+                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []),
+                files_behind=bool(m.get("files_behind")))
 
 def _group_label(p):
     """the committee page's label for a person: their role's label, then " · " and their committees' labels joined by
@@ -2176,10 +2226,14 @@ def history_back():
         refused = sync.head_split(spec, o, depts)[1]
         return refused[0][1] if refused else None
     tag = {"putback": unit, "putback_of": es[0].get("as"), "putback_ts": es[0].get("ts")}
-    try: store.apply_changes(ops, "history", check=check, since=v0, by=by(), tag=tag)
+    told = {}
+    try: store.apply_changes(ops, "history", check=check, since=v0, by=by(), tag=tag, told=told)
     except store.Replaced: return {"error": REPLACED_MEANWHILE}, 409
     except store.Refused as x: return {"error": str(x)}, 409
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
+    said = _follow_students(told)    # the published timetable follows a put back too
+    if said and "error" in said:
+        return {"done": True, "text": "Put back. The published timetable was not updated: press Update the published timetable on the Students step."}
     return {"done": True, "text": "Put back."}
 
 ONLY_ADMIN = "Only an admin can open this page."
@@ -3433,6 +3487,8 @@ def events_who(id):
 
 startup_log()
 move_relief_lists()
+try: students.resume_files()                                     # the files to download, if a restart found them behind a student change
+except Exception as e: print("warning: the files to download were not resumed (" + type(e).__name__ + ")", file=sys.stderr)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
