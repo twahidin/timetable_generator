@@ -198,4 +198,91 @@ def drop_removes():
     d = {"people": {}}
     assert P.drop(d, NT3)["role"] is None and d["removed"] == {NT3: 1}
 
+from relief import links, tgdb  # noqa: E402
+
+def tg_state():
+    with tgdb.db(read=True) as c:
+        return ({r["name"]: (r["chat"], r["handle"], r["at"]) for r in c.execute("SELECT name, chat, handle, at FROM links")},
+                {r["name"] for r in c.execute("SELECT name FROM codes")},
+                {r["k"] for r in c.execute("SELECT k FROM state")},
+                {r["chat"] for r in c.execute("SELECT chat FROM talks")})
+
+def tg_clear():
+    with tgdb.db() as c:
+        for tb in ("links", "codes", "state", "talks"): c.execute(f"DELETE FROM {tb}")
+
+def tg_talk(chat):
+    with tgdb.db() as c: c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, 'x', '{}', 9e12)", (chat,))
+
+@t
+def move_moves_the_link():
+    tg_clear()
+    links.link(NT3, 101, "@nt3"); links.link(ARJUN, 102, "@arjun")
+    before = tg_state()[0][NT3]
+    links.new_code(NT3); links.new_code(ARJUN); tg_talk(101); tg_talk(102)
+    with tgdb.db() as c:
+        c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (links.BLOCKED + NT3,))
+        c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (f"{links.ALERT}{NT3}:2026-11-24",))
+        c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (f"{links.ALERT}{ARJUN}:2026-11-24",))
+    assert links.move(NT3, LEE) == "moved"
+    ln, codes, st, talks = tg_state()
+    assert NT3 not in ln and ln[LEE] == before and ln[ARJUN][0] == 102, ln
+    assert codes == {ARJUN}, codes
+    assert st == {links.BLOCKED + LEE, f"{links.ALERT}{ARJUN}:2026-11-24"}, st
+    assert talks == {101, 102}, talks
+    assert links.move(NT3, LEE) == "none"                         # twice is harmless
+    assert tg_state()[0][LEE] == before
+
+@t
+def move_keeps_the_new_blocked_note():
+    tg_clear()
+    links.link(NT3, 101, "@nt3")
+    with tgdb.db() as c:
+        c.execute("INSERT INTO state(k, v) VALUES (?, '\"old\"')", (links.BLOCKED + NT3,))
+        c.execute("INSERT INTO state(k, v) VALUES (?, '\"new\"')", (links.BLOCKED + LEE,))
+    assert links.move(NT3, LEE) == "moved"
+    assert links.blocked(LEE) == "new" and links.blocked(NT3) is None
+
+@t
+def move_kept():
+    tg_clear()
+    links.link(NT3, 101, "@nt3"); links.link(LEE, 103, "@lee")
+    links.new_code(NT3); tg_talk(101); tg_talk(103)
+    links.note_alert(NT3, "x")
+    with tgdb.db() as c: c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (links.BLOCKED + NT3,))
+    assert links.move(NT3, LEE) == "kept"
+    ln, codes, st, talks = tg_state()
+    assert set(ln) == {LEE} and ln[LEE][0] == 103 and codes == set() and st == set() and talks == {103}, tg_state()
+
+@t
+def move_none():
+    tg_clear()
+    links.link(ARJUN, 102, "@arjun")
+    links.new_code(NT3); links.new_code(ARJUN); links.note_alert(NT3, "x"); links.note_alert(ARJUN, "x")
+    with tgdb.db() as c: c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (links.BLOCKED + NT3,))
+    assert links.move(NT3, LEE) == "none"
+    ln, codes, st, _ = tg_state()
+    assert set(ln) == {ARJUN} and codes == {ARJUN} and len(st) == 1 and next(iter(st)).startswith(links.ALERT + ARJUN), tg_state()
+
+@t
+def move_same_or_blank_changes_nothing():
+    tg_clear()
+    links.link(NT3, 101, "@nt3"); links.new_code(NT3); links.note_alert(NT3, "x")
+    before = tg_state()
+    for a, b in ((NT3, NT3), ("", LEE), (NT3, ""), ("", ""), (None, LEE), (NT3, None)):
+        assert links.move(a, b) == "none", (a, b)
+        assert tg_state() == before, (a, b)
+
+@t
+def move_colon_name_spares_other_alerts():
+    tg_clear()
+    links.link("A:B", 101, "@x")
+    links.note_alert("A:B", "x"); links.note_alert("A", "y")          # "A:B" must not touch alert:A:..., nor "A" alert:A:B:...
+    with tgdb.db() as c: c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (f"{links.ALERT}A:B:C:2026-11-24",))
+    assert links.move("A", LEE) == "none"                              # alert:A:B:... is "A:B"'s, not "A"'s
+    keys = tg_state()[2]
+    assert any(k.startswith(f"{links.ALERT}A:B:") for k in keys) and not any(k.startswith(f"{links.ALERT}A:2") for k in keys), keys
+    assert links.move("A:B", LEE) == "moved"
+    assert set(links.alerts("2000-01-01")) == {("A:B:C", "2026-11-24")}, links.alerts("2000-01-01")   # only the other name's alert is left
+
 print(f"{COUNT} renames tests passed")
