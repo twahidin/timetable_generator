@@ -9,15 +9,20 @@ Stage 2 is the publish question on step 9: each renamed teacher with an account 
 - A failure in the account or link step after the publish is said in that teacher's sentence ("could not be finished") and is not retried. The retry belongs to stage 3. Cost: in that rare case the old account stays under a name no longer on the timetable.
 - The last-admin guard is pinned by unit test only (Task 1). The route cannot reach it, because the person publishing an account pair is always a usable admin.
 - The blocked-bot note follows only while there is no link. When the link moves, neither name keeps a note; when there is no link under the old name, the note passes to the new name if the new name has no link and no note of its own; when the new name already has a link, the old note is deleted. A person who blocked the bot is still that person after a rename.
+- A choice is sent and judged by the pair (old and new name): once the old name is claimed by another new name, the publish is refused and the page forgets its picks.
+- One lock is held around a publish's three steps (the pairs, the publish, applying the choices); the exams-to-relief sync runs after it, under its own lock.
+- Same person is not offered when the join would leave no admin who can sign in; the publish's join checks again and writes nothing if so.
 
 ## Known limits
 
 - A Telegram message waiting to be sent to the old name at the moment of the publish is not delivered, and buttons on messages already sent under the old name stop matching. Stage 3 removes both.
 - Reliefs and exam duties do not follow a rename.
 - A rename published before this stage is not asked about: the pair needs the old name on the timetable published now.
-- The setup is read twice at a publish (the pairs, then the publish). A rename saved in the milliseconds between is published without being asked about, and its old account stays under the old name.
+- The setup is still read twice at a publish, inside the lock: a rename saved on step 4 in the moment between is published without being asked about, and its old account stays under the old name.
 - A failure after the publish shows "could not be finished" and is not retried.
 - Two old names claiming one new name, both "same": the second join raises after its link was already dropped.
+- A Telegram link moved or forgotten on its own (a pair with no account) leaves no History entry.
+- "Published now" shows only the last publish's lines.
 
 ## Checked in a browser
 
