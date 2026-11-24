@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- Work only in the worktree `/Users/joetay/Developer/tt-generator/tt-student-groups`, branch `student-groups`. Never commit to `main`. Never push, open a pull request, merge or deploy.
+- Work only in the worktree `tt-student-groups` beside the dev checkout, branch `student-groups`. Never commit to `main`. Never push, open a pull request, merge or deploy.
 - **NEVER run `git stash`, `git stash pop`, `git checkout -- <file>`, `git reset --hard` or switch branches.** To see old code use `git show REV:path > <scratch file>`. After each task `git stash list` must still show exactly the two old entries ("On import-publish: verify-base-import-publish", "On main: pre-sync copy of the critical-vs-warning edits").
 - Never use `pkill`/`killall` by name or pattern. Stop only processes you started, by PID.
-- Python is `/Users/joetay/Developer/tt-generator/timetable_generator/.venv/bin/python` (written `$PY` below). The worktree has no `.venv` of its own.
+- Python is the dev checkout's `.venv/bin/python` (written `$PY` below). The worktree has no `.venv` of its own.
 - Never print, read aloud or edit the values in `.claude/launch.json`. No test may call a model API or the Telegram API. Tests and browser checks use a scratch `DATA_DIR`, never the repo's `data/`.
 - The repository is public: made-up names only (the fixture names below), the school is only ever "CTSS". No real student or teacher name, in code, tests, docs or commit text.
 - Do not change the `ttgen` package (it is copied under `skill/` and a test keeps the two identical). Import from it freely.
