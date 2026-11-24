@@ -78,7 +78,7 @@ t("uses finds every place that names a teacher exactly", () => {
 });
 t("a rename carries to groups, form teachers and Teacher rules, and keeps the old name", () => {
   const s = rspec(), r = TeacherView.rename(s, 0, "  Mdm   Lee ");
-  assert.deepStrictEqual(r, { was: "New Teacher 3", now: "Mdm Lee", groups: 2, classes: ["2A"], rules: 1, typed: [2], notes: 1, twice: false });
+  assert.deepStrictEqual(r, { was: "New Teacher 3", now: "Mdm Lee", groups: 2, classes: ["2A"], rules: 1, typed: [2], notes: 1, twice: false, short: "NT3" });
   assert.strictEqual(s.teachers[0].name, "Mdm Lee");
   assert.deepStrictEqual(s.teachers[0].earlier_names, ["New Teacher 3"]);
   assert.deepStrictEqual(s.lessons[0].teachers, ["Mdm Lee", null]);            // the empty place stays where it is
@@ -91,11 +91,17 @@ t("a rename carries to groups, form teachers and Teacher rules, and keeps the ol
 });
 t("not a rename: a blank new name, a row with no name yet, the same name, no such row", () => {
   const s = rspec(), before = JSON.stringify(s);
-  for (const to of ["", "   ", null, "New Teacher 3", " New Teacher 3 "]) assert.strictEqual(TeacherView.rename(s, 0, to), null);
+  for (const to of ["", "   ", null]) assert.strictEqual(TeacherView.rename(s, 0, to), null);
+  for (const to of ["New Teacher 3", " New Teacher 3 ", "New  Teacher   3"]) { assert.deepStrictEqual(TeacherView.rename(s, 0, to), { same: true }); assert.strictEqual(JSON.stringify(s), before); }
   assert.strictEqual(TeacherView.rename(s, 9, "X"), null);
   s.teachers.push({ _id: "z", name: "" }); const b2 = JSON.stringify(s);
   assert.strictEqual(TeacherView.rename(s, 3, "Somebody"), null); assert.strictEqual(JSON.stringify(s), b2);
   s.teachers.pop(); assert.strictEqual(JSON.stringify(s), before);
+});
+t("cleanName trims and makes runs of spaces one", () => {
+  assert.strictEqual(TeacherView.cleanName("  Mdm   Lee "), "Mdm Lee");
+  assert.strictEqual(TeacherView.cleanName(null), ""); assert.strictEqual(TeacherView.cleanName(undefined), ""); assert.strictEqual(TeacherView.cleanName(""), "");
+  assert.strictEqual(TeacherView.cleanName(7), "7");
 });
 t("a name another teacher has is refused; a change of only case or spacing is a rename", () => {
   const s = rspec(), before = JSON.stringify(s);
@@ -131,8 +137,8 @@ t("two rows of the old name: the name changes and nothing follows", () => {
 });
 t("a short name that was the name follows it; any other short name stays", () => {
   const s = rspec(); s.teachers[0].short = "New Teacher 3";
-  TeacherView.rename(s, 0, "Mdm Lee"); assert.strictEqual(s.teachers[0].short, "Mdm Lee");
-  TeacherView.rename(s, 1, "Mr Arjun"); assert.strictEqual(s.teachers[1].short, "Arjun");          // a short name of its own is left
+  assert.strictEqual(TeacherView.rename(s, 0, "Mdm Lee").short, null); assert.strictEqual(s.teachers[0].short, "Mdm Lee");
+  assert.strictEqual(TeacherView.rename(s, 1, "Mr Arjun").short, "Arjun"); assert.strictEqual(s.teachers[1].short, "Arjun");          // a short name of its own is left
   const u = rspec(); delete u.teachers[0].short; TeacherView.rename(u, 0, "Mdm Lee"); assert.ok(!("short" in u.teachers[0]));
   const v = rspec(); v.teachers[0].short = "New Teacher 3"; v.teachers.push({ _id: "d", name: "New Teacher 3", short: "New Teacher 3" });
   TeacherView.rename(v, 0, "Mdm Lee"); assert.deepStrictEqual([v.teachers[0].short, v.teachers[3].short], ["Mdm Lee", "New Teacher 3"]);   // only the renamed row's
@@ -153,13 +159,15 @@ t("settle puts earlier names right whatever wrote them", () => {
   assert.strictEqual(TeacherView.settle({}), false); assert.strictEqual(TeacherView.settle(null), false);
 });
 t("the toast says what followed", () => {
-  const T = TeacherView.renameText, base = { was: "New Teacher 3", now: "Mdm Lee", groups: 0, classes: [], rules: 0, typed: [], notes: 0, twice: false };
+  const T = TeacherView.renameText, base = { was: "New Teacher 3", now: "Mdm Lee", groups: 0, classes: [], rules: 0, typed: [], notes: 0, twice: false, short: null };
   assert.strictEqual(T(base), "New Teacher 3 is now Mdm Lee.");
   assert.strictEqual(T({ ...base, groups: 6, classes: ["2A"], rules: 1 }), "New Teacher 3 is now Mdm Lee: on 6 groups, form teacher of 2A, 1 rule. Undo, at the top, brings it back.");
   assert.strictEqual(T({ ...base, groups: 1, classes: ["2A", "2B", "2C"], rules: 2 }), "New Teacher 3 is now Mdm Lee: on 1 group, form teacher of 2A, 2B and 2C, 2 rules. Undo, at the top, brings it back.");
   assert.strictEqual(T({ ...base, classes: ["2A", "2B"] }), "New Teacher 3 is now Mdm Lee: form teacher of 2A and 2B. Undo, at the top, brings it back.");
   assert.strictEqual(T({ ...base, twice: true }), "New Teacher 3 is now Mdm Lee. Two teachers were called New Teacher 3, so their groups were not changed: pick the right teacher on each.");
   assert.strictEqual(T({ ...base, groups: 2, typed: [3], notes: 1 }), "New Teacher 3 is now Mdm Lee: on 2 groups. Undo, at the top, brings it back. Typed rule T3 still says New Teacher 3: check it. 1 note still says New Teacher 3: check it.");
+  assert.strictEqual(T({ ...base, groups: 2, short: "NT3" }), "New Teacher 3 is now Mdm Lee: on 2 groups. Undo, at the top, brings it back. The short name is still NT3: change it too if it should be different.");
+  assert.strictEqual(T({ ...base, short: "New", typed: [3] }), "New Teacher 3 is now Mdm Lee. The short name is still New: change it too if it should be different. Typed rule T3 still says New Teacher 3: check it.");
   assert.strictEqual(T({ ...base, typed: [3, 5], notes: 2 }), "New Teacher 3 is now Mdm Lee. Typed rules T3 and T5 still say New Teacher 3: check them. 2 notes still say New Teacher 3: check them.");
 });
 t("a head is told what stands in the way of a rename", () => {

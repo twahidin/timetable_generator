@@ -2030,11 +2030,12 @@ document.addEventListener("change", async e => {
   if (vrn && v !== null) v = VenueView.cleanName(v) || null;   // a room's name: runs of spaces made one, the ends trimmed
   const tkn = /^spec\.teachers\.(\d+)\.name$/.exec(path), tkt = tkn ? S.spec.teachers[Number(tkn[1])] : null;
   let tkr = null;   // a teacher's new name (either name box: the open card or the Table view): it carries to their groups, form-teacher places and Teacher rules
+  if (tkn && v !== null) v = TeacherView.cleanName(v) || null;   // a teacher's name: runs of spaces made one, the ends trimmed (a blank one is an emptied box)
   if (tkt && typeof tkt.name === "string" && tkt.name.trim() !== "" && v !== null) {
-    const now = String(v).replace(/\s+/g, " ").trim();
-    if (tkHead() && now !== "" && now !== tkt.name) { const why = TeacherView.blocked(S.spec, tkt.name, otherRow, cpBlock); if (why) { toast(why); render(); return; } }   // nothing saved; the box goes back
+    if (tkHead() && v !== tkt.name) { const why = TeacherView.blocked(S.spec, tkt.name, otherRow, cpBlock); if (why) { toast(why); render(); return; } }   // nothing saved; the box goes back
     tkr = TeacherView.rename(S.spec, Number(tkn[1]), v);
     if (tkr && tkr.error) { toast(tkr.error); render(); return; }   // another teacher's name: nothing saved, the box goes back
+    if (tkr && tkr.same) { render(); return; }   // the stored name with stray spaces: nothing saved, the box goes back to it
   }
   if (!tkr) setPath(path, v);   // a rename has set the name itself
   if (tkr) toast(TeacherView.renameText(tkr));

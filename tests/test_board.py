@@ -735,6 +735,29 @@ def test_a_draft_reads_an_earlier_name_as_the_teachers_name_now():
     finally:
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_a_trade_made_before_a_rename_is_replayed_with_the_new_name():
+    """a trade stored on step 8 names its two teachers (x, y) as they were called then; after one of them is renamed on step 4
+    the trade still applies, and each group's card names the right teacher, the renamed one by the new name"""
+    import copy
+    T0, T1 = TEACHERS[0], TEACHERS[1]; ka, kb = f"C:{CLASSES[0]}:{SUBJ}", f"C:{CLASSES[1]}:{SUBJ}"
+    rows = [dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[T0], room=ROOMS[0]),
+            dict(id=2, day=DAYS[1], p=L1, n=1, level=LEVEL, classes=[CLASSES[1]], subject=SUBJ, teachers=[T1], room=ROOMS[1])]
+    def renamed(old, to):
+        s = copy.deepcopy(SPEC); t = next(t for t in s["teachers"] if t["name"] == old); t["name"] = to; t["earlier_names"] = [old]
+        for x in s["lessons"]: x["teachers"] = [to if v == old else v for v in x.get("teachers") or []]
+        return s
+    names = lambda i: [t for row in card(i)["rows"] for t in row["teachers"]]
+    try:
+        for old, one, two in ((T0, "Mdm Lee", None), (T1, None, "Mdm Lee")):   # the renamed teacher is x, then y
+            save_draft(rows); draft.fix(dict(kind="trade", a=ka, b=kb, x=T0, y=T1))
+            assert c.put("/api/setup", json=dict(spec=renamed(old, "Mdm Lee"), why="a rename")).status_code == 200
+            j = draft.info(); assert not j["fix_problems"], j["fix_problems"]
+            assert taught(1) == [[two or T1]] and taught(2) == [[one or T0]], (taught(1), taught(2))   # traded: 1 has y, 2 has x
+            assert names(1) == [two or T1] and names(2) == [one or T0], (names(1), names(2))
+            assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     import re
     fresh()

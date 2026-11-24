@@ -182,7 +182,7 @@
     }
     const field = ["set", "school", "day", "top"].includes(e.op) && e.kind !== "account" && "was" in e && "now" in e;
     if (e.kind === "setup" && field) {
-      return [where, h("span", { text: `${plain(e.label)}${e.field && !String(e.label || "").endsWith(String(e.field)) ? ": " + (Object.hasOwn(FIELD_WORDS, e.field) ? FIELD_WORDS[e.field] : e.field) : ""}: ` }),
+      return [where, h("span", { text: `${plain(e.label)}${e.field && !String(e.label || "").endsWith(String(e.field)) ? ": " + (Object.prototype.hasOwnProperty.call(FIELD_WORDS, e.field) ? FIELD_WORDS[e.field] : e.field) : ""}: ` }),
         shown(e.was, "was"), " → ", shown(e.now, "now")];
     }
     return [where, h("span", { text })];

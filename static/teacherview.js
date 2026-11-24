@@ -73,6 +73,9 @@ var TeacherView = (function () {
   /* ---- renaming a teacher: the new name follows to groups, form teachers and Teacher rules ----
      Names are matched exactly (===); only the "already a teacher" check ignores case and spacing (P.key). */
 
+  /* a name as it is stored: the ends trimmed, runs of spaces made one; "" for nothing */
+  function cleanName(v) { return v == null || (typeof v !== "string" && typeof v !== "number") ? "" : String(v).replace(/\s+/g, " ").trim(); }
+
   var NOTE_LISTS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules"];
 
   /* where a teacher's name is used: row numbers (from 0) of groups, classes and Teacher rules, the numbers (from 1)
@@ -123,16 +126,18 @@ var TeacherView = (function () {
 
   /* gives teacher row ti the name `to` and carries it to their groups, the classes they are form teacher of and their
      Teacher rules (not when two rows have the old name). Changes spec in place.
-     null: not a rename; { error }: the name is another teacher's; else { was, now, groups, classes, rules, typed, notes, twice } */
+     null: not a rename; { same: true }: the cleaned name is the stored one (nothing changes); { error }: the name is another
+     teacher's; else { was, now, groups, classes, rules, typed, notes, twice, short } (short: a short name that did not follow, else null) */
   function rename(spec, ti, to) {
     var teachers = list(spec && spec.teachers), t = teachers[ti];
     if (!isRow(t) || typeof t.name !== "string" || t.name.trim() === "" || to == null) return null;
-    var now = String(to).replace(/\s+/g, " ").trim(), was = t.name;
-    if (now === "" || now === was) return null;
+    var now = cleanName(to), was = t.name;
+    if (now === "") return null;
+    if (now === was) return { same: true };
     for (var j = 0; j < teachers.length; j++) {
       if (j !== ti && isRow(teachers[j]) && P.key(teachers[j].name) === P.key(now)) return { error: teachers[j].name + " is already a teacher." };
     }
-    var u = uses(spec, was), r = { was: was, now: now, groups: 0, classes: [], rules: 0, typed: u.typed, notes: u.notes, twice: u.twice };
+    var u = uses(spec, was), r = { was: was, now: now, groups: 0, classes: [], rules: 0, typed: u.typed, notes: u.notes, twice: u.twice, short: null };
     if (!u.twice) {
       u.lessons.forEach(function (i) {
         var ts = spec.lessons[i].teachers;
@@ -154,6 +159,7 @@ var TeacherView = (function () {
     });
     t.earlier_names = earlier;
     if (t.short === was) t.short = now;                       // a short name that was the name follows it
+    else if (typeof t.short === "string" && t.short.trim() !== "") r.short = t.short;
     t.name = now;
     settle(spec);
     return r;
@@ -171,6 +177,7 @@ var TeacherView = (function () {
     if (parts.length) out += ": " + parts.join(", ") + ". Undo, at the top, brings it back.";
     else if (r.twice) out += ". Two teachers were called " + r.was + ", so their groups were not changed: pick the right teacher on each.";
     else out += ".";
+    if (typeof r.short === "string" && r.short.trim() !== "") out += " The short name is still " + r.short + ": change it too if it should be different.";
     if (r.typed.length) {
       var one = r.typed.length === 1;
       out += " Typed " + (one ? "rule " : "rules ") + andList(r.typed.map(function (n) { return "T" + n; })) +
@@ -196,6 +203,6 @@ var TeacherView = (function () {
     return parts.length ? "Only the committee can rename " + name + ": they are " + andList(parts) + "." : "";
   }
 
-  return { columns: columns, setSecond: setSecond, tidy: tidy, uses: uses, rename: rename, renameText: renameText, settle: settle, blocked: blocked };
+  return { cleanName: cleanName, columns: columns, setSecond: setSecond, tidy: tidy, uses: uses, rename: rename, renameText: renameText, settle: settle, blocked: blocked };
 })();
 if (typeof module !== "undefined") module.exports = TeacherView;
