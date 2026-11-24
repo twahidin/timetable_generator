@@ -113,5 +113,15 @@ const t = async (name, f) => { try { await f(); } catch (e) { console.error("FAI
     assert.deepStrictEqual(p.$("#fDept").children.map(c => c.textContent), ["All departments", "SC"]);
   });
 
+  await t("a setup line names the field earlier_names in words, every other field as it is", async () => {
+    const es = [Object.assign({ id: "h2", kind: "setup", op: "set", where: "Step 4 · Teachers", label: "Mdm Lee", field: "earlier_names", was: null, now: ["New Teacher 3"] }, ENTRY),
+      Object.assign({ id: "h1", kind: "setup", op: "set", where: "Step 4 · Teachers", label: "Mdm Lee", field: "dept", was: "SC", now: "MA" }, ENTRY)];
+    const p = page(() => [200, reply(es)]);
+    await p.settle();
+    const shown = p.$("#list").textContent;
+    assert.ok(shown.includes("Mdm Lee: Earlier names: ") && !shown.includes("earlier_names"), shown);
+    assert.ok(shown.includes("Mdm Lee: dept: "), shown);
+  });
+
   console.log(`${n} history page cases passed`);
 })().catch(e => { console.error(e); process.exit(1); });
