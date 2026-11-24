@@ -148,6 +148,10 @@ var TeacherView = (function () {
     }
     var earlier = list(t.earlier_names).filter(function (n) { return n !== was; });
     earlier.push(was);
+    teachers.forEach(function (o) {
+      if (o === t || !isRow(o) || !Array.isArray(o.earlier_names)) return;
+      o.earlier_names = o.earlier_names.filter(function (n) { return n !== was; });
+    });
     t.earlier_names = earlier;
     t.name = now;
     settle(spec);

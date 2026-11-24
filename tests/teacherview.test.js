@@ -116,6 +116,12 @@ t("earlier names: renaming back clears it, the latest rename wins, a name in use
   assert.deepStrictEqual(s.teachers[0].earlier_names, ["Mdm Lee Mei"]);
   assert.deepStrictEqual(s.teachers[1].earlier_names, ["Arjun Nair", "Miss Lim"]);
 });
+t("the renaming row takes the old name even when a later row also lists it", () => {
+  const s = rspec(); s.teachers[2].earlier_names = ["New Teacher 3"];
+  TeacherView.rename(s, 0, "Mdm Lee");
+  assert.deepStrictEqual(s.teachers[0].earlier_names, ["New Teacher 3"]);
+  assert.ok(!("earlier_names" in s.teachers[2]));
+});
 t("two rows of the old name: the name changes and nothing follows", () => {
   const s = rspec(); s.teachers.push({ _id: "d", name: "New Teacher 3", dept: "SC" });
   const r = TeacherView.rename(s, 0, "Mdm Lee");
