@@ -809,9 +809,19 @@ def students_skeleton():
 @app.post("/api/students/update")
 @need("committee")
 def students_update():
-    """bring the whole student list into step with the published timetable"""
-    out = students.update_all(by())
+    """bring the whole student list into step with the published timetable. expect: the counts {change, add, remove}
+    the member was asked about (an older page sends none); when they no longer hold nothing is written"""
+    body = request.get_json(force=True, silent=True)
+    expect = None
+    if isinstance(body, dict) and "expect" in body:
+        e = body["expect"]
+        if not (isinstance(e, dict) and all(type(e.get(k)) is int for k in ("change", "add", "remove"))):
+            return {"error": "Check the numbers and press Update again."}, 400
+        expect = {k: e[k] for k in ("change", "add", "remove")}
+    out = students.update_all(by(), expect=expect)
     if out is None: return {"error": "No timetable is published yet."}, 409
+    if out.get("changed"):
+        return {"error": "The list or the published timetable changed. Check the numbers and press Update again.", "status": students.status()}, 409
     return jsonify(outcome=out, status=students.status())
 
 @app.get("/api/setup/copies")
@@ -2221,7 +2231,9 @@ def history_back():
     except store.Replaced: return {"error": REPLACED_MEANWHILE}, 409
     except store.Refused as x: return {"error": str(x)}, 409
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
-    _follow_students(told)    # the published timetable follows a put back too; its answer does not change
+    said = _follow_students(told)    # the published timetable follows a put back too
+    if said and "error" in said:
+        return {"done": True, "text": "Put back. The published timetable was not updated: press Update the published timetable on the Students step."}
     return {"done": True, "text": "Put back."}
 
 ONLY_ADMIN = "Only an admin can open this page."

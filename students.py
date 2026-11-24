@@ -2,7 +2,7 @@
 the published timetable are brought up to date at once, and nothing else in it changes. Students are matched by
 student ID (the published records have no row id). A student who cannot follow is left as the published timetable
 has them, with the reason in words."""
-import collections, copy, hashlib, json, sys, threading, time
+import collections, copy, hashlib, json, math, sys, threading, time
 import history, store
 from ttgen import export as E
 
@@ -34,12 +34,12 @@ def why_not(row, model, counts):
     return None
 
 def touched(pairs):
-    """(keys of every row after the save, keys that may be removed, how many deleted rows are held back)"""
+    """(keys of every row after the save, keys that may be removed, the keys of a save that deleted several rows: held back)"""
     keys = [key(a) for b, a in pairs if a is not None]
     gone = [b for b, a in pairs if a is None and b is not None]
     may_remove = {key(b) for b, a in pairs if b is not None and a is not None and key(b) != key(a)}
     if len(gone) == 1: may_remove.add(key(gone[0]))
-    return keys, may_remove, (len(gone) if len(gone) > 1 else 0)
+    return keys, may_remove, ({key(b) for b in gone} if len(gone) > 1 else set())
 
 def _text(updated, removed, left, held):
     out = []
@@ -49,7 +49,8 @@ def _text(updated, removed, left, held):
     elif removed: out.append(f"{len(removed)} students removed from the published timetable.")
     if len(left) == 1: out.append(f"Published timetable not changed for {left[0]['name']} ({left[0]['id']}): {left[0]['why']}.")
     elif left: out.append(f"Published timetable not changed for {len(left)} students: their groups or classes are not on it.")
-    if held: out.append(f"{held} students stay on the published timetable until Update the published timetable is pressed.")
+    if held == 1: out.append("1 student stays on the published timetable until Update the published timetable is pressed.")
+    elif held: out.append(f"{held} students stay on the published timetable until Update the published timetable is pressed.")
     return " ".join(out)
 
 def _setup_copy(setup, changed, rows_now):
@@ -81,6 +82,40 @@ def _commit(model, new_students, updated, added, removed, rows_now):
     try: schedule_files()
     except Exception as e: print("warning: the files to download could not be scheduled (" + type(e).__name__ + ")", file=sys.stderr)   # the update is made
 
+def _rows_by_key(setup_rows):
+    """the setup's student rows by key (blank rows left out) and how many rows each key has"""
+    rows = [r for r in setup_rows or [] if isinstance(r, dict) and key(r)]
+    rows_now = collections.defaultdict(list)
+    for r in rows: rows_now[key(r)].append(r)
+    return rows_now, collections.Counter(key(r) for r in rows)
+
+def _at(model):
+    return {str(s["id"]).strip(): i for i, s in enumerate(model["students"])}
+
+def _bring(model, waiting, extra=()):
+    """the model's students with the waiting records put in (updated in place or added at the end) and the extra
+    published indexes taken out: (new students, updated, added, removed); the model is not changed"""
+    new_students, updated, added = list(model["students"]), [], []
+    for k, r, rec, i in waiting:
+        if i is None: new_students.append(rec); added.append(rec)
+        else: new_students[i] = rec; updated.append(rec)
+    removed = [model["students"][i] for i in extra]
+    if removed:
+        gone = {id(s) for s in removed}
+        new_students = [s for s in new_students if id(s) not in gone]
+    return new_students, updated, added, removed
+
+def _write(model, new_students, updated, added, removed, rows_now, text, by, batch):
+    """the new model in the published folder (when anything changed) and its History line (when there are words)"""
+    _commit(model, new_students, updated, added, removed, rows_now)
+    if text:
+        try: history.add(dict(kind=KIND, text=text, where="Students", of=batch, **by))
+        except Exception as e: store._warn(e)   # the update is made: a history failure never undoes it
+
+def _result(updated, added, removed, left, held, text):
+    return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
+                left=left, held=held, text=text)
+
 def _files_run():
     """the one background thread: waits until FILES_WAIT seconds have passed since the last change, remakes the files,
     and goes again while a change arrived meanwhile; an error is told by its type alone and the thread stops"""
@@ -90,6 +125,8 @@ def _files_run():
                 if not _files["pending"]: _files["running"] = False; return
             while time.time() - _files["last"] < FILES_WAIT: time.sleep(0.2)   # FILES_WAIT read on every poll
             with _files_lock: _files["pending"] = False
+            pub = store.published()
+            if pub is None or not pub["meta"].get("files_behind"): continue   # a publish made fresh files meanwhile
             if store.remake_files() is False:
                 with _files_lock: _files["pending"] = True
     except BaseException as e:
@@ -119,7 +156,7 @@ def resume_files():
 def follow(pairs, by, batch=None):
     """bring the students these (before, after) rows name up to date on the published timetable, reading the setup as
     it is now; None when nothing is published"""
-    keys, may_remove, held = touched(pairs)
+    keys, may_remove, gone_keys = touched(pairs)
     renamed = {key(b): key(a) for b, a in pairs if b is not None and a is not None and key(b) != key(a)}
     gone = [key(b) for b, a in pairs if a is None and b is not None]
     single_gone = set(gone) if len(gone) == 1 else set()
@@ -127,44 +164,34 @@ def follow(pairs, by, batch=None):
         pub = store.published()
         if pub is None: return None
         model = pub["model"]
-        rows = [r for r in store.setup_record()["spec"].get("students") or [] if isinstance(r, dict)]
-        counts = collections.Counter(key(r) for r in rows)
-        rows_now = collections.defaultdict(list)
-        for r in rows: rows_now[key(r)].append(r)
-        at = {str(s["id"]).strip(): i for i, s in enumerate(model["students"])}
+        rows_now, counts = _rows_by_key(store.setup_record()["spec"].get("students"))
+        at = _at(model)
+        held = sum(1 for k in gone_keys if k and k in at and k not in rows_now)   # held back: still published and off the list
         new_students = list(model["students"])
         updated, added, removed, left, made = [], [], [], [], set()
         order = [k for k in list(dict.fromkeys(keys)) + sorted(may_remove - set(keys)) if k]   # the rows after the save first, then the old keys; a blank row is ignored
         for k in order:
             if k in rows_now:
                 row = rows_now[k][0]; why = why_not(row, model, counts)
-                if why: left.append(dict(id=k, name=str(row.get("name") or ""), why=why)); continue
-                rec = record(row)
-                if k not in at: at[k] = len(new_students); new_students.append(rec); added.append(rec); made.add(k)
-                elif new_students[at[k]] != rec: new_students[at[k]] = rec; updated.append(rec); made.add(k)
+                if why: left.append(_left(k, row, why)); continue
+                rec = record(row); made.add(k)   # it follows: an old ID renamed to it may go, even when its record was already equal
+                if k not in at: at[k] = len(new_students); new_students.append(rec); added.append(rec)
+                elif new_students[at[k]] != rec: new_students[at[k]] = rec; updated.append(rec)
             elif k in may_remove and k in at and (k in single_gone or renamed.get(k) in made):   # a re-numbered row whose new ID did not follow stays
                 removed.append(new_students[at[k]])
         if removed:
             out = {id(s) for s in removed}
             new_students = [s for s in new_students if id(s) not in out]
-        _commit(model, new_students, updated, added, removed, rows_now)
-        both = updated + added
-        text = _text(both, removed, left, held)
-        if text:
-            try: history.add(dict(kind=KIND, text=text, where="Students", of=batch, **by))
-            except Exception as e: store._warn(e)   # the update is made: a history failure never undoes it
-        return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
-                    left=left, held=held, text=text)
+        text = _text(updated + added, removed, left, held)
+        _write(model, new_students, updated, added, removed, rows_now, text, by, batch)
+        return _result(updated, added, removed, left, held, text)
 
 def _compare(model, setup_rows):
-    """the setup's student rows set against the published model: (rows_now by key, keys in list order, counts, left, waiting, extra)
+    """the setup's student rows set against the published model: (rows_now by key, left, waiting, extra)
     where left is [(key, row, why)], waiting [(key, row, record, published index or None)], extra [published index];
     blank rows are ignored and a repeated ID counts once"""
-    rows = [r for r in setup_rows if isinstance(r, dict) and key(r)]
-    counts = collections.Counter(key(r) for r in rows)
-    rows_now = collections.defaultdict(list)
-    for r in rows: rows_now[key(r)].append(r)
-    at = {str(s["id"]).strip(): i for i, s in enumerate(model["students"])}
+    rows_now, counts = _rows_by_key(setup_rows)
+    at = _at(model)
     left, waiting = [], []
     for k, rs in rows_now.items():
         why = why_not(rs[0], model, counts)
@@ -182,51 +209,73 @@ def _setup_students():
 def _left(k, row, why):
     return dict(id=k, name=str(row.get("name") or ""), why=why)
 
+def _counts(waiting, extra):
+    return dict(change=sum(1 for w in waiting if w[3] is not None), add=sum(1 for w in waiting if w[3] is None), remove=len(extra))
+
+NO_COUNTS = dict(change=0, add=0, remove=0)
+
 def status():
-    """the whole list against the published timetable; writes nothing"""
-    with store._publishing:
-        pub = store.published()
-        setup_rows = _setup_students() if pub is not None else []
+    """the whole list against the published timetable; writes nothing, and takes no lock: it reads the published
+    timetable and the setup once each, so it never waits for a publish"""
+    pub = store.published()
     if pub is None: return dict(published=False)
+    setup_rows = _setup_students()
     model = pub["model"]; stamp_ = stamp(pub)
     if setup_rows is None:
         return dict(published=True, at=pub["meta"].get("published_at"), stamp=stamp_, students=len(model["students"]), listed=0, same=0, differ=[], differ_n=0,
-                    counts=dict(change=0, add=0, remove=0), can_update=False, files_behind=bool(pub["meta"].get("files_behind")), no_setup=True)
+                    counts=dict(NO_COUNTS), can_update=False, files_behind=bool(pub["meta"].get("files_behind")), no_setup=True)
     rows_now, left, waiting, extra = _compare(model, setup_rows)
     differ = ([dict(_left(k, r, w), kind="left") for k, r, w in left]
               + [dict(id=k, name=str(r.get("name") or ""), why="not updated yet", kind="waiting") for k, r, rec, i in waiting]
               + [dict(id=str(model["students"][i]["id"]), name=str(model["students"][i]["name"]), why="on the published timetable but not on this list", kind="extra") for i in extra])
-    counts = dict(change=sum(1 for w in waiting if w[3] is not None), add=sum(1 for w in waiting if w[3] is None), remove=len(extra))
+    counts = _counts(waiting, extra)
     return dict(published=True, at=pub["meta"].get("published_at"), stamp=stamp_, students=len(model["students"]), listed=len(rows_now),
                 same=len(rows_now) - len(left) - len(waiting), differ=differ[:10], differ_n=len(differ), counts=counts,
                 can_update=any(counts.values()), files_behind=bool(pub["meta"].get("files_behind")))
 
-def update_all(by):
+def update_all(by, expect=None):
     """bring the whole list into step with the published timetable: students who can follow are updated or added,
-    published students not on the list are removed, students who cannot follow are left; None when nothing is published"""
+    published students not on the list are removed, students who cannot follow are left; None when nothing is published.
+    expect: the counts {change, add, remove} the member was asked about; when the counts now differ nothing is written
+    and the answer is {"changed": True}"""
     with store._publishing:
         pub = store.published()
         if pub is None: return None
         model = pub["model"]
         setup_rows = _setup_students()
-        if setup_rows is None: return dict(updated=[], added=[], removed=[], left=[], held=0, text="")   # no setup saved: nothing to compare with
+        if setup_rows is None:   # no setup saved: nothing to compare with
+            return dict(changed=True) if expect is not None and expect != NO_COUNTS else _result([], [], [], [], 0, "")
         rows_now, left, waiting, extra = _compare(model, setup_rows)
-        new_students = list(model["students"])
-        updated, added = [], []
-        for k, r, rec, i in waiting:
-            if i is None: new_students.append(rec); added.append(rec)
-            else: new_students[i] = rec; updated.append(rec)
-        removed = [model["students"][i] for i in extra]
-        gone = {id(s) for s in removed}
-        new_students = [s for s in new_students if id(s) not in gone]
-        _commit(model, new_students, updated, added, removed, rows_now)
+        if expect is not None and expect != _counts(waiting, extra): return dict(changed=True)
+        new_students, updated, added, removed = _bring(model, waiting, extra)
         text = ""
         if updated or added or removed:
             text = f"Published timetable brought into step with the list: {len(updated)} changed, {len(added)} added, {len(removed)} removed."
-            try: history.add(dict(kind=KIND, text=text, where="Students", of=None, **by))   # no "of": no save made this line
-            except Exception as e: store._warn(e)
-        return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
-                    left=[_left(k, r, w) for k, r, w in left], held=0, text=text)
+        _write(model, new_students, updated, added, removed, rows_now, text, by, None)   # no "of": no save made this line
+        return _result(updated, added, removed, [_left(k, r, w) for k, r, w in left], 0, text)
+
+def catch_up(by=None):
+    """after a full publish: every listed student who can follow and whose published record differs or is absent is put
+    on it (a save that landed while the publish was being made, which the publish read too early); nobody is removed
+    and nothing is written when all agree; by the app when by is None; None when nothing is published"""
+    with store._publishing:
+        pub = store.published()
+        if pub is None: return None
+        setup_rows = _setup_students()
+        if setup_rows is None: return _result([], [], [], [], 0, "")
+        model = pub["model"]
+        rows_now, left, waiting, extra = _compare(model, setup_rows)
+        new_students, updated, added, _ = _bring(model, waiting)
+        text = _text(updated + added, [], [], 0)
+        _write(model, new_students, updated, added, [], rows_now, text, by or history.by_of(None, "app"), None)
+        return _result(updated, added, [], [_left(k, r, w) for k, r, w in left], 0, text)
+
+def people_stamp(pub):
+    """names the published students (ID, name, class, groups): a short hash that moves with any student change; "" when
+    nothing is published"""
+    if not pub: return ""
+    rows = sorted([str(s.get("id")), str(s.get("name")), str(s.get("cls")), sorted(str(g) for g in s.get("groups") or [])] for s in (pub.get("model") or {}).get("students") or [])
+    return hashlib.sha1(json.dumps(rows).encode()).hexdigest()[:12]
 
 def stamp(pub):
     """names this publish's lessons: the published time, then a short hash of the lessons (the time is only to the minute);
@@ -242,6 +291,7 @@ def _seats(rooms, capacities):
     cap = capacities.get(rooms[0])
     try: x = float(str(cap).strip())
     except (TypeError, ValueError): return None
+    if not math.isfinite(x): return None   # "inf", "1e400", "nan"
     return int(x) if x > 0 and x == int(x) else None
 
 def skeleton():

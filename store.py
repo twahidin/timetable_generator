@@ -330,21 +330,35 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spe
             _turns["publish"] += 1
         return m
 
+META_UNREADABLE = "The published meta.json could not be read."
+
+def _published_meta(meta_path, need_at=False):
+    """the published meta.json as a dict: FileNotFoundError when it is not there, ValueError when it cannot be read, is
+    not a dict or (need_at) has no published_at; the messages carry nothing of the file"""
+    if not os.path.exists(meta_path): raise FileNotFoundError("The published meta.json is not there.")
+    try:
+        with open(meta_path, encoding="utf-8") as f: meta = json.load(f)
+    except (OSError, ValueError): meta = None
+    if not isinstance(meta, dict) or need_at and not meta.get("published_at"): raise ValueError(META_UNREADABLE)
+    return meta
+
 def swap_model(model, **meta):
     """put a new model in the published folder in place of the old one, with meta laid over meta.json (the caller
-    holds _publishing); nothing else in the folder changes"""
+    holds _publishing); nothing else in the folder changes. A meta.json that cannot be read is never written over:
+    the error goes out and nothing is written"""
     meta_path = os.path.join(PUB, "meta.json")
-    if not os.path.exists(meta_path): raise FileNotFoundError(meta_path)
-    tmp = os.path.join(PUB, "model.pkl.tmp")
+    meta0 = _published_meta(meta_path)
+    tmp, swapped = os.path.join(PUB, "model.pkl.tmp"), False
     try:
         with open(tmp, "wb") as f: pickle.dump(model, f)
-        os.replace(tmp, os.path.join(PUB, "model.pkl"))
+        os.replace(tmp, os.path.join(PUB, "model.pkl")); swapped = True
+        write_json(meta_path, {**meta0, **meta})
     finally:
         if os.path.exists(tmp): os.remove(tmp)
-    write_json(meta_path, {**(read_json(meta_path) or {}), **meta})
-    with _lock:
-        _cache.update(stamp=None, value=None)
-        _turns["swap"] += 1
+        if swapped:                               # readers see the model on disk even when the meta write failed
+            with _lock:
+                _cache.update(stamp=None, value=None)
+                _turns["swap"] += 1
 
 def remake_files():
     """make the files to download again from the published model as it is now and swap them in as a publish does; None
@@ -357,7 +371,7 @@ def remake_files():
         with _lock:                               # a publish swaps folders under _lock: meta and model come from one folder
             turns = dict(_turns)                  # read first: a swap after this is seen at the end, never missed
             if not os.path.exists(meta_path): return None
-            meta0 = read_json(meta_path, {}) or {}
+            meta0 = _published_meta(meta_path, need_at=True)   # unreadable or with no published_at: stop, nothing written
             with open(os.path.join(PUB, "model.pkl"), "rb") as f: m = pickle.load(f)   # its own copy: export_all may change it
         tmp, old = PUB + ".files", PUB + ".old"
         shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
@@ -369,7 +383,7 @@ def remake_files():
                          books={os.path.basename(p).split(" - ")[0].lower(): os.path.relpath(p, tmp) for p in out["pdf_books"]})
             with _publishing:
                 if not os.path.exists(meta_path): shutil.rmtree(tmp, ignore_errors=True); return None
-                meta = read_json(meta_path, {}) or {}
+                meta = _published_meta(meta_path, need_at=True)   # raised: the folder is removed below and nothing is written
                 if _turns["publish"] != turns["publish"] or meta.get("published_at") != meta0.get("published_at"):
                     shutil.rmtree(tmp, ignore_errors=True); return True   # a publish made its own files
                 for f in os.listdir(PUB):         # what the export does not make: the model, the setup and the timetable it was published from

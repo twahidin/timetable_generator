@@ -4665,4 +4665,38 @@ def every_quote_mark_of_the_list_cuts_the_reason():
         same(R("doesn" + m + "t fit"), "doesn…")       # never a contraction's apostrophe
         same(R("it" + m + "s Tan"), "it…")
 
+@t
+def a_student_change_gives_an_open_talk_fresh_names_without_a_published_again_line():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    real, calls = facts.checklist, []
+    def counted(*a, **k):
+        calls.append(1); return real(*a, **k)
+    facts.checklist = counted
+    try:
+        T.view(talk, env); n = len(calls); T.view(talk, env); same(len(calls), n)
+        pub = dict(env._pub); pub["model"] = dict(pub["model"], students=pub["model"]["students"] + [dict(id="3A-99", name="Devi Nair", cls="3A", level="Sec 3", groups=[])])
+        env._pub = pub                                                  # a student saved on the Students step: published_at is as it was
+        T.view(talk, env); same(len(calls), n + 1)                      # the checks are worked out again
+        call = answer(talk, env, "Is Devi Nair sitting it?", reply(say("ok")))
+    finally:
+        facts.checklist = real
+    sent = user_texts(call.sent[0])[-1]
+    assert "Devi" not in sent and "Nair" not in sent, sent              # the new student is known: the name does not go out
+    assert "The timetable was published again: codes and checks are fresh." not in texts(talk, "sys"), texts(talk, "sys")
+    assert not any("codes of people start again" in u for u in user_texts(call.sent[0])), user_texts(call.sent[0])
+
+@t
+def a_new_student_whose_id_moves_a_code_is_told_to_the_ai():
+    fresh(); no_schedules()
+    env, talk = a_talk(staff=STAFF)
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    old = talk.names.code(TAN)
+    pub = dict(env._pub); pub["model"] = dict(pub["model"], students=pub["model"]["students"] + [dict(id=old, name="Devi Nair", cls="3A", level="Sec 3", groups=[])])
+    env._pub = pub                                                      # a student whose ID is the teacher's code
+    call = answer(talk, env, f"Ask {TAN}", reply(say("ok")))
+    assert talk.names.code(TAN) != old and "The timetable was published again: codes and checks are fresh." not in texts(talk, "sys")
+    u = user_texts(call.sent[0]); assert u[-2].startswith("[The app: The people on the timetable changed: the codes of people start again"), u[-2]
+
 print(f"{COUNT} plan tests passed")

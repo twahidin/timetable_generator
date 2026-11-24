@@ -477,6 +477,201 @@ def a_made_exam_goes_stale_after_a_group_change():
     assert "S002" not in sit1 and "S002" in sit2 and fp1 != fp2
     assert XM.published_at(store.published()) == at
 
+# ------------------------------------------------------------------------------------------------ the fix wave after the review
+CHANGED = "The list or the published timetable changed. Check the numbers and press Update again."
+
+def kind_lines(): return len(history.read(kinds=[students.KIND], limit=10 ** 6))
+
+@t
+def update_refuses_when_the_counts_it_was_asked_for_have_changed():
+    fresh(); set_students([PEOPLE[0] | dict(groups=["GA2"])] + PEOPLE[1:])   # the page saw: 1 changes
+    set_students([PEOPLE[0] | dict(groups=["GA2"])])                          # another member's save meanwhile: 2 more to remove
+    was, n = copy.deepcopy(store.published()["model"]["students"]), kind_lines()
+    r = c.post("/api/students/update", json=dict(expect=dict(change=1, add=0, remove=0)))
+    assert r.status_code == 409 and r.get_json()["error"] == CHANGED, r.get_json()
+    assert r.get_json()["status"]["counts"] == dict(change=1, add=0, remove=2)
+    assert store.published()["model"]["students"] == was and kind_lines() == n and "students_at" not in store.published()["meta"]
+    r = c.post("/api/students/update", json=dict(expect=dict(change=1, add=0, remove=2)))   # the counts agree: as before
+    assert r.status_code == 200 and r.get_json()["outcome"]["text"] == "Published timetable brought into step with the list: 1 changed, 0 added, 2 removed."
+    assert [s["id"] for s in store.published()["model"]["students"]] == ["S001"] and kind_lines() == n + 1
+
+@t
+def update_with_no_expect_is_as_before_and_a_bad_expect_is_refused():
+    fresh(); set_students([PEOPLE[0] | dict(groups=["GA2"])] + PEOPLE[1:])
+    for body in (dict(expect=None), dict(expect=dict(change=1, add=0)), dict(expect=dict(change="1", add=0, remove=0)), dict(expect=[1, 0, 0]), dict(expect=dict(change=True, add=0, remove=0))):
+        r = c.post("/api/students/update", json=body)
+        assert r.status_code == 400 and r.get_json() == {"error": "Check the numbers and press Update again."}, body
+    assert pub_student("S001")["groups"] == ["GA1", "GB1"]
+    r = c.post("/api/students/update", json=dict())   # an old page: no expect at all
+    assert r.status_code == 200 and pub_student("S001")["groups"] == ["GA2"]
+
+@t
+def update_all_changes_only_the_students():
+    fresh(); m0 = store.published()["model"]; at = store.published()["meta"]["published_at"]
+    set_students([PEOPLE[0] | dict(groups=["GA2"]), PEOPLE[1], dict(id="S004", name="Devi Nair", **{"class": CB}, groups=[])])
+    c.post("/api/students/update"); m1 = store.published()["model"]
+    for k in m0:
+        if k not in ("students", "setup", "checked_setup", "checks"): assert m1[k] == m0[k], k
+    assert store.published()["meta"]["published_at"] == at and [s["id"] for s in m1["students"]] == ["S001", "S002", "S004"]
+
+def upload_draft():
+    spec = store.setup_record()["spec"]
+    r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(spec)), "setup.xlsx"), timetable=(io.BytesIO(workbook(ROWS)), "timetable.xlsx"), replace="1"), content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+@t
+def a_publish_does_not_undo_a_student_save_made_while_it_was_checked():
+    import draft
+    fresh(); upload_draft(); n = kind_lines()
+    real_pub, real_info = store.publish, draft.info
+    def late(*a, **k):                     # the setup was read and the draft checked: a student save lands and follows
+        change(["merge", "students", row_id("S001"), "groups", ["GA2"], ["GA1"]]); return real_pub(*a, **k)
+    store.publish, draft.info = late, (lambda **k: dict(real_info(**k), critical=0))   # the made-up setup has critical mistakes of its own
+    try: draft.publish()
+    finally: store.publish, draft.info = real_pub, real_info
+    pub = store.published()
+    assert sorted(pub_student("S001")["groups"]) == ["GA2", "GB1"] and pub["meta"]["students"] == 3 and pub["meta"]["files_behind"] is True
+    assert pub["meta"]["problems"] == pub["model"]["checks"]["problems"][:20] and students.status()["can_update"] is False
+    got = history.read(kinds=[students.KIND], limit=10 ** 6); assert len(got) == n + 2   # the save's line and the publish's
+    assert got[0]["text"] == "Published timetable updated for Aisha Rahman (S001)." and got[0]["as"] == "The app" and got[0]["via"] == "app"
+
+@t
+def catch_up_removes_nobody_and_writes_nothing_when_all_agree():
+    fresh(); set_students(PEOPLE[:2]); n = kind_lines(); mt = os.path.getmtime(os.path.join(store.PUB, "model.pkl"))
+    got = students.catch_up()
+    assert got["text"] == "" and pub_student("S003") and kind_lines() == n
+    assert os.path.getmtime(os.path.join(store.PUB, "model.pkl")) == mt and "students_at" not in store.published()["meta"] and "files_behind" not in store.published()["meta"]
+
+@t
+def a_failing_catch_up_does_not_fail_the_publish():
+    import draft
+    fresh(); upload_draft(); real_cu, real_info, err = students.catch_up, draft.info, sys.stderr
+    students.catch_up, draft.info, sys.stderr = (lambda *a, **k: 1 / 0), (lambda **k: dict(real_info(**k), critical=0)), io.StringIO()
+    try: j = draft.publish(); said = sys.stderr.getvalue()
+    finally: students.catch_up, draft.info, sys.stderr = real_cu, real_info, err
+    assert j["published"] is True and said == "students.catch_up failed: ZeroDivisionError\n", said
+
+@t
+def a_paste_of_listed_students_holds_nobody():
+    fresh(); ops = [["del", "students", row_id(p["id"])] for p in PEOPLE] + [["add", "students", dict(copy.deepcopy(p), _id=f"paste{i:05d}"), ""] for i, p in enumerate(PEOPLE)]
+    o = change(*ops)["students"]["outcome"]
+    assert o["held"] == 0 and "stay" not in o["text"], o
+
+@t
+def a_replace_keeping_one_of_three_holds_two():
+    fresh(); ops = [["del", "students", row_id(p["id"])] for p in PEOPLE] + [["add", "students", dict(copy.deepcopy(PEOPLE[0]), _id="paste00001"), ""]]
+    o = change(*ops)["students"]["outcome"]
+    assert o["held"] == 2 and o["text"] == "2 students stay on the published timetable until Update the published timetable is pressed.", o
+    assert pub_student("S002") and pub_student("S003")
+
+@t
+def one_held_student_is_said_in_the_singular():
+    fresh(); ops = [["del", "students", row_id(p["id"])] for p in PEOPLE] + [["add", "students", dict(copy.deepcopy(p), _id=f"paste{i:05d}"), ""] for i, p in enumerate(PEOPLE[:2])]
+    o = change(*ops)["students"]["outcome"]
+    assert o["held"] == 1 and o["text"] == "1 student stays on the published timetable until Update the published timetable is pressed.", o
+
+@t
+def an_unreadable_meta_is_never_overwritten():
+    for bad in ("{ not json", "[1, 2]"):
+        fresh(); mp, kp = os.path.join(store.PUB, "meta.json"), os.path.join(store.PUB, "model.pkl")
+        model = dict(store.published()["model"], students=[])
+        with open(mp, "w") as f: f.write(bad)
+        kb = open(kp, "rb").read()
+        with store._publishing: raises(ValueError, lambda: store.swap_model(model, students=0), "The published meta.json could not be read.")
+        assert open(mp).read() == bad and open(kp, "rb").read() == kb
+        raises(ValueError, store.remake_files, "The published meta.json could not be read.")
+        assert open(mp).read() == bad and [d for d in os.listdir(os.path.dirname(store.PUB)) if d.startswith("published.")] == []
+    fresh(); mp = os.path.join(store.PUB, "meta.json"); meta = store.read_json(mp); meta.pop("published_at"); store.write_json(mp, meta)
+    raises(ValueError, store.remake_files, "The published meta.json could not be read.")
+    assert [d for d in os.listdir(os.path.dirname(store.PUB)) if d.startswith("published.")] == []
+    fresh(); os.remove(os.path.join(store.PUB, "meta.json"))
+    with store._publishing: raises(FileNotFoundError, lambda: store.swap_model({}, students=0))
+
+@t
+def a_failed_meta_write_still_drops_the_cache():
+    fresh(); model = dict(store.published()["model"], students=[]); real = store.write_json
+    def boom(path, obj): raise OSError("disk full")
+    store.write_json = boom
+    try:
+        with store._publishing: raises(OSError, lambda: store.swap_model(model, students=0))
+    finally: store.write_json = real
+    assert store.published()["model"]["students"] == []   # the model on disk is what readers see
+
+@t
+def a_put_back_whose_follow_fails_says_so():
+    fresh(); change(["set", "students", row_id("S002"), "name", "Ben K"])
+    setup = next(e for e in history.read(limit=20) if e["kind"] == "setup")
+    real, err = students.follow, sys.stderr; students.follow = lambda *a, **k: 1 / 0; sys.stderr = io.StringIO()
+    try: r = c.post("/api/history/back", json=dict(id=setup["id"])); said = sys.stderr.getvalue()
+    finally: students.follow = real; sys.stderr = err
+    assert r.status_code == 200 and r.get_json() == {"done": True, "text": "Put back. The published timetable was not updated: press Update the published timetable on the Students step."}
+    assert said == "students.follow failed: ZeroDivisionError\n" and next(s for s in store.setup_record()["spec"]["students"] if s["id"] == "S002")["name"] == "Ben Koh"
+    assert pub_student("S002")["name"] == "Ben K"
+
+@t
+def status_waits_for_no_publish():
+    import threading
+    fresh(); got = {}
+    th = threading.Thread(target=lambda: got.update(s=students.status()), daemon=True)
+    with store._publishing:
+        th.start(); th.join(5)
+    assert got.get("s", {}).get("published") is True
+
+@t
+def the_files_thread_does_nothing_when_the_files_are_fresh():
+    fresh(); real, calls = store.remake_files, []
+    store.remake_files = lambda: calls.append(1) or True
+    students.FILES_WAIT = 0
+    try:
+        students._files.update(pending=True, running=True); students._files_run()          # a publish made fresh files meanwhile
+        assert calls == [] and students._files["running"] is False
+        with store._publishing: store.swap_model(store.published()["model"], files_behind=True)
+        students._files.update(pending=True, running=True); students._files_run()
+        assert calls == [1]
+    finally: store.remake_files = real; students.FILES_WAIT = 3600
+
+@t
+def a_new_students_code_signs_in_and_a_removed_ones_does_not():
+    fresh(); change(["add", "students", dict(_id="newrow0002", id="S004", name="Devi Nair", **{"class": CB}, groups=["GA1"]), ""])
+    s = A.app.test_client(); r = s.post("/login", data=dict(code=access.personal_code("S004")))
+    assert r.status_code == 302 and r.headers["Location"].endswith("/me") and s.get("/me").status_code == 200
+    change(["del", "students", row_id("S004")])
+    s2 = A.app.test_client(); r = s2.post("/login", data=dict(code=access.personal_code("S004")))
+    assert r.status_code != 302 and s2.get("/me").status_code != 200
+
+@t
+def a_heads_save_of_students_is_refused_and_follows_nothing():
+    fresh(); h = A.app.test_client()
+    with h.session_transaction() as s: s.update(role="head")
+    was, n = copy.deepcopy(store.published()["model"]["students"]), kind_lines()
+    r = h.post("/api/setup/changes", json=dict(client="h", since=store.setup_record()["v"], ops=[["merge", "students", row_id("S001"), "groups", ["GA2"], ["GA1"]], ["del", "students", row_id("S003")]]))
+    j = r.get_json(); assert r.status_code == 200 and len(j.get("refused") or []) == 2 and "students" not in j, j
+    assert store.published()["model"]["students"] == was and kind_lines() == n
+
+@t
+def a_renumbered_row_onto_an_equal_published_record_removes_the_old_id():
+    fresh(); change(["add", "students", dict(_id="dup0000001", id="S009", name="Chen Li", **{"class": CA}, groups=[]), ""])
+    set_students(PEOPLE)                                                    # S009 stays published, off the list
+    change(["set", "students", row_id("S003"), "id", "S009"])
+    assert pub_student("S003") is None and pub_student("S009")["name"] == "Chen Li"
+    assert access.norm(access.personal_code("S003")) not in store.published()["codes"]
+
+@t
+def seats_of_an_endless_or_odd_capacity_are_none():
+    for cap in ("inf", "1e400", "nan", float("inf"), float("nan"), "-inf"):
+        fresh(); m = store.published()["model"]
+        _swap(rooms=[dict(r, capacity=cap) if r["name"] == R1 else r for r in m["rooms"]])
+        assert c.get("/api/students/skeleton").get_json()["groups"]["GA1"]["seats"] is None, cap
+
+@t
+def the_people_stamp_moves_with_the_students_only():
+    fresh(); a = students.people_stamp(store.published())
+    assert a and a == students.people_stamp(store.published()) and students.people_stamp(None) == ""
+    change(["set", "students", row_id("S002"), "name", "Ben K"]); b = students.people_stamp(store.published())
+    change(["merge", "students", row_id("S002"), "groups", ["GA1"], ["GA2"]]); d = students.people_stamp(store.published())
+    assert len({a, b, d}) == 3
+    _swap(lessons=_lessons_with("GA1", room=R2)); assert students.people_stamp(store.published()) == d
+
 if __name__ == "__main__":
     for f in TESTS: f()
     print(f"{len(TESTS)} checks passed")
