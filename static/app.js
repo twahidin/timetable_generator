@@ -956,6 +956,7 @@ function render() {
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
   if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); }   // again: the person opened the step
+  if (id === "publish") loadRenames();   // the renamed teachers, when the setup, the draft or what is published moved since they were fetched
   if (id === "download") fitCheck();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
@@ -1941,6 +1942,7 @@ function paint(c) {
 }
 document.addEventListener("change", async e => {
   const el = e.target;
+  if (el.dataset && el.dataset.rn) { const [i, v] = el.dataset.rn.split("|"), p = RNP.list[Number(i)]; if (p && el.checked) { RN[p.old] = v; render(); } return; }   // step 9: same person or a different person
   if (el.id === "importX") { const f = el.files[0]; if (!f) return; el.value = ""; const fd = new FormData(); fd.append("file", f);
     try { const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json().catch(() => ({})); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) return; }
     catch (err) { toast("Could not reach the server: " + err.message); return; }
@@ -2990,7 +2992,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     if (al) al.hidden = !rights.includes("admin");
     if (hy) hy.hidden = !rights.includes("history");
     if (fa) fa.hidden = !(G.st.admin_exists === false && rights.includes("committee"));   /* deploy day: the committee code makes the first admin */
-    paintPublished(); draftWatch(); if (!VS.open) { VS.list = null; } vsPaintBtn(); rfPaintBtn();
+    paintPublished(); draftWatch(); loadRenames(); if (!VS.open) { VS.list = null; } vsPaintBtn(); rfPaintBtn();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
@@ -3033,7 +3035,7 @@ function paintFit() {
 function paintPublished() {   // the Publish step's lower card: what teachers and students see now, the downloads and the codes
   const el = $("#pubNow"), st = G.st; if (!el || !st) return;
   const p = st.published, f = p ? p.files || {} : {};
-  el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
+  el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>${renamedHTML(p.renamed)}
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
       ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${p.compared_v ? `<p class="muted small">Checked against the setup at ${esc(p.compared_v)}</p>` : ""}${p.compared_v ? ((p.left || []).length || p.open ? `<details><summary>${p.open || p.left.length} warning${(p.open || p.left.length) === 1 ? " was" : "s were"} open when it was published</summary><ul>${(p.left || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<p class="muted small">0 warnings were open when it was published</p>`) : ""}${p.compared_v ? ((p.fixes || []).length ? `<details><summary>${p.fixes.length} fix${p.fixes.length === 1 ? "" : "es"} made in the app</summary><ol class="fxlist">${p.fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ol></details>` : `<p class="muted small">No fixes were made in the app.</p>`) : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
@@ -3423,17 +3425,47 @@ async function refreshDraft() {   // the draft again from the server, and the st
   } catch (e) { }
   if (STEPS[S.step][0] === "publish") render();
 }
+/* step 9: the renamed teachers a publish asks about (GET /api/draft/renames, committee only), RNP.list, and the person's picks by old
+   name, RN. Fetched on step 9 only, once for each state of the setup, the draft and what is published (rnSig): a render on step 9
+   asks, and the status poll asks, but a fetch happens only when the state moved; its answer redraws only when the list changed */
+const RNP = { list: [], sig: null, busy: false, gen: 0 };
+let RN = {};
+const rnSig = () => JSON.stringify([SYNC.v, G.st && G.st.setup_saved_at, draftSig(), G.st && G.st.published ? G.st.published.at : null]);
+function rnTake(list) {   // a new list of pairs: the picks are forgotten when its old names change -> true when the list changed
+  list = Array.isArray(list) ? list : [];
+  const olds = x => JSON.stringify(x.map(p => p && p.old));
+  if (olds(list) !== olds(RNP.list)) RN = {};
+  const changed = JSON.stringify(list) !== JSON.stringify(RNP.list);
+  RNP.list = list; return changed;
+}
+async function loadRenames() {
+  if (STEPS[S.step][0] !== "publish" || S.practice || !committee() || RNP.busy) return;
+  const sig = rnSig(); if (sig === RNP.sig) return;
+  RNP.busy = true; const gen = RNP.gen; let list = null;
+  try {
+    const r = await fetch("/api/draft/renames"), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (r.ok && Array.isArray(j.renames)) list = j.renames;
+  } catch (e) { }
+  finally { RNP.busy = false; }
+  if (gen !== RNP.gen) return;   // a refusal of a publish brought a newer list meanwhile
+  RNP.sig = sig;   // tried for this state: a failure is not asked again until the state moves (a publish refused brings the list too)
+  if (list && rnTake(list) && STEPS[S.step][0] === "publish") render();
+  if (rnSig() !== sig) loadRenames();   // the state moved while the answer was on its way
+}
+const renamedHTML = xs => (Array.isArray(xs) ? xs : []).map(x => `<p class="muted small">${esc(x)}</p>`).join("");   // what followed each renamed teacher, a line each
 async function publishDraft() {   // step 9
   const btn = $("#pbPublish"), msg = $("#pbMsg"), again = () => { if (STEPS[S.step][0] === "publish") render(); };
   DR.hold = true; DR.gen++;   // no fetch of the draft, and no answer of one already sent, while the publish runs
   if (btn) btn.disabled = true;
   if (msg) msg.textContent = "Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…";
   try {
-    const r = await fetch("/api/draft/publish", { method: "POST" }), j = await r.json().catch(() => ({}));
+    const r = await fetch("/api/draft/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Renames.body(RNP.list, RN)) }), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.status === 409 && (j.critical || j.unplaced)) { toast(j.error); await refreshDraft(); return; }   // a critical mistake, or a lesson not placed, arrived meanwhile: the step shows it now
+    if (r.status === 409 && Array.isArray(j.renames)) { RNP.gen++; rnTake(j.renames); RNP.sig = rnSig(); again(); toast(j.error || "Choose for each teacher with a new name first."); return; }   // a renamed teacher still to choose for (or for an admin): the server's list, drawn again
     if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; S.help = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
+    S.draft = j; S.help = null; RN = {}; RNP.sig = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { again(); toast("Could not reach the server: " + err.message); }
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
@@ -3501,7 +3533,7 @@ function warnHead(w) {   // a warning's first lines, the same on steps 8 and 9: 
 }
 function draftHead(j) { return `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`; }
 function publishedMsg(j) {   // what both steps show once the draft is published
-  return draftHead(j) + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
+  return draftHead(j) + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>${renamedHTML(j.renamed)}
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>`;
 }
 function draftHTML(j) {   // {head: the school, the counts, the configuration line (in the upload card); warns: the Warnings tab of the board's side panel; changes: its Changes tab; foot: the notes of the upload and the way to step 9, at the foot of the timetable card}
@@ -3538,6 +3570,7 @@ function publishHTML(j) {
   if (!j) return `<h2>The timetable to publish</h2><p class="muted">Nothing to publish yet. Upload a timetable on step 8.</p><div class="row"><button data-step="${stepAt("edit")}">Go to step 8</button></div>`;
   if (j.published) return publishedMsg(j);
   const ws = j.warnings || [], crit = Draft.critical(ws), nc = j.critical ?? crit.length, fl = j.fixes || [], pub = G.st && G.st.published, gate = Draft.gateText(nc);
+  const rg = Renames.gate(RNP.list, RN), why = nc ? gate : rg;   // the renamed teachers' gate, after the critical one
   const row = (w, show) => `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}">${warnHead(w)}
       ${show ? `<div class="row warnbtns">${Draft.fixTarget(w) ? `<button data-pbshow="${esc(w.key)}">Show on step 8</button>` : `<button data-pbfind="${esc(w.key)}">Find it on step 8</button>`}</div>` : ""}</li>`;
   const groups = Draft.group(ws.filter(w => !w.crit), "open"), nw = groups.reduce((a, k) => a + k.groups.reduce((b, g) => b + g.items.length, 0), 0);
@@ -3550,7 +3583,8 @@ function publishHTML(j) {
     + `<h3 class="sev">Changes made in the app · ${fl.length}</h3>` + (fl.length ? fixList(fl) : `<p class="muted small">No fixes have been made in the app.</p>`)
     + (nc ? `<p class="issue crit" style="margin-top:12px">${esc(gate)}</p>`
         : `<p class="muted small" style="margin-top:12px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>`)
-    + `<div class="row"><button class="primary" id="pbPublish"${nc ? ` disabled title="${esc(gate)}"` : ""}>Publish this timetable</button><a href="/draft/preview" target="_blank" rel="noopener" title="Opens in a new tab: the timetable as teachers and students would see it, from the draft as it is now. Nothing is published."><button>Preview as it will be published</button></a></div><p class="muted small" id="pbMsg"></p>`;
+    + Renames.card(RNP.list, RN, esc) + (rg ? `<p class="issue crit" style="margin-top:12px" id="pbRenames">${esc(rg)}</p>` : "")
+    + `<div class="row"><button class="primary" id="pbPublish"${why ? ` disabled title="${esc(why)}"` : ""}>Publish this timetable</button><a href="/draft/preview" target="_blank" rel="noopener" title="Opens in a new tab: the timetable as teachers and students would see it, from the draft as it is now. Nothing is published."><button>Preview as it will be published</button></a></div><p class="muted small" id="pbMsg"></p>`;
 }
 const unplacedText = n => n === 1 ? "1 lesson is not placed. Place it or delete it on step 8 first." : `${n} lessons are not placed. Place them or delete them on step 8 first.`;   // the server's own sentence (draft.NotPlaced)
 function printoutsCard() {   // while a lesson waits in Not placed, the printouts and the download are refused: the sentence stands in their place
