@@ -228,20 +228,20 @@ def move_moves_the_link():
     ln, codes, st, talks = tg_state()
     assert NT3 not in ln and ln[LEE] == before and ln[ARJUN][0] == 102, ln
     assert codes == {ARJUN}, codes
-    assert st == {links.BLOCKED + LEE, f"{links.ALERT}{ARJUN}:2026-11-24"}, st
+    assert st == {f"{links.ALERT}{ARJUN}:2026-11-24"}, st             # a linked person has no blocked note
     assert talks == {101, 102}, talks
     assert links.move(NT3, LEE) == "none"                         # twice is harmless
     assert tg_state()[0][LEE] == before
 
 @t
-def move_keeps_the_new_blocked_note():
+def move_moved_leaves_no_blocked_note():
     tg_clear()
     links.link(NT3, 101, "@nt3")
     with tgdb.db() as c:
         c.execute("INSERT INTO state(k, v) VALUES (?, '\"old\"')", (links.BLOCKED + NT3,))
         c.execute("INSERT INTO state(k, v) VALUES (?, '\"new\"')", (links.BLOCKED + LEE,))
     assert links.move(NT3, LEE) == "moved"
-    assert links.blocked(LEE) == "new" and links.blocked(NT3) is None
+    assert links.blocked(LEE) is None and links.blocked(NT3) is None     # linked now: no note, as _put keeps it
 
 @t
 def move_kept():
@@ -262,7 +262,28 @@ def move_none():
     with tgdb.db() as c: c.execute("INSERT INTO state(k, v) VALUES (?, '1')", (links.BLOCKED + NT3,))
     assert links.move(NT3, LEE) == "none"
     ln, codes, st, _ = tg_state()
-    assert set(ln) == {ARJUN} and codes == {ARJUN} and len(st) == 1 and next(iter(st)).startswith(links.ALERT + ARJUN), tg_state()
+    assert set(ln) == {ARJUN} and codes == {ARJUN}, tg_state()
+    assert st == {links.BLOCKED + LEE} | {k for k in st if k.startswith(links.ALERT + ARJUN)} and len(st) == 2, st   # the note follows the person
+
+@t
+def move_none_blocked_note():
+    tg_clear()
+    with tgdb.db() as c:
+        c.execute("INSERT INTO state(k, v) VALUES (?, '\"old\"')", (links.BLOCKED + NT3,))
+    assert links.move(NT3, LEE) == "none"
+    assert links.blocked(LEE) == "old" and links.blocked(NT3) is None
+    tg_clear()
+    with tgdb.db() as c:
+        c.execute("INSERT INTO state(k, v) VALUES (?, '\"old\"')", (links.BLOCKED + NT3,))
+        c.execute("INSERT INTO state(k, v) VALUES (?, '\"new\"')", (links.BLOCKED + LEE,))
+    assert links.move(NT3, LEE) == "none"
+    assert links.blocked(LEE) == "new" and links.blocked(NT3) is None    # the new name's own note stays
+    tg_clear()
+    links.link(LEE, 103, "@lee")
+    with tgdb.db() as c:
+        c.execute("INSERT INTO state(k, v) VALUES (?, '\"old\"')", (links.BLOCKED + NT3,))
+    assert links.move(NT3, LEE) == "none"
+    assert links.blocked(LEE) is None and links.blocked(NT3) is None     # the new name is linked: the note goes
 
 @t
 def move_same_or_blank_changes_nothing():

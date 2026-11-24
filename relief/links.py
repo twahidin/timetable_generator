@@ -192,9 +192,11 @@ def forget(name):
 
 def move(name_old, name_new):
     """a renamed teacher who is the same person: their Telegram link follows to the new name, in one transaction -> "moved" (the
-    link row, with its chat, handle and time, now has the new name; a talk open in that chat stays; the old name's blocked note
-    becomes the new name's unless it has one), "kept" (the new name has a link already: the old name goes as forget does) or "none"
-    (no link under the old name). Every case also drops the old name's link codes, blocked note (when not moved) and alerts. The
+    link row, with its chat, handle and time, now has the new name; a talk open in that chat stays; neither name keeps a blocked
+    note, as _put keeps it for a linked person), "kept" (the new name has a link already: the old name goes as forget does) or
+    "none" (no link under the old name: the old name's blocked note becomes the new name's while the new name has no link and no
+    note of its own; a person who blocked the bot is still that person). Every case drops the old name's link codes, blocked note
+    and alerts. The
     same name twice, or a blank one, changes nothing and answers "none". Every linked name: set(linked())"""
     old, new = name_old, name_new
     if not isinstance(old, str) or not isinstance(new, str) or not old.strip() or not new.strip() or old == new: return "none"
@@ -202,7 +204,9 @@ def move(name_old, name_new):
     with tgdb.db() as c:
         r = c.execute("SELECT chat FROM links WHERE name=?", (old,)).fetchone()
         has_new = c.execute("SELECT 1 FROM links WHERE name=?", (new,)).fetchone() is not None
-        if r is None: answer = "none"
+        if r is None:
+            answer = "none"
+            if not has_new: c.execute("INSERT OR IGNORE INTO state(k, v) SELECT ?, v FROM state WHERE k=?", (BLOCKED + new, BLOCKED + old))
         elif has_new:
             answer = "kept"
             c.execute("DELETE FROM links WHERE name=?", (old,))
@@ -210,7 +214,7 @@ def move(name_old, name_new):
         else:
             answer = "moved"
             c.execute("UPDATE links SET name=? WHERE name=?", (new, old))
-            c.execute("INSERT OR IGNORE INTO state(k, v) SELECT ?, v FROM state WHERE k=?", (BLOCKED + new, BLOCKED + old))
+            c.execute("DELETE FROM state WHERE k=?", (BLOCKED + new,))                 # linked now: no note, as _put keeps it
         c.execute("DELETE FROM codes WHERE name=?", (old,))
         c.execute("DELETE FROM state WHERE k=? OR (substr(k, 1, ?)=? AND instr(substr(k, ?), ':')=0)", (BLOCKED + old, len(own), own, len(own) + 1))   # a date holds no colon
     return answer
