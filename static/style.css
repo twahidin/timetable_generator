@@ -605,3 +605,48 @@ body.vslock{overflow:hidden}
 @media(max-width:640px){.vsov{padding:0}.vspop{border-radius:0;min-height:100%}}
 @media(max-width:640px){.vstable,.vstable tbody,.vstable tr,.vstable td{display:block;width:100%;box-sizing:border-box}.vstable tr:first-child{display:none}.vstable tr{border-bottom:1px solid var(--line);padding:6px 0}.vstable td{border:0;padding:3px 8px}.vstable td[data-l]:not(:first-child)::before{content:attr(data-l) ": ";color:var(--muted);font-size:12px}}
 @media(max-width:640px){.vstable td.vsbtns{display:flex;gap:6px;flex-wrap:wrap}}
+
+/* the Students step: one student's card (bands and groups on the left, the week on the published timetable on the right) */
+.sv-card h2{margin:0 0 2px}
+.sv-top{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:6px}
+.sv-top #svName{width:220px}.sv-top #svId{width:130px}.sv-top select{min-width:96px}
+.sv-lv{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}.sv-lv b{color:var(--ink);font-weight:600;padding:5px 0}
+.sv-codeline{margin:6px 0 12px}
+.sv-cols{display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr);gap:16px;align-items:start}
+.sv-bands,.sv-week{min-width:0}
+.sv-h{font-size:11.5px;margin:12px 0 3px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.sv-bands>.sv-h:first-child{margin-top:0}
+.sv-opt{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:6px;align-items:center;padding:4px 6px;border:1px solid var(--line);border-radius:8px;margin-bottom:3px;cursor:pointer;font-size:13px;background:var(--panel)}
+.sv-opt input{margin:0;padding:0;width:14px;height:14px}
+.sv-opt.on{border-color:var(--accent);background:#dbeafe}
+.sv-opt.was{background:#f1f3f6}
+.sv-opt.bad{background:var(--warn-bg);border-color:#f3c4bf}
+.sv-opt small{display:block;color:var(--muted);font-size:11px}
+.sv-opt.drop .sv-name{text-decoration:line-through;color:var(--muted)}
+.sv-plain{display:flex;gap:4px}.sv-plain .sv-opt{grid-template-columns:16px auto;flex:1;font-size:12.5px}
+.sv-red{color:var(--warn)}
+.sv-n{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);white-space:nowrap}
+.sv-n.over{color:var(--warn);font-weight:600}
+.sv-note{margin-top:12px}.sv-note input{width:100%}
+.sv-weekwrap{max-width:100%;overflow-x:auto;overflow-y:hidden}
+.sv-wk{margin-bottom:8px}.sv-wk h5{margin:0 0 3px;font-size:12px;color:var(--navy)}
+table.sv-grid{border-collapse:collapse;border-spacing:0;table-layout:fixed;width:100%;font-size:10.5px}
+table.sv-grid th{position:static;background:none;color:var(--muted);font-weight:600;font-size:11px;padding:2px;text-align:center;border:0;white-space:nowrap}
+table.sv-grid th.sv-p{width:24px;padding:0 4px 0 0;text-align:right;font-size:9.5px;font-weight:400}
+table.sv-grid td{border:1px solid var(--line);height:15px;padding:0 1px;text-align:center;vertical-align:middle;line-height:1.15;overflow:hidden;background:var(--panel)}
+table.sv-grid td.brk{background:#f6f7f9}
+table.sv-grid td.sv-brk{background:#fafbfc;color:var(--muted);font-size:10px}
+.sv-in{overflow:hidden}.sv-l{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sv-l small{display:block;color:var(--muted);font-size:9.5px;font-weight:400;overflow:hidden;text-overflow:ellipsis}
+table.sv-grid td.new{background:#dbeafe;border-color:var(--accent);font-weight:600}
+table.sv-grid td.gone{background:#f1f3f6;color:#9aa3b2;text-decoration:line-through}
+table.sv-grid td.clash{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);font-weight:600}
+table.sv-grid td.clash small{display:none}
+.sv-l.gone{text-decoration:line-through;color:#9aa3b2}
+.sv-left{font-size:12px;color:var(--muted);margin:4px 0}
+.sv-key{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;font-size:11.5px;color:var(--muted)}
+.sv-key i{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid var(--line)}
+.sv-key i.new{background:#dbeafe;border-color:var(--accent)}.sv-key i.gone{background:#f1f3f6}.sv-key i.clash{background:var(--warn-bg);border-color:var(--warn)}
+.sv-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+td.sv-btns{white-space:nowrap}
+@media(max-width:899px){.sv-cols{grid-template-columns:minmax(0,1fr)}}

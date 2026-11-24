@@ -1721,6 +1721,7 @@ const VIEWS = {
       <div class="card"><h2>Constraints</h2>${strip}${parts.join("")}</div>${giveWay(out, crit, psel, weeks, days)}`;
   },
   students() {
+    stuCheck();   /* the open student's row moved or went with a change to the list */
     const { out, crit } = issues(); const L = S.spec.students, f = S.stu, q = f.q.trim().toLowerCase(), MAX = 200;
     const combos = (S.spec.combinations || []).map(c => c.code).filter(Boolean);
     const per = {}; L.forEach(s => per[s.class] = (per[s.class] || 0) + 1);
@@ -1734,13 +1735,13 @@ const VIEWS = {
         <p class="muted small" style="margin:4px 0 8px">Copy the rows from Excel or a CSV file, with a header row: <b>Student ID</b>, <b>Name</b>, <b>Class</b> and <b>Groups</b> (codes in one cell separated by commas, or one code per column). Without a header, the columns are read as ID, name, class, then groups. Whole-class subjects need no codes: a student has those with their class. Use an ID that stays the same (an admission number, say): personal codes are made from it.</p>
         <textarea id="stuPaste" rows="5" spellcheck="false" placeholder="Student ID&#9;Name&#9;Class&#9;Groups&#10;S001&#9;Tan Wei Ming&#9;1A&#9;1ELP1, 1MAP1, 1SCP1"></textarea>
         <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (.xlsx or .csv)<input type="file" id="stuFile" accept=".xlsx,.csv,.tsv,.txt" hidden></label><button class="primary" data-stu="replace">Replace the list</button><button data-stu="add">Add to the list</button><span class="muted small" id="stuMsg"></span></div></div></div>
-      <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">The list</h2>
+      ${stuScreen()}<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">The list</h2>
         <div class="row"><select id="stuCls">${clsOpts}</select><input id="stuQ" type="search" placeholder="Search ID or name" title="Type, then press Enter" value="${esc(f.q)}" style="width:190px"><span class="muted small">${rows.length === L.length ? `${L.length} students` : `${rows.length} of ${L.length}`}</span>${L.length ? `<button class="small danger" data-stu="clear">Remove all</button>` : ""}</div></div>
       ${stuBar()}${L.length ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th><input type="checkbox" data-pickall="students" title="Tick every student shown (${rows.length})" ${all ? "checked" : ""}></th><th>Student ID</th><th>Name</th><th>Class</th><th>Level</th>${combos.length ? "<th>Combination</th>" : ""}<th>Groups (click to pick)</th><th>Note</th><th></th></tr>
-      ${rows.slice(0, MAX).map(([s, i]) => `<tr id="students-${i}" class="${rowCls(out, crit, "students", i)}${P.students.has(i) ? " picked" : ""}" title="${esc((out.students[i] || []).join(" "))}"><td><input type="checkbox" data-pick="students.${i}" ${P.students.has(i) ? "checked" : ""}></td><td>${inp(`spec.students.${i}.id`, s.id, "text", 'style="width:110px"')}</td><td style="min-width:190px">${inp(`spec.students.${i}.name`, s.name)}</td><td style="min-width:88px">${sel(`spec.students.${i}.class`, s.class, classNames())}</td><td class="calc">${esc(clsLevel(s.class) || s.level || "")}</td>${combos.length ? `<td>${sel(`spec.students.${i}.combination`, s.combination, combos)}</td>` : ""}<td style="min-width:260px">${chips(`spec.students.${i}.groups`, s.groups, "groups", `data-cls="${esc(s.class || "")}"`)}</td><td>${inp(`spec.students.${i}.note`, s.note)}</td><td>${delBtn("students", i)}</td></tr>`).join("")}
+      ${rows.slice(0, MAX).map(([s, i]) => `<tr id="students-${i}" class="${rowCls(out, crit, "students", i)}${P.students.has(i) || (S.stuSaved && stuKey(s) === S.stuSaved) ? " picked" : ""}" title="${esc((out.students[i] || []).join(" "))}"><td><input type="checkbox" data-pick="students.${i}" ${P.students.has(i) ? "checked" : ""}></td><td>${inp(`spec.students.${i}.id`, s.id, "text", 'style="width:110px"')}</td><td style="min-width:190px">${inp(`spec.students.${i}.name`, s.name)}</td><td style="min-width:88px">${sel(`spec.students.${i}.class`, s.class, classNames())}</td><td class="calc">${esc(clsLevel(s.class) || s.level || "")}</td>${combos.length ? `<td>${sel(`spec.students.${i}.combination`, s.combination, combos)}</td>` : ""}<td style="min-width:260px">${chips(`spec.students.${i}.groups`, s.groups, "groups", `data-cls="${esc(s.class || "")}"`)}</td><td>${inp(`spec.students.${i}.note`, s.note)}</td><td class="sv-btns"><button class="small" data-stuopen="${i}" title="Open this student: groups and week">Open</button> ${delBtn("students", i)}</td></tr>`).join("")}
       </table></div>${rows.length > MAX ? `<p class="muted small">Showing the first ${MAX}. Pick a class or search to see the rest.</p>` : ""}`
         : `<p class="muted" style="margin-top:10px">No students yet. Paste or upload a list above, or add students one by one.</p>`}
-      <div class="row" style="margin-top:10px"><button data-add="students">+ Add student</button></div></div>`;
+      <div class="row" style="margin-top:10px"><button data-stuopen="-1">+ Add student</button></div></div>`;
   },
   download() {
     const { out, crit } = issues(); let n = 0, nc = 0; const nch = (S.spec.choices || []).length, mode = sc().choices_mode === "compare" ? "compare" : "fallback";
@@ -1864,6 +1865,9 @@ document.addEventListener("click", async e => {
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
   if (b.dataset.mcard !== undefined) { placeOn(cardAt(b.dataset.mcard), tickedIdx()); return; }
   if (b.dataset.pop) { if (!b.classList.contains("ro")) openPop(b); return; }
+  if (b.dataset.stuopen !== undefined) { stuOpen(Number(b.dataset.stuopen)); return; }
+  if (b.dataset.svcancel !== undefined) { stuClose(); return; }
+  if (b.dataset.svsave !== undefined) { stuSave(); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
   if (b.dataset.tl) { tlAction(b.dataset.tl); return; }
   if (b.dataset.past) { pastAction(b.dataset.past); return; }
@@ -1905,6 +1909,16 @@ document.addEventListener("click", async e => {
   if (b.id === "copyPrompt") { const ta = $("#prompt"); const done = () => toast("Copied."); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); document.execCommand("copy"); done(); }); else { ta.select(); document.execCommand("copy"); done(); } return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
+document.addEventListener("input", e => {   /* the open student's boxes: kept as typed, the card is not drawn again (the caret stays) */
+  const k = SV_TEXT[e.target.id]; if (!k || !S.stuOpen) return;
+  S.stuOpen.row[k] = e.target.value; if (k === "id") { const c = $("#svCode"); if (c) c.textContent = stuCodeLine(); }
+});
+document.addEventListener("change", e => {   /* the open student's card: a radio, a tick, the class; a box left */
+  const el = e.target; if (!S.stuOpen || !el.closest || !el.closest("#stuCard")) return;
+  if (SV_TEXT[el.id]) { S.stuOpen.row[SV_TEXT[el.id]] = el.value; stuLines(); return; }
+  stuPick(el);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !e.isComposing && S.stuOpen && $("#pop").hidden && $("#stuCard")) { e.preventDefault(); stuClose(); } });   /* Esc closes the student's card, nothing saved */
 document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("bands")) S.bandsOpen = e.target.open; }, true);
 document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo; inside a text box the browser's own undo applies. On step 8, with the board there, the keys are the timetable's: Z undoes its last change, redo does nothing
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -2572,6 +2586,191 @@ function bulkTeachers(k) {   // step 4: one change for every ticked teacher
   if (k === "tc-role") { if (!P.r) return; ix.forEach(i => T[i].role = P.r); msg = `${n} teacher${s1} now ${P.r}`; }
   if (k === "tc-allow") { const a = Number(P.a); if (P.a === "" || !(a >= 0)) { toast("Type the allowance first."); return; } ix.forEach(i => T[i].allowance = a); msg = `Allowance ${a} for ${n} teacher${s1}`; }
   save(); render(); toast(`${msg}. Undo takes it back.`);
+}
+/* ---------------- the Students step: one student's screen. StudentView (static/studentview.js) works it out; this draws it.
+   S.stuOpen: null, or {i, _id, orig, row, picks}: i the place in S.spec.students (-1 for a new student), _id that row's id
+   when the card opened, orig the student as saved, row the working copy of the boxes, picks the groups picked. Nothing in
+   S.spec changes until Save. S.skel: the published skeleton, false when nothing is published, undefined before it is fetched. */
+const SV_TEXT = { svName: "name", svId: "id", svNote: "note" };
+const stuCodes = () => lessonInfo().map(x => x.code);
+const stuSkelFor = () => S.practice ? null : S.skel || null;
+function stuExempt(note, cls) {   /* the bands of the class the Note exempts the student from, as the groups picker reads them */
+  const out = {}; StudentView.bands(S.spec, stuCodes(), cls || "").bands.forEach(b => { if (exemptFrom(note, b.band)) out[b.band] = true; }); return out;
+}
+function stuView(codes) { const o = S.stuOpen; return StudentView.view(S.spec, codes || stuCodes(), stuSkelFor(), o.orig, o.picks); }
+function stuDirty() {   /* the open student has changes: picks, or a box typed in */
+  const o = S.stuOpen; if (!o) return false;
+  if (["id", "name", "note"].some(k => String(o.row[k] || "").trim() !== String(o.orig[k] || "").trim())) return true;
+  return stuView().changed;
+}
+async function stuSkel() {   /* the published timetable's shape, fetched once; S.skel = undefined fetches it again */
+  if (S.practice || S.skel !== undefined || S.skelBusy) return;
+  S.skelBusy = true; S.skelErr = false;
+  try {
+    const r = await fetch("/api/students/skeleton");
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (r.status === 404) S.skel = false;
+    else if (!r.ok) throw new Error(`status ${r.status}`);
+    else S.skel = await r.json();
+  } catch (err) { S.skelErr = true; }
+  finally { S.skelBusy = false; }
+  stuDraw();
+}
+function stuOpen(i) {
+  const o = S.stuOpen;
+  if (o && i >= 0 && o.i === i) { stuScroll(); return; }
+  if (o && stuDirty() && !confirm("Leave this student without saving?")) return;
+  const s = i >= 0 ? S.spec.students[i] : null; if (i >= 0 && !s) return;
+  const orig = { id: (s && s.id) || "", name: (s && s.name) || "", class: (s && s.class) || "", note: (s && s.note) || "", groups: [...((s && s.groups) || [])] };
+  S.stuOpen = { i, _id: s ? s._id : null, orig, row: { ...orig, groups: [...orig.groups] }, picks: StudentView.open(S.spec, stuCodes(), orig, stuExempt(orig.note, orig.class)) };
+  if (S.skel === undefined) S.skelErr = false;
+  render(); stuSkel(); stuScroll();
+}
+function stuScroll() { const c = $("#stuCard"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); }
+function stuClose() { S.stuOpen = null; const c = $("#stuCard"); if (c) c.remove(); }
+function stuCheck() {   /* the list changed under the open card: find the row again by its id, or close the card when it is gone */
+  const o = S.stuOpen; if (!o || o.i < 0) return;
+  const L = S.spec.students; if (L[o.i] && (o._id == null || L[o.i]._id === o._id)) return;
+  const j = o._id == null ? -1 : L.findIndex(s => s && s._id === o._id);
+  if (j >= 0) { o.i = j; return; }
+  S.stuOpen = null; toast("That student was removed from the list.");
+}
+function stuCodeLine() {
+  const o = S.stuOpen; if (o.i < 0) return "A personal code is made from the ID.";
+  return String(o.row.id || "").trim() !== String(o.orig.id || "").trim() ? "A new ID gives a new personal code." : "The personal code stays the same.";
+}
+function stuCount(x) { return `<span class="sv-n${x.full || x.over ? " over" : ""}">${x.n} of ${x.size == null ? "?" : x.size}${x.full || x.over ? " · full" : ""}</span>`; }
+function stuOptLine(x, skel, why) {   /* an option's second line: why, teacher, room, then fits / the clash / off the timetable, then was */
+  const st = x.dropped ? "" : x.off ? "not on the published timetable" : x.clash ? `<span class="sv-red">${esc(x.clash)}</span>` : skel ? "fits" : "";   /* a crossed-out group: why and was only */
+  return [why ? esc(why) : "", esc(x.teacher), esc(x.room), st, x.was && !x.on ? "was in this group" : ""].filter(Boolean).join(" · ");
+}
+function stuOptHTML(x, input, skel, why) {
+  const cls = ["sv-opt", x.dropped ? "drop" : x.on ? "on" : x.was ? "was" : "", x.clash && !x.dropped ? "bad" : ""].filter(Boolean).join(" "), line = stuOptLine(x, skel, why);
+  return `<label class="${cls}">${input}<span><span class="sv-name">${esc(x.code)}${x.subject ? ` · ${esc(x.subject)}` : ""}</span>${line ? `<small>${line}</small>` : ""}</span>${stuCount(x)}</label>`;
+}
+function stuBandsHTML(v, skel, cls) {
+  if (!cls) return `<p class="muted small">Pick the student's class to see its bands and groups.</p>`;
+  const EX = StudentView.EXEMPT, NO = StudentView.NONE;
+  const radio = (k, band, val, on) => `<input type="radio" name="svb${k}" data-svband="${esc(band)}" data-svf="${esc(band + "|" + val)}" value="${esc(val)}"${on ? " checked" : ""}>`;
+  const bands = v.bands.map((b, k) => `<h3 class="sv-h">${esc(b.band)} · ${b.everyone ? "every student takes one" : "optional"}</h3>`
+    + b.options.map(x => stuOptHTML(x, radio(k, b.band, x.code, b.pick === x.code), skel, "")).join("")
+    + `<div class="sv-plain"><label class="sv-opt${b.pick === NO ? " on" : ""}">${radio(k, b.band, NO, b.pick === NO)}<span>None</span></label>`
+    + `<label class="sv-opt${b.pick === EX ? " on" : ""}" title="Not taking this subject: no lesson in this band. Written into the Note.">${radio(k, b.band, EX, b.pick === EX)}<span>Exempt</span></label></div>`).join("");
+  const other = v.other.map(x => stuOptHTML(x, `<input type="checkbox" data-svother="${esc(x.code)}" data-svf="${esc("other|" + x.code)}"${x.dropped ? ` data-svdrop="1"` : ""}${x.why ? "" : ` data-svown="1"`}${x.on ? " checked" : ""}>`, skel, x.why)).join("");
+  return (bands || (other ? "" : `<p class="muted small">No groups on step 5 include ${esc(cls)} yet.</p>`)) + (other ? `<h3 class="sv-h">Other groups</h3>${other}` : "");
+}
+const SV_LESSON = c => c === "L" || c === "A";
+function stuWeekHTML(v, skel, cls) {
+  if (S.practice) return `<p class="muted">A practice copy shows no week.</p>`;
+  if (S.skel === false) return `<p class="muted">No timetable is published yet, so there is no week to show.</p>`;
+  if (!skel) return S.skelErr && !S.skelBusy ? `<p class="sv-red">The week could not be loaded.</p>` : `<p class="muted">Loading the week…</p>`;
+  if (!cls) return `<p class="muted">Pick the class to see the week.</p>`;
+  const k = skel.classes && Object.prototype.hasOwnProperty.call(skel.classes, cls) ? skel.classes[cls] : null, codes = (k && k.codes) || [], NP = Number(skel.NP) || 0, days = skel.days || [];
+  /* a lesson left is drawn only where no lesson kept or gained sits; otherwise it is named under the grid */
+  const used = new Set(), alive = v.cells.filter(c => c.state !== "gone"), left = [];
+  alive.forEach(c => { for (let q = 0; q < (Number(c.n) || 1); q++) used.add(`${c.d},${c.p + q}`); });
+  const shown = alive.concat(v.cells.filter(c => {
+    if (c.state !== "gone") return false;
+    for (let q = 0; q < (Number(c.n) || 1); q++) if (used.has(`${c.d},${c.p + q}`)) { left.push(`${c.short || c.code} ${days[c.d] || ""} ${c.p + 1}`); return false; }
+    return true;
+  }));
+  const pay = { NP, codes, lessons: shown };
+  const tables = Grid.weeks(days).map(wk => {
+    const rows = Grid.table(pay, wk);
+    const brk = rows.map((r, p) => r.every(x => !x.lessons.length && !x.covered && !SV_LESSON(x.code)) ? ((c => c.length && c.every(y => y === c[0]) ? FX_BREAK[c[0]] || "Break" : "Break")(r.map(x => x.code).filter((y, _, all) => y !== "." || all.every(z => z === ".")))) : "");   /* named by its code, a day with no lesson then aside */
+    const cell = x => {
+      if (x.covered) return "";
+      if (!x.lessons.length) return `<td class="sv-c${SV_LESSON(x.code) ? "" : " brk"}"></td>`;
+      const live = x.lessons.filter(l => l.state !== "gone"), st = live.some(l => l.state === "clash") ? "clash" : (live[0] || x.lessons[0]).state;
+      const tip = x.lessons.map(l => [l.code, l.short, l.room, { new: "new", gone: "left", clash: "a clash" }[l.state] || ""].filter(Boolean).join(" · ")).join("\n");
+      return `<td class="sv-c ${st === "same" ? "" : esc(st)}" rowspan="${x.rowspan}" title="${esc(tip)}"><div class="sv-in" style="max-height:${x.rowspan * 15 - 2}px">${x.lessons.map(l => `<div class="sv-l ${esc(l.state)}">${esc(l.short || l.code)}${l.room ? `<small>${esc(l.room)}</small>` : ""}</div>`).join("")}</div></td>`;
+    };
+    let body = "";
+    rows.forEach((r, p) => {
+      if (brk[p] && p > 0 && brk[p - 1] === brk[p]) { body += `<tr><th class="sv-p">${p + 1}</th></tr>`; return; }
+      let n = 1; while (brk[p] && p + n < rows.length && brk[p + n] === brk[p]) n++;
+      body += `<tr><th class="sv-p">${p + 1}</th>${brk[p] ? `<td class="sv-brk" colspan="${wk.days.length}"${n > 1 ? ` rowspan="${n}"` : ""}>${esc(brk[p])}</td>` : r.map(cell).join("")}</tr>`;
+    });
+    return `<div class="sv-wk">${wk.name ? `<h5>${esc(wk.name)} week</h5>` : ""}<table class="sv-grid" style="min-width:${24 + wk.days.length * 48}px"><tr><th class="sv-p"></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${body}</table></div>`;
+  }).join("");
+  return (k ? "" : `<p class="muted small">Class ${esc(cls)} is not on the published timetable.</p>`)
+    + `<div class="sv-weekwrap">${tables}</div>`
+    + (left.length ? `<p class="sv-left">Lessons left: ${esc(left.join(", "))}</p>` : "")
+    + `<div class="sv-key"><span><i class="new"></i>new lessons</span><span><i class="gone"></i>lessons left</span><span><i class="clash"></i>a clash</span></div>`;
+}
+function stuScreen() {   /* the card for the open student (above the list) */
+  const o = S.stuOpen; if (!o) return "";
+  const codes = stuCodes(), skel = stuSkelFor(), v = StudentView.view(S.spec, codes, skel, o.orig, o.picks), r = o.row, cls = o.picks.cls || "", names = classNames();
+  const title = o.i < 0 ? "A new student" : o.orig.name || o.orig.id || "A student";
+  const clsSel = `<select id="svCls">${o.i < 0 || !cls ? opt("", cls, "") : ""}${names.map(c => opt(c, cls)).join("")}${cls && !names.includes(cls) ? opt(cls, cls, `${cls} (not on step 2)`) : ""}</select>`;
+  const plain = S.skel === false || S.practice;
+  return `<div class="card sv-card" id="stuCard"><h2>${esc(title)}</h2>
+    <div class="sv-top"><label class="f">Name<input id="svName" type="text" value="${esc(r.name)}" autocomplete="off"></label><label class="f">Student ID<input id="svId" type="text" value="${esc(r.id)}" autocomplete="off"></label><label class="f">Class${clsSel}</label><span class="f sv-lv">Level<b>${esc(clsLevel(cls) || "–")}</b></span></div>
+    <p class="muted small sv-codeline" id="svCode">${esc(stuCodeLine())}</p>
+    <div class="sv-cols"><div class="sv-bands">${stuBandsHTML(v, skel, cls)}<label class="f sv-note">Note<input id="svNote" type="text" value="${esc(r.note)}" autocomplete="off"></label></div>
+      <div class="sv-week">${stuWeekHTML(v, skel, cls)}</div></div>
+    <div class="sv-foot"><span id="svSum">${esc(v.summary)}</span><span class="row"><button data-svcancel="1">Cancel</button><button class="primary" data-svsave="1">${plain ? "Save" : "Save · the timetable changes at once"}</button></span></div></div>`;
+}
+function stuDraw() {   /* the card alone again (the list below stays put); the focus and the week's sideways scroll are kept */
+  const c = $("#stuCard"); if (!c || !S.stuOpen) return;
+  const a = document.activeElement, fk = a && c.contains(a) ? (a.id ? `#${CSS.escape(a.id)}` : a.dataset.svf ? `[data-svf="${CSS.escape(a.dataset.svf)}"]` : "") : "";
+  const w = c.querySelector(".sv-weekwrap"), sl = w ? w.scrollLeft : 0;
+  c.outerHTML = stuScreen();
+  const n = $("#stuCard"), w2 = n && n.querySelector(".sv-weekwrap"); if (w2) w2.scrollLeft = sl;
+  if (fk && n) { const el = n.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
+}
+function stuLines() {   /* after a box is left: the personal-code line and the summary */
+  const c = $("#svCode"), s = $("#svSum"); if (c) c.textContent = stuCodeLine(); if (s) s.textContent = stuView().summary;
+}
+function stuPick(el) {   /* a radio of a band, a tick of Other groups or the class: new picks, then the card again */
+  const o = S.stuOpen, ds = el.dataset, SVm = StudentView;
+  if (el.id === "svCls") { o.row.class = el.value; o.picks = SVm.setClass(S.spec, stuCodes(), o.picks, el.value, stuExempt(o.row.note, el.value)); stuDraw(); return; }
+  if (ds.svband !== undefined) { o.picks = { ...o.picks, band: { ...o.picks.band, [ds.svband]: el.value } }; stuDraw(); return; }
+  if (ds.svother !== undefined) {
+    const c = ds.svother, other = o.picks.other || [];
+    if (ds.svdrop) { if (el.checked) o.picks = SVm.keep(o.picks, c); }
+    else if (el.checked) { if (!other.includes(c)) o.picks = { ...o.picks, other: [...other, c] }; }
+    else o.picks = ds.svown ? { ...o.picks, other: other.filter(x => x !== c) } : SVm.drop(o.picks, c);
+    stuDraw();
+  }
+}
+function stuSave() {
+  const o = S.stuOpen; if (!o) return;
+  Object.entries(SV_TEXT).forEach(([id, k]) => { const el = document.getElementById(id); if (el) o.row[k] = el.value; });
+  const id = String(o.row.id || "").trim(), name = String(o.row.name || "").trim(), cls = o.picks.cls || "", isNew = o.i < 0;
+  if (isNew) {
+    if (!id) { toast("Type the student's ID."); return; }
+    if (!name) { toast("Type the student's name."); return; }
+    if (!cls) { toast("Pick the student's class."); return; }
+  } else if (!id && !name) { toast("Type the student's ID."); return; }
+  stuCheck(); if (S.stuOpen !== o) { render(); return; }
+  if (id && (isNew || id !== String(o.orig.id || "").trim()) && S.spec.students.some((s, j) => j !== o.i && stuKey(s) === id)) { toast(`${id} is already on the list.`); return; }
+  const v = stuView();
+  if (v.asks.length && !confirm(v.asks.join("\n") + "\n\nSave anyway?")) return;
+  const groups = StudentView.apply(o.orig, o.picks).groups, note = String(o.row.note || "").trim() || null;
+  let st;
+  if (isNew) { st = { id, name, class: cls, level: clsLevel(cls) || null, groups, note }; S.spec.students.push(st); }
+  else {
+    st = S.spec.students[o.i];
+    if ((st.class || "") !== cls) st.level = clsLevel(cls) || null;
+    Object.assign(st, { id: id || null, name: name || null, class: cls || null, note, groups });
+  }
+  const shown = [...new Set([...v.bands.map(b => b.band), ...Object.keys(o.picks.exemptWas || {})])], picked = v.bands.filter(b => b.pick === StudentView.EXEMPT).map(b => b.band);
+  setExempt(st, shown, picked);   /* the Note's "Exempt: band" lines, as the groups picker writes them */
+  save();
+  S.stuSaved = stuKey(st); S.stuOpen = null;
+  const q = S.stu.q.trim().toLowerCase();
+  if ((S.stu.cls && S.stu.cls !== st.class) || (q && !`${st.id || ""} ${st.name || ""}`.toLowerCase().includes(q))) S.stu = { cls: classNames().includes(st.class) ? st.class : "", q: "" };
+  render();
+  const at = S.spec.students.indexOf(st);
+  if (!document.getElementById(`students-${at}`) && classNames().includes(st.class) && S.stu.cls !== st.class) { S.stu = { cls: st.class, q: "" }; render(); }   /* past the first 200 shown: its class alone */
+  stuFlash(at);
+}
+function stuFlash(i) {   /* the saved row: in view, and marked for a moment */
+  const r = document.getElementById(`students-${i}`), w = r && r.closest(".tablewrap"), x = w ? w.scrollLeft : 0;
+  if (r) { r.scrollIntoView({ block: "center" }); if (w) w.scrollLeft = x; }   /* down to it, not sideways */
+  clearTimeout(S.stuSavedT);
+  S.stuSavedT = setTimeout(() => { S.stuSaved = null; const t = document.getElementById(`students-${i}`); if (t && !S.pick.students.has(i)) t.classList.remove("picked"); }, 2000);
 }
 function stuBar() {
   const P = S.pick, L = S.spec.students, ix = [...P.students].filter(i => L[i]); if (!ix.length) return "";
