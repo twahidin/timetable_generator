@@ -1941,7 +1941,7 @@ function paint(c) {
 }
 document.addEventListener("change", async e => {
   const el = e.target;
-  if (el.dataset && el.dataset.rn) { const [i, v] = el.dataset.rn.split("|"), p = RNP.list[Number(i)]; if (p && el.checked) { RN[p.old] = v; render(); } return; }   // step 9: same person or a different person
+  if (el.dataset && el.dataset.rn) { const [i, v] = el.dataset.rn.split("|"), p = RNP.list[Number(i)]; if (p && el.checked) { RN[Renames.key(p)] = v; render(); } return; }   // step 9: same person or a different person, for this pair
   if (el.id === "importX") { const f = el.files[0]; if (!f) return; el.value = ""; const fd = new FormData(); fd.append("file", f);
     try { const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json().catch(() => ({})); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) return; }
     catch (err) { toast("Could not reach the server: " + err.message); return; }
@@ -3424,16 +3424,16 @@ async function refreshDraft() {   // the draft again from the server, and the st
   } catch (e) { }
   if (STEPS[S.step][0] === "publish") render();
 }
-/* step 9: the renamed teachers a publish asks about (GET /api/draft/renames, committee only), RNP.list, and the person's picks by old
-   name, RN. Fetched on step 9 only, once for each state of the setup, the draft and what is published (rnSig): a render on step 9
+/* step 9: the renamed teachers a publish asks about (GET /api/draft/renames, committee only), RNP.list, and the person's picks by
+   pair (Renames.key: old and new name), RN. Fetched on step 9 only, once for each state of the setup, the draft and what is published (rnSig): a render on step 9
    asks, and the status poll asks, but a fetch happens only when the state moved; its answer redraws only when the list changed */
 const RNP = { list: [], sig: null, busy: false, gen: 0, again: false };   // again: the person opened step 9 while a fetch was on its way
 let RN = {};
 const rnSig = () => JSON.stringify([SYNC.v, G.st && G.st.setup_saved_at, draftSig(), G.st && G.st.published ? G.st.published.at : null]);
-function rnTake(list) {   // a new list of pairs: the picks are forgotten when its old names change -> true when the list changed
+function rnTake(list) {   // a new list of pairs: the picks are forgotten when its pairs (old and new names) change -> true when the list changed
   list = Array.isArray(list) ? list : [];
-  const olds = x => JSON.stringify(x.map(p => p && p.old).sort());   // as a set: the same names in another order keep the picks
-  if (olds(list) !== olds(RNP.list)) RN = {};
+  const keys = x => JSON.stringify(x.filter(p => p && typeof p === "object").map(Renames.key).sort());   // as a set: the same pairs in another order keep the picks
+  if (keys(list) !== keys(RNP.list)) RN = {};
   const changed = JSON.stringify(list) !== JSON.stringify(RNP.list);
   RNP.list = list; return changed;
 }
