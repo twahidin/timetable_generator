@@ -200,8 +200,11 @@ def double_days(school, days):
 def filled_lessons(rows):
     """the lesson rows that name a subject, each with the fields a row read from the workbook always has. A row added in the
     editor and not filled in yet is saved with no subject, and may have no level, classes or teachers either; the workbook
-    leaves such a row out, so a setup given as it is in the editor is read the same way"""
-    return [{"level": None, "block": None, "classes": [], "teachers": [], **x} for x in rows or [] if isinstance(x, dict) and str(x.get("subject") or "").strip()]
+    leaves such a row out, so a setup given as it is in the editor is read the same way. A teacher box emptied in the editor
+    stays in the row's list as an empty place (["Mdm Lee", None]); the workbook leaves an empty cell out, so it is left out here
+    (in the copy: the rows given are not changed)"""
+    named = lambda v: [t for t in v if t is not None and str(t).strip()] if isinstance(v, list) else []
+    return [{"level": None, "block": None, "classes": [], **x, "teachers": named(x.get("teachers"))} for x in rows or [] if isinstance(x, dict) and str(x.get("subject") or "").strip()]
 
 def end_rows(school):
     """'Lessons end by (Monday to Thursday)' rows on Settings -> [(label, weekdays, minutes after midnight)]"""
