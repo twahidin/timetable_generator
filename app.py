@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, compare, draft, history, putback, refit, refit_plan, store, sync, typed, versions
+import access, checks, compare, draft, history, putback, refit, refit_plan, store, students, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
@@ -766,14 +766,29 @@ def post_setup_changes():
         sync.head_prepare(ops, depts)    # a teacher a head adds is provisional, in one of their departments
         split = lambda spec, o: sync.head_split(spec, o, depts)
     since = _int(body.get("since"))
-    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split, by=by())
+    told = {}
+    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split, by=by(), told=told)
     except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
     reply = _changes_reply(since, client, v)
     if mine is not None: reply["mine"] = mine    # the version of the sender's own ops: the page applies patches below it first and above it last
     if refused: reply["refused"] = [dict(i=i, why=why) for i, why in refused]
+    said = _follow_students(told)
+    if said: reply["students"] = said
     return reply
+
+STUDENTS_NOT_UPDATED = "The published timetable was not updated. Press Update the published timetable on the Students step."
+
+def _follow_students(told):
+    """bring the students a save named up to date on the published timetable: {"outcome": ...}, {"error": ...} when that
+    failed (the save itself stands; only the exception's type is printed), or None when there is nothing to say"""
+    if not told.get("students"): return None
+    try: out = students.follow(told["students"], by(), told.get("batch"))
+    except Exception as e:
+        print(f"students.follow failed: {type(e).__name__}", file=sys.stderr)
+        return {"error": STUDENTS_NOT_UPDATED}
+    return {"outcome": out} if out is not None else None
 
 @app.get("/api/setup/copies")
 @need("committee")
@@ -2176,10 +2191,12 @@ def history_back():
         refused = sync.head_split(spec, o, depts)[1]
         return refused[0][1] if refused else None
     tag = {"putback": unit, "putback_of": es[0].get("as"), "putback_ts": es[0].get("ts")}
-    try: store.apply_changes(ops, "history", check=check, since=v0, by=by(), tag=tag)
+    told = {}
+    try: store.apply_changes(ops, "history", check=check, since=v0, by=by(), tag=tag, told=told)
     except store.Replaced: return {"error": REPLACED_MEANWHILE}, 409
     except store.Refused as x: return {"error": str(x)}, 409
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
+    _follow_students(told)    # the published timetable follows a put back too; its answer does not change
     return {"done": True, "text": "Put back."}
 
 ONLY_ADMIN = "Only an admin can open this page."

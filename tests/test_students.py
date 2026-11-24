@@ -71,10 +71,10 @@ def publish():
     return store.published()
 
 def change(*ops):
-    """a save as the route will make it (Task 2): the change applied, then the students it named followed"""
-    told = {}
-    store.apply_changes(list(ops), "t", told=told, by=BY)
-    return {"students": {"outcome": students.follow(told.get("students") or [], BY, told.get("batch"))}}
+    """a save as the app makes it: the route answers with what happened to the students"""
+    r = c.post("/api/setup/changes", json=dict(client="t", since=store.setup_record()["v"], ops=list(ops)))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    return r.get_json()
 
 def row_id(sid):
     return next(r["_id"] for r in store.setup_record()["spec"]["students"] if str(r.get("id")) == sid)
@@ -189,6 +189,37 @@ def nothing_published_is_no_error():
 def told_names_the_student_rows():
     fresh(); told = {}; store.apply_changes([["set", "students", row_id("S002"), "name", "Ben K"], ["set", "classes", SPEC["classes"][0]["_id"], "size", 31]], "t", told=told)
     assert told["batch"].startswith("b") and [(b["name"], a["name"]) for b, a in told["students"]] == [("Ben Koh", "Ben K")]
+
+@t
+def the_route_follows_and_says_what_happened():
+    fresh(); j = change(["merge", "students", row_id("S001"), "groups", ["GA2"], ["GA1"]])
+    assert j["students"]["outcome"]["updated"] == ["S001"] and j["students"]["outcome"]["text"] == "Published timetable updated for Aisha Rahman (S001)."
+
+@t
+def a_save_of_other_rows_says_nothing_about_students():
+    fresh(); assert "students" not in change(["set", "classes", SPEC["classes"][0]["_id"], "size", 33])
+
+@t
+def a_failure_does_not_fail_the_save():
+    fresh(); real, err = students.follow, sys.stderr; students.follow = lambda *a, **k: 1 / 0; sys.stderr = io.StringIO()
+    try: j = change(["set", "students", row_id("S002"), "name", "Ben K"]); said = sys.stderr.getvalue()
+    finally: students.follow = real; sys.stderr = err
+    assert said == "students.follow failed: ZeroDivisionError\n"
+    assert j["students"] == {"error": "The published timetable was not updated. Press Update the published timetable on the Students step."}
+    assert next(s for s in c.get("/api/setup").get_json()["spec"]["students"] if s["id"] == "S002")["name"] == "Ben K"
+
+@t
+def history_has_its_own_line_and_put_back_follows():
+    fresh(); n0 = len(history.read(kinds=[students.KIND], limit=10 ** 6)); change(["merge", "students", row_id("S001"), "groups", ["GA2"], ["GA1"]])
+    es = history.read(limit=20); line = next(e for e in es if e["kind"] == students.KIND); setup = next(e for e in es if e["kind"] == "setup")
+    assert line["text"] == "Published timetable updated for Aisha Rahman (S001)." and line["of"] == setup["batch"] and line["where"] == "Students"
+    assert putback.unit_of(line) is None                                    # it cannot be put back
+    shown = [e for e in c.get("/api/history?where=Students").get_json()["entries"] if e["kind"] == students.KIND]   # the page's own list: found by Where, no Put back
+    assert shown and shown[0]["id"] == line["id"] and "back" not in shown[0]
+    assert c.post("/api/history/back", json=dict(id=setup["id"])).get_json() == {"done": True, "text": "Put back."}
+    assert sorted(pub_student("S001")["groups"]) == ["GA1", "GB1"]            # the published timetable followed the put back
+    assert len(history.read(kinds=[students.KIND], limit=10 ** 6)) == n0 + 2   # the save's line and the put back's
+    assert all(e["kind"] != students.KIND for e in putback.gather(setup["id"])[1])   # not part of the save's unit
 
 if __name__ == "__main__":
     for f in TESTS: f()
