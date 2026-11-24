@@ -388,6 +388,14 @@ t("question: nothing collides, a rule in the way, not lesson time, an older answ
   const old = Board.question(c, Object.assign({}, base, { beside: { state: "no", why: "1A has Maths G1 then." } }), b);   // no clashes key
   assert.deepStrictEqual(old.lines, []); assert.strictEqual(old.why, "1A has Maths G1 then."); assert.strictEqual(old.anyway, "Put it here anyway");
 });
+t("question: collisions at a place that is not lesson time say that sentence too, and offer nothing but Cancel", () => {
+  const c = card(9, 0, 1, 1, ["1A"], { what: "Science" }), b = board([c]), out = [{ id: 5, what: "Maths G1", classes: ["1A"], groups: 1 }];
+  const s = { d: 1, p: 2, state: "na", why: "Another lesson is there.", swap: null, also: [], push: { state: "ok", why: "", out },
+    clashes: [{ kind: "class", text: "1A has Maths G1 then." }], beside: { state: "na", why: "That is not lesson time for 1A." } };
+  const q = Board.question(c, s, b);
+  assert.ok(q.text.endsWith("collides with:")); assert.strictEqual(q.lines.length, 1);
+  assert.strictEqual(q.why, "That is not lesson time for 1A."); assert.strictEqual(q.anyway, null); assert.strictEqual(q.beside, null);
+});
 t("fix: put it here anyway is the plain move forced with the reason shown; no push", () => {
   const c = card(9, 0, 1, 1, ["1A"]), s = { d: 1, p: 2, state: "na", swap: null, push: { state: "ok", why: "", out: [] }, beside: { state: "no", why: "1A has Maths then." } };
   assert.deepStrictEqual(Board.fix(c, s, "anyway"), { kind: "move", id: 9, d: 1, p: 2, force: true, why: "1A has Maths then." });

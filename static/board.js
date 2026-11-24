@@ -307,7 +307,8 @@ var Board = (function () {
     var all = s.clashes || [], lines = all.slice(0, 8).map(function (c) { return { kind: CLASH[c.kind] || "", text: c.text }; });
     var at = card.what + " on " + board.days[s.d] + " period " + s.p;
     var text = lines.length ? at + " collides with:" : at + ": another lesson is there.";
-    var why = lines.length ? "" : a.beside ? "Nothing collides." : (s.beside && s.beside.why) || "";
+    var na = !!s.beside && s.beside.state === "na";   // not lesson time there: its sentence says why nothing but Cancel is offered, lines or not
+    var why = na ? s.beside.why || "" : lines.length ? "" : a.beside ? "Nothing collides." : (s.beside && s.beside.why) || "";
     var swap = null, beside = null, also = [];
     if (a.swap) {
       var other = null;
