@@ -799,6 +799,13 @@ def _follow_students(told):
 def students_published():
     return jsonify(students.status())
 
+@app.get("/api/students/skeleton")
+@need("committee")
+def students_skeleton():
+    k = students.skeleton()
+    if k is None: return {"error": "No timetable is published yet."}, 404
+    return _gz(jsonify(k))
+
 @app.post("/api/students/update")
 @need("committee")
 def students_update():

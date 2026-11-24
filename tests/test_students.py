@@ -402,6 +402,51 @@ def the_thread_runs_after_the_wait_and_after_a_restart():
         assert store.published()["meta"]["files_behind"] is False
     finally: students.FILES_WAIT = 3600
 
+@t
+def the_skeleton_holds_what_the_screen_needs():
+    fresh(); k = c.get("/api/students/skeleton").get_json(); m = store.published()["model"]
+    assert k["stamp"] == students.stamp(store.published()) and k["stamp"].startswith(store.published()["meta"]["published_at"] + "|")
+    assert k["days"] == m["days"] and k["NP"] == m["NP"] and k["times"] == m["times"]
+    d1, d2 = m["days"].index(DAYS[1]), m["days"].index(DAYS[2])
+    assert k["groups"]["GA1"] == dict(subject=SUBJ, short=E.abbrev(SUBJ), band="Band A", classes=sorted([CA, CB]), teachers=[T1], rooms=[R1], seats=k["groups"]["GA1"]["seats"], slots=[[d1, L1, 2]])
+    assert k["groups"]["GB1"]["slots"] == [[d2, L1, 1]] and k["groups"]["GX"]["band"] == ""
+    assert k["classes"][CA]["whole"] == [[m["days"].index(DAYS[0]), L1, 1, E.abbrev(SUBJ), R1]] and k["classes"][CB]["whole"] == []
+    assert len(k["classes"][CA]["codes"]) == len(m["days"])
+    seats = k["groups"]["GA1"]["seats"]; cap = next(r["capacity"] for r in m["rooms"] if r["name"] == R1)
+    assert seats == (int(cap) if str(cap).strip().isdigit() and int(cap) > 0 else None)
+    assert NOSE.get("/api/students/skeleton").status_code == 401
+
+@t
+def the_skeleton_has_no_student_in_it():
+    fresh(); raw = c.get("/api/students/skeleton").get_data(as_text=True)
+    assert "Aisha" not in raw and "S001" not in raw
+
+@t
+def the_skeleton_is_gzipped_when_asked_and_404_when_nothing_is_published():
+    fresh(); r = c.get("/api/students/skeleton", headers={"Accept-Encoding": "gzip"})
+    assert r.headers.get("Content-Encoding") == "gzip"
+    import gzip
+    assert json.loads(gzip.decompress(r.get_data()))["stamp"] == students.stamp(store.published())
+
+@t
+def the_stamp_ignores_a_student_change_and_status_carries_it():
+    fresh(); before = c.get("/api/students/skeleton").get_json()["stamp"]
+    change(["merge", "students", row_id("S002"), "groups", ["GA1"], ["GA2"]])
+    k = c.get("/api/students/skeleton").get_json()
+    assert k["stamp"] == before == students.status()["stamp"]
+    assert students.status()["at"] == store.published()["meta"]["published_at"]
+
+@t
+def a_made_exam_goes_stale_after_a_group_change():
+    from exams import make as XM, papers as XP
+    fresh(); sched = dict(papers=[dict(id="p1", who="groups", level=LEVEL, subject=SUBJ)]); xset = {}
+    at = XM.published_at(store.published())
+    fp1, sit1 = XM.fingerprint(sched, xset, store.published()["model"]), XP.who_sits(sched["papers"][0], store.published()["model"])
+    change(["merge", "students", row_id("S002"), "groups", ["GA1"], ["GA2"]])
+    fp2, sit2 = XM.fingerprint(sched, xset, store.published()["model"]), XP.who_sits(sched["papers"][0], store.published()["model"])
+    assert "S002" not in sit1 and "S002" in sit2 and fp1 != fp2
+    assert XM.published_at(store.published()) == at
+
 if __name__ == "__main__":
     for f in TESTS: f()
     print(f"{len(TESTS)} checks passed")

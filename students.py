@@ -2,7 +2,7 @@
 the published timetable are brought up to date at once, and nothing else in it changes. Students are matched by
 student ID (the published records have no row id). A student who cannot follow is left as the published timetable
 has them, with the reason in words."""
-import collections, copy, sys, threading, time
+import collections, copy, hashlib, json, sys, threading, time
 import history, store
 from ttgen import export as E
 
@@ -188,16 +188,16 @@ def status():
         pub = store.published()
         setup_rows = _setup_students() if pub is not None else []
     if pub is None: return dict(published=False)
-    model = pub["model"]
+    model = pub["model"]; stamp_ = stamp(pub)
     if setup_rows is None:
-        return dict(published=True, at=pub["meta"].get("published_at"), students=len(model["students"]), listed=0, same=0, differ=[], differ_n=0,
+        return dict(published=True, at=pub["meta"].get("published_at"), stamp=stamp_, students=len(model["students"]), listed=0, same=0, differ=[], differ_n=0,
                     counts=dict(change=0, add=0, remove=0), can_update=False, files_behind=bool(pub["meta"].get("files_behind")), no_setup=True)
     rows_now, left, waiting, extra = _compare(model, setup_rows)
     differ = ([dict(_left(k, r, w), kind="left") for k, r, w in left]
               + [dict(id=k, name=str(r.get("name") or ""), why="not updated yet", kind="waiting") for k, r, rec, i in waiting]
               + [dict(id=str(model["students"][i]["id"]), name=str(model["students"][i]["name"]), why="on the published timetable but not on this list", kind="extra") for i in extra])
     counts = dict(change=sum(1 for w in waiting if w[3] is not None), add=sum(1 for w in waiting if w[3] is None), remove=len(extra))
-    return dict(published=True, at=pub["meta"].get("published_at"), students=len(model["students"]), listed=len(rows_now),
+    return dict(published=True, at=pub["meta"].get("published_at"), stamp=stamp_, students=len(model["students"]), listed=len(rows_now),
                 same=len(rows_now) - len(left) - len(waiting), differ=differ[:10], differ_n=len(differ), counts=counts,
                 can_update=any(counts.values()), files_behind=bool(pub["meta"].get("files_behind")))
 
@@ -227,3 +227,48 @@ def update_all(by):
             except Exception as e: store._warn(e)
         return dict(updated=[s["id"] for s in updated], added=[s["id"] for s in added], removed=[s["id"] for s in removed],
                     left=[_left(k, r, w) for k, r, w in left], held=0, text=text)
+
+def stamp(pub):
+    """names this publish's lessons: the published time, then a short hash of the lessons (the time is only to the minute);
+    a student change leaves it as it is"""
+    keys = ("id", "d", "p", "n", "group", "room", "subject", "teachers", "classes")
+    rows = [[L.get(k) for k in keys] for L in pub["model"]["lessons"]]
+    h = hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:10]
+    return f"{pub['meta'].get('published_at')}|{h}"
+
+def _seats(rooms, capacities):
+    """the one room's capacity as a whole number above 0, else None"""
+    if len(rooms) != 1: return None
+    cap = capacities.get(rooms[0])
+    try: n = int(str(cap).strip())
+    except (TypeError, ValueError): return None
+    return n if n > 0 else None
+
+def skeleton():
+    """the published timetable's shape for the student screen: days, periods, each class's whole-class lessons and each
+    teaching group's lessons; no student in it; None when nothing is published"""
+    pub = store.published()
+    if pub is None: return None
+    m = pub["model"]; caps = {r["name"]: r.get("capacity") for r in m.get("rooms") or []}
+    whole = {c["name"]: set() for c in m["classes"]}
+    gs = collections.OrderedDict()
+    for L in m["lessons"]:
+        if L["group"] == E.ENTIRE:
+            for cn in L["classes"]:
+                if cn in whole: whole[cn].add((L["d"], L["p"], L["n"], E.abbrev(L["subject"]), L["room"]))
+            continue
+        g = gs.setdefault(L["group"], dict(subject=L["subject"], band=L.get("block") or "", classes=set(), teachers={}, rooms={}, slots=set()))
+        g["classes"].update(L["classes"]); g["slots"].add((L["d"], L["p"], L["n"]))
+        for tn in L["teachers"]:
+            if str(tn).strip(): g["teachers"][tn] = 1
+        if str(L["room"] or "").strip(): g["rooms"][L["room"]] = 1
+    classes = {}
+    for c in m["classes"]:
+        classes[c["name"]] = dict(level=c["level"], codes=m["cgrid"].get(c["name"]) or E._codes_for(m, [c["level"]]),
+                                  whole=[list(x) for x in sorted(whole[c["name"]], key=lambda x: (x[0], x[1], x[2]))])
+    groups = {}
+    for code, g in gs.items():
+        rooms = list(g["rooms"])
+        groups[code] = dict(subject=g["subject"], short=E.abbrev(g["subject"]), band=g["band"], classes=sorted(g["classes"]), teachers=list(g["teachers"]),
+                            rooms=rooms, seats=_seats(rooms, caps), slots=[list(x) for x in sorted(g["slots"])])
+    return dict(stamp=stamp(pub), days=m["days"], NP=m["NP"], times=m["times"], classes=classes, groups=groups)
