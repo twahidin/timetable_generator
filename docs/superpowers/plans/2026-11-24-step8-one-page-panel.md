@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Work only in `/Users/joetay/Developer/tt-generator/tt-step8-no-popout` (branch `step8-no-popout`). Use its Python through `/Users/joetay/Developer/tt-generator/timetable_generator/.venv/bin/python` (the worktree has no `.venv` of its own).
+- Work only in the worktree (branch `step8-no-popout`). Use Python through the dev checkout's `.venv/bin/python` (the worktree has no `.venv` of its own).
 - NEVER run `git stash`, `git stash pop`, `git checkout -- <file>`, `git reset --hard`, or switch branches. `git stash list` must stay at 2 entries. To see old code: `git show HEAD:path > /scratch/file`.
 - Never use `pkill`/`killall` by name or pattern; stop only processes you started, by PID.
 - Never print or edit `.claude/launch.json`. Never start a dev server from a builder task; browser checks are the controller's.
@@ -293,7 +293,7 @@ t("verdict: a trade is a direct swap or not", () => {
 
 - [ ] **Step 1:** In `README.md`, find every sentence about step 8's pop-out, the Lesson tab, the Ask tab, "push", and the two teacher questions (`grep -n -i -e "pop-out" -e "push" -e "Lesson tab" -e "Ask tab" -e "trade" README.md`) and rewrite each to what the spec says. Plain words, short sentences, as the README is written.
 - [ ] **Step 2:** Write the notes file: the rulings made while building, known limits (a red place still lands at once; `Board.tell`'s old push sentence gone; the server still accepts `push`), anything not tried in a browser.
-- [ ] **Step 3: Every suite.** `node --check static/app.js`; `for f in tests/*.test.js; do node "$f" || echo "FAILED $f"; done`; `for f in tests/test_*.py tests/smoke.py; do /Users/joetay/Developer/tt-generator/timetable_generator/.venv/bin/python "$f" > "$LOGS/$(basename "$f").log" 2>&1 || echo "FAILED $f"; done`, with `LOGS` the scratch folder the controller names (never `/tmp`). Expected: no "FAILED" line. Then `--full` on `test_typed`, `test_helper`, `test_fixes` and `smoke` in the background.
+- [ ] **Step 3: Every suite.** `node --check static/app.js`; `for f in tests/*.test.js; do node "$f" || echo "FAILED $f"; done`; `for f in tests/test_*.py tests/smoke.py; do "$PY" "$f" > "$LOGS/$(basename "$f").log" 2>&1 || echo "FAILED $f"; done`, with `PY` the dev checkout's `.venv/bin/python` and `LOGS` the scratch folder the controller names (never `/tmp`). Expected: no "FAILED" line. Then `--full` on `test_typed`, `test_helper`, `test_fixes` and `smoke` in the background.
 - [ ] **Step 4: Commit** `docs: step 8's one page, the collisions box and the teacher answers`
 
 The browser check (real pointer actions, scratch data folder, sample school) is the controller's, after Task 5: the list is in the spec's "Tests" section.

@@ -3840,6 +3840,7 @@ async function bdLoad() {   // the board again for the draft the page has; with 
   if (b.drag !== null || b.wait) { b.next = got; return; }   // a redraw would end the drag: drawn when it ends
   bdTake(got); bdDraw(); bdWant(); bdReveal();
   if (b.show && b.data) bdShowWarning(b.show.key, b.show.stay);   // step 9's Show on step 8, waiting for the board
+  if (b.sel !== null && !b.about && !bdEntry(b.sel)) { const c = bdCard(b.sel); if (c && !c.entry) akOpen(Ask.ofCard(c, null), false); }   // step 9's Show on step 8 on a lesson not placed (bdShowTray before the board was in): its page is there to open, the panel keeps its tab
 }
 function bdShowTray(id) {   // step 9's "Show on step 8" on a lesson not placed: it is selected in the tray and the board scrolled into view, once the board is in
   const b = S.board; if (!b) return;
@@ -3896,7 +3897,7 @@ function bdPieces(row, d, b, hit, warned) {   // warned: the open warnings by le
   });
   return st.join("");
 }
-function bdTrayHTML(b, hit) {   // the Not placed tray beside the rows: the lessons lifted or pushed out, a group per first class, each saying where it was
+function bdTrayHTML(b, hit) {   // the Not placed tray beside the rows: the lessons lifted out or not placed, a group per first class, each saying where it was
   const d = b.data, gs = Board.tray(d);
   const body = gs.length ? gs.map(g => `<div class="bdtgrp"><b>${esc(g.cls || "No class")}</b>${g.cards.map(c => {
     const ln = Board.lines(c, d), was = bdWas(d, c), pal = bdPal(d, ln);
@@ -4091,7 +4092,7 @@ function bdPopHTML() {   // the pop-out beside where the pointer was last presse
   }
   if (b.ask) {   // a lesson dropped where another is: what collides there (or why it cannot simply go there), then Swap, Put it beside, Put it here anyway, Cancel, as the place allows
     const q = b.ask.q, dis = FX.busy ? " disabled" : "";
-    return `<span>${esc(q.text)}</span>${q.lines.map(l => `<span class="bdcl">${l.kind ? `<b>${esc(l.kind)}</b> ` : ""}${esc(l.text)}</span>`).join("")}${q.more ? `<span class="muted small">and ${q.more} more</span>` : ""}${q.why ? `<span class="bdwhy">${esc(q.why)}</span>` : ""}${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.anyway ? `<button data-bdanyway="1"${dis}>${esc(q.anyway)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
+    return `<span>${esc(q.text)}</span>${q.lines.map(l => `<span class="bdcl">${l.kind ? `<b>${esc(l.kind)}</b> ` : ""}${esc(l.text)}</span>`).join("")}${q.more ? `<span class="muted small">and ${q.more} more</span>` : ""}${q.why ? `<span class="${q.why === "Nothing collides." ? "muted small" : "bdwhy"}">${esc(q.why)}</span>` : ""}${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.anyway ? `<button data-bdanyway="1"${dis}>${esc(q.anyway)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
   }
   return "";
 }
@@ -4111,7 +4112,10 @@ function bdHowHTML() {   // how to change the timetable: always in the same plac
     <li><b>Whole cycle:</b> click a name at the left.</li>
     <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc lets go of the lesson.</li></ul></div>`;
 }
-function bdLineDraw() { const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); bdPopDraw(); }
+function bdLineDraw() {
+  const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); bdPopDraw();
+  if (S.board && !S.board.del && $("#bdSide .akdel")) bdSideDraw();   // the delete question withdrawn elsewhere (a box asked, a drag, a change sent): the page's two buttons again
+}
 function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the air or a drop waits, and when there is nothing in it; else placed beside where the pointer was last pressed
   const pop = $("#bdPop"), box = $("#bdBox"), b = S.board; if (!pop || !box) return;
   const html = b && b.data && b.drag === null && !b.wait ? bdPopHTML() : "";
@@ -4447,11 +4451,11 @@ function bdClick(b) {   // true when the click was the board's
     };
     const j = bdDelOf(c.id);
     if (j) ask(j);
-    else { const gen = BD.gen; bdSlotsP(c.id).then(() => { if (S.board === bd && gen === BD.gen && bd.about === A && A.card === c.id) ask(bdDelOf(c.id)); }); }
+    else { const gen = BD.gen; bdSlotsP(c.id).then(() => { if (S.board === bd && gen === BD.gen && bd.about === A && A.card === c.id && !bd.ask && bd.drag === null && !bd.wait) ask(bdDelOf(c.id)); }); }   // a late judgement never withdraws an open question, nor acts during a drag or a waiting drop
     return true;
   }
   if (d.bddelgo !== undefined) {   // the delete is forced when its judgement was "no", with the sentence shown (the server keeps it only for that same reason)
-    const x = bd.del, c = x && bdCard(x.id); if (!c) return true;
+    const x = bd.del, c = x && bdCard(x.id); if (!c) { bdSideDraw(); return true; }   // the question is gone: the page again
     bdSend("/api/draft/fix", Board.deleteFix(c, x.j), c); return true;
   }
   if (d.bdswap !== undefined || d.bdbeside !== undefined || d.bdanyway !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
@@ -4788,7 +4792,7 @@ function akOpen(sub, show = true) {   // the page is about sub now (the log stay
   const pt = Ask.parts(sub, c);
   A.les = pt.lists ? { id: sub.id, group: pt.group, got: {}, all: {}, n: 0 } : null;
   if (A.les) bdLessonFetch();
-  akWithdraw(b); if (show) b.side = "ask"; bdSideDraw();
+  b.del = null; akWithdraw(b); if (show) b.side = "ask"; bdSideDraw();   // a delete question goes with what the page was about
   const y = show && $("#bdSide .bdsbody"); if (y) y.scrollTop = 0;   // its heading and starters first
 }
 function akBack(b) { if (b.side === "ask") b.side = b.about ? b.about.back || null : null; }   // let go of what the page is about: the tab open before it is shown again; the page's tab stays in the row

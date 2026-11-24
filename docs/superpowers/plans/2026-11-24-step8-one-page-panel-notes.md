@@ -45,12 +45,15 @@ By the controller, with real clicks and drags on a scratch server and a sample s
 - A drop on another lesson at lesson time: "collides with:" with a Teacher line and a Class line, "Put it here anyway" and Cancel. Putting it there leaves both lessons marked "In two places" with 2 critical, and Undo takes it back. A place that is not lesson time shows the lines, the sentence and Cancel only.
 - A band's chips and the lists for each; a Room list change (the page stays); a busy teacher in the Teacher list gives "Give it anyway?" and Cancel puts the list back; the No room counter; Show me goes to the right day; the Teachers rows (a click gives the page for that teacher's group, no chips); Delete and then "no longer on the timetable", and Undo brings the page back.
 - "Who could I trade this class with?": "3 direct swaps are possible for … 4 more would land with a problem.", with Direct swap three times, then Not a direct swap four times; Preview and Apply on the direct ones.
+- "Who else could teach it?" after the change: 26 free, the department's six first and then the others, no busy teacher listed, "and 18 more".
+- A "Step 5 asks for these" entry selected: its line ("group … · 2 periods · has 18 of 20"), no pop-out, the panel stays; Esc clears it.
+- Counts only, on the school's real setup and timetable (a scratch data folder, since deleted; no names printed), not in a browser: 1018 lessons, 32 classes, 106 teachers. The collision lines against the clash check at 28,830 places of 120 lessons: 0 disagreements; at most 47 lines at one place (the page shows 8). `/api/draft/place` asked 150 times, all answered, more than 8 lines at 6. A forced plain move: 12 tried, 12 made, 0 refused, the critical count back after each undo. Teachers and trades on 60 lessons: 0 errors, 0 busy teachers listed, 0 answers out of rank order, slowest call 0.41 s; 14 of 60 teacher answers begin "No one in {dept}".
 
 ## Not tried in a browser
 
 - A hover while dragging over a day's tab.
 - The collisions box with more than 8 collisions ("and n more").
 - A hand-over after "Put it here anyway" on the Teachers rows.
-- The box where nothing collides ("Nothing collides." with "Put it beside them"), a clean swap, and a "Step 5 asks for these" entry's line.
-- The new "No one in … is free" sentences and "Who else could teach it?" on the page.
+- The box where nothing collides ("Nothing collides." with "Put it beside them"), and a clean swap.
+- The new "No one in … is free" sentences on the page.
 - The published site (nothing here is deployed).

@@ -1,4 +1,4 @@
-/* The Ask tab: what a click on a lesson or an empty place asks the server, and what to show and send for each answer. Plain
+/* The page beside the board (step 8): what a click on a lesson or an empty place asks the server, and what to show and send for each answer. Plain
    functions, no page access, so they run under Node (tests/ask.test.js). Board is a page global, or board.js under Node. */
 var Ask = (function () {
   "use strict";

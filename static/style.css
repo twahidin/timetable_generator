@@ -459,6 +459,7 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdpop[hidden]{display:none}
 .bdpop>span{flex:1 0 100%}
 .bdpop>span:first-child{font-weight:600;font-size:14px}
+.bdpop .bdwhy{background:#fff4e0;border-radius:8px;padding:6px 8px;font-size:12.5px}
 .bdpop button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px;font-size:13px;cursor:pointer}
 .bdpop [data-bdcancel]{margin-left:auto}
 .bdpop [data-bdyes],.bdpop [data-bdswap]{background:#2563eb;border-color:#2563eb;color:#fff}   /* only Swap and Yes are filled: Put it beside and Put it here anyway keep the plain look */
@@ -490,7 +491,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.sel{outline:2px solid var(--accent);outline-offset:-1px;z-index:2}
 .bdcard.fade{opacity:.25}
 .bdcell.ok{background:#d6f1e0;cursor:pointer}.bdcell.prefer{background:#fff0c2;cursor:pointer}.bdcell.no{background:#fbdcdc;cursor:not-allowed}.bdcell.na{background:#eceef2}
-.bdcell.ask{background:#dcebfa;cursor:pointer}   /* another lesson is there and a drop asks: swap, put it beside or push it out */
+.bdcell.ask{background:#dcebfa;cursor:pointer}   /* another lesson is there and a drop asks: swap, put it beside or put it here anyway */
 .bdcell.own{box-shadow:inset 0 0 0 2px var(--accent)}
 .bdcell.over{box-shadow:inset 0 0 0 3px var(--navy)}
 .bdrow.dim{opacity:.4}
