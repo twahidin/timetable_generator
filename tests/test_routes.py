@@ -151,8 +151,11 @@ def every_route_has_a_guard_and_the_guard_decides():
     from ttgen import export as E
     real = E.render_html, E.student_view, E.pdf_bytes          # the walk is about the guards: no page is made from the fake school
     E.render_html, E.student_view, E.pdf_bytes = (lambda *a, **k: "a page"), (lambda *a, **k: {}), (lambda *a, **k: b"%PDF-")
+    import students
+    real_s = students.update_all, students.status, students.skeleton          # nor can the fake school be compared with a list
+    students.update_all, students.status, students.skeleton = (lambda *a, **k: dict(text="")), (lambda *a, **k: dict(published=True)), (lambda *a, **k: dict(stamp="x"))
     try: walk(rules)
-    finally: E.render_html, E.student_view, E.pdf_bytes = real
+    finally: E.render_html, E.student_view, E.pdf_bytes = real; students.update_all, students.status, students.skeleton = real_s
 
 # every guarded endpoint and the rights that open it, written out: a new or changed route must be listed here on purpose
 GUARDS = {
@@ -352,6 +355,9 @@ GUARDS = {
     "relief_tg.unlink": ('relief.save',),
     "restore_setup": ('committee',),
     "status": ('setup',),
+    "students_published": ('committee',),
+    "students_update": ('committee',),
+    "students_skeleton": ('committee',),
     "timetable": ('timetable',),
 }
 
