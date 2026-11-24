@@ -950,7 +950,7 @@ function render() {
   hwHint(); fitAreas(main);
   const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
-  renderIssues(); saveState(); window.scrollTo(0, y);
+  renderIssues(); saveState(); window.scrollTo(0, y); stuAfter();   /* the student panel: the page behind locked while it is open, its areas scrolled back */
   paintPublished();
   if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); }   // again: the person opened the step
   if (id === "download") fitCheck();
@@ -1910,11 +1910,11 @@ document.addEventListener("click", async e => {
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
 document.addEventListener("input", e => {   /* the open student's boxes: kept as typed, the card is not drawn again (the caret stays) */
-  const k = SV_TEXT[e.target.id]; if (!k || !S.stuOpen) return;
+  const k = SV_TEXT[e.target.id]; if (!k || !stuMine(e.target)) return;
   S.stuOpen.row[k] = e.target.value; if (k === "id") { const c = $("#svCode"); if (c) c.textContent = stuCodeLine(); }
 });
 document.addEventListener("change", e => {   /* the open student's card: a radio, a tick, the class; a box left */
-  const el = e.target; if (!S.stuOpen || !el.closest || !el.closest("#stuCard")) return;
+  const el = e.target; if (!stuMine(el)) return;
   if (SV_TEXT[el.id]) { S.stuOpen.row[SV_TEXT[el.id]] = el.value; stuLines(); return; }
   stuPick(el);
 });
@@ -2587,20 +2587,29 @@ function bulkTeachers(k) {   // step 4: one change for every ticked teacher
   if (k === "tc-allow") { const a = Number(P.a); if (P.a === "" || !(a >= 0)) { toast("Type the allowance first."); return; } ix.forEach(i => T[i].allowance = a); msg = `Allowance ${a} for ${n} teacher${s1}`; }
   save(); render(); toast(`${msg}. Undo takes it back.`);
 }
-/* ---------------- the Students step: one student's screen. StudentView (static/studentview.js) works it out; this draws it.
-   S.stuOpen: null, or {i, _id, orig, row, picks}: i the place in S.spec.students (-1 for a new student), _id that row's id
-   when the card opened, orig the student as saved, row the working copy of the boxes, picks the groups picked. Nothing in
-   S.spec changes until Save. S.skel: the published skeleton, false when nothing is published, undefined before it is fetched. */
+/* ---------------- the Students step: one student's screen, a panel over the page. StudentView (static/studentview.js) works it out; this draws it.
+   S.stuOpen: null, or {i, _id, orig, row, picks, scroll, elsewhere}: i the place in S.spec.students (-1 for a new student), _id that row's id,
+   orig the student as it was when the panel opened (or was last refreshed), row the working copy of the boxes, picks the groups picked,
+   scroll where each of the panel's areas was scrolled to, elsewhere: the row was changed by someone else while this had changes. Nothing
+   in S.spec changes until Save, and Save writes only what was changed here. S.skel: the published skeleton, false when nothing is
+   published, undefined before it is fetched. */
 const SV_TEXT = { svName: "name", svId: "id", svNote: "note" };
 const stuCodes = () => lessonInfo().map(x => x.code);
 const stuSkelFor = () => S.practice ? null : S.skel || null;
+const stuTrim = v => String(v || "").trim();
 function stuExempt(note, cls) {   /* the bands of the class the Note exempts the student from, as the groups picker reads them */
   const out = {}; StudentView.bands(S.spec, stuCodes(), cls || "").bands.forEach(b => { if (exemptFrom(note, b.band)) out[b.band] = true; }); return out;
 }
 function stuView(codes) { const o = S.stuOpen; return StudentView.view(S.spec, codes || stuCodes(), stuSkelFor(), o.orig, o.picks); }
-function stuDirty() {   /* the open student has changes: picks, or a box typed in */
+const stuTyped = o => ["id", "name", "note"].filter(k => stuTrim(o.row[k]) !== stuTrim(o.orig[k]));   /* the boxes changed here */
+function stuExemptMoved(o, v) {   /* a band whose Exempt was picked or taken off here */
+  const was = o.picks.exemptWas || {};
+  return [...new Set([...v.bands.map(b => b.band), ...Object.keys(was)])].some(b => ((v.bands.find(x => x.band === b) || {}).pick === StudentView.EXEMPT) !== !!was[b]);
+}
+function stuDirty() {   /* the open student has changes: a box typed in, or picks */
   const o = S.stuOpen; if (!o) return false;
-  if (["id", "name", "note"].some(k => String(o.row[k] || "").trim() !== String(o.orig[k] || "").trim())) return true;
+  if (stuTyped(o).length) return true;
+  if (o.i < 0) return StudentView.groupsOf(o.picks).length > 0 || Object.values(o.picks.band || {}).includes(StudentView.EXEMPT);   /* a new student's class alone is no change */
   return stuView().changed;
 }
 async function stuSkel() {   /* the published timetable's shape, fetched once; S.skel = undefined fetches it again */
@@ -2616,28 +2625,55 @@ async function stuSkel() {   /* the published timetable's shape, fetched once; S
   finally { S.skelBusy = false; }
   stuDraw();
 }
+function stuFrom(s) {   /* the panel's start for a row as it is now (or a new student) */
+  const orig = { id: (s && s.id) || "", name: (s && s.name) || "", class: (s && s.class) || "", note: (s && s.note) || "", groups: [...((s && s.groups) || [])] };
+  return { orig, row: { ...orig, groups: [...orig.groups] }, picks: StudentView.open(S.spec, stuCodes(), orig, stuExempt(orig.note, orig.class)) };
+}
 function stuOpen(i) {
   const o = S.stuOpen;
-  if (o && i >= 0 && o.i === i) { stuScroll(); return; }
+  if (o && i >= 0 && o.i === i) return;
   if (o && stuDirty() && !confirm("Leave this student without saving?")) return;
   const s = i >= 0 ? S.spec.students[i] : null; if (i >= 0 && !s) return;
-  const orig = { id: (s && s.id) || "", name: (s && s.name) || "", class: (s && s.class) || "", note: (s && s.note) || "", groups: [...((s && s.groups) || [])] };
-  S.stuOpen = { i, _id: s ? s._id : null, orig, row: { ...orig, groups: [...orig.groups] }, picks: StudentView.open(S.spec, stuCodes(), orig, stuExempt(orig.note, orig.class)) };
+  S.stuOpen = { i, _id: s ? s._id : null, n: (S.stuN = (S.stuN || 0) + 1), scroll: {}, elsewhere: false, ...stuFrom(s) };
+  const cls = i < 0 && classNames().includes(S.stu.cls) ? S.stu.cls : "";   /* a new student starts in the class the list is filtered to */
+  if (cls) { S.stuOpen.row.class = cls; S.stuOpen.picks = StudentView.setClass(S.spec, stuCodes(), S.stuOpen.picks, cls, {}); }
   if (S.skel === undefined) S.skelErr = false;
-  render(); stuSkel(); stuScroll();
+  render(); stuSkel();
+  if (i < 0) { const b = $("#svId"); if (b) b.focus(); }
 }
-function stuScroll() { const c = $("#stuCard"); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); }
-function stuClose() { S.stuOpen = null; const c = $("#stuCard"); if (c) c.remove(); }
-function stuCheck() {   /* the list changed under the open card: find the row again by its id, or close the card when it is gone */
+/* a box of the panel now open: the boxes of the one just closed or replaced (their change fires while the next is drawn) say nothing to it */
+function stuMine(el) { const c = S.stuOpen && el && el.closest ? el.closest("#stuCard") : null; return !!c && c.isConnected && Number(c.dataset.svn) === S.stuOpen.n; }
+function stuClose() { S.stuOpen = null; const c = $("#stuBack"); if (c) c.remove(); stuAfter(); }
+/* after the panel is drawn (or gone): the page behind does not scroll while it is open; each of its areas back where it was */
+function stuAfter() {
+  const c = $("#stuCard"); document.documentElement.classList.toggle("sv-lock", !!c);
+  if (!c || !S.stuOpen) return;
+  const sc = S.stuOpen.scroll || {};
+  c.querySelectorAll("[data-svscroll]").forEach(el => { const p = sc[el.dataset.svscroll]; if (p) { el.scrollTop = p[0]; el.scrollLeft = p[1]; } });
+}
+document.addEventListener("scroll", e => {   /* where each of the panel's areas is scrolled to, kept for the next drawing */
+  const k = e.target && e.target.dataset && e.target.dataset.svscroll; if (!k || !S.stuOpen) return;
+  (S.stuOpen.scroll = S.stuOpen.scroll || {})[k] = [e.target.scrollTop, e.target.scrollLeft];
+}, true);
+function stuSame(s, g) {   /* the row is still as the panel took it */
+  return ["id", "name", "class", "note"].every(k => stuTrim(s[k]) === stuTrim(g[k])) && (s.groups || []).join("\n") === (g.groups || []).join("\n");
+}
+function stuCheck() {   /* the list changed under the open panel: find the row again by its id (or close when it is gone); a change made elsewhere is taken in, or named when this has changes too */
   const o = S.stuOpen; if (!o || o.i < 0) return;
-  const L = S.spec.students; if (L[o.i] && (o._id == null || L[o.i]._id === o._id)) return;
-  const j = o._id == null ? -1 : L.findIndex(s => s && s._id === o._id);
-  if (j >= 0) { o.i = j; return; }
-  S.stuOpen = null; toast("That student was removed from the list.");
+  const L = S.spec.students;
+  if (!(L[o.i] && (o._id == null || L[o.i]._id === o._id))) {
+    const j = o._id == null ? -1 : L.findIndex(s => s && s._id === o._id);
+    if (j < 0) { S.stuOpen = null; toast("That student was removed from the list."); return; }
+    o.i = j;
+  }
+  const s = L[o.i]; if (o._id == null && s._id) o._id = s._id;
+  if (stuSame(s, o.orig)) return;
+  if (stuDirty()) { o.elsewhere = true; return; }
+  Object.assign(o, stuFrom(s));
 }
 function stuCodeLine() {
   const o = S.stuOpen; if (o.i < 0) return "A personal code is made from the ID.";
-  return String(o.row.id || "").trim() !== String(o.orig.id || "").trim() ? "A new ID gives a new personal code." : "The personal code stays the same.";
+  return stuTrim(o.row.id) !== stuTrim(o.orig.id) ? "A new ID gives a new personal code." : "The personal code stays the same.";
 }
 function stuCount(x) { return `<span class="sv-n${x.full || x.over ? " over" : ""}">${x.n} of ${x.size == null ? "?" : x.size}${x.full || x.over ? " · full" : ""}</span>`; }
 function stuOptLine(x, skel, why) {   /* an option's second line: why, teacher, room, then fits / the clash / off the timetable, then was */
@@ -2648,18 +2684,20 @@ function stuOptHTML(x, input, skel, why) {
   const cls = ["sv-opt", x.dropped ? "drop" : x.on ? "on" : x.was ? "was" : "", x.clash && !x.dropped ? "bad" : ""].filter(Boolean).join(" "), line = stuOptLine(x, skel, why);
   return `<label class="${cls}">${input}<span><span class="sv-name">${esc(x.code)}${x.subject ? ` · ${esc(x.subject)}` : ""}</span>${line ? `<small>${line}</small>` : ""}</span>${stuCount(x)}</label>`;
 }
-function stuBandsHTML(v, skel, cls) {
+function stuBandsHTML(v, skel, cls, codes) {
   if (!cls) return `<p class="muted small">Pick the student's class to see its bands and groups.</p>`;
-  const EX = StudentView.EXEMPT, NO = StudentView.NONE;
+  const EX = StudentView.EXEMPT, NO = StudentView.NONE, mine = StudentView.bands(S.spec, codes, cls), own = new Set([...mine.bands.flatMap(b => b.groups.map(g => g.code)), ...mine.other.map(g => g.code)]);
   const radio = (k, band, val, on) => `<input type="radio" name="svb${k}" data-svband="${esc(band)}" data-svf="${esc(band + "|" + val)}" value="${esc(val)}"${on ? " checked" : ""}>`;
-  const bands = v.bands.map((b, k) => `<h3 class="sv-h">${esc(b.band)} · ${b.everyone ? "every student takes one" : "optional"}</h3>`
+  const bands = v.bands.map((b, k) => `<h3 class="sv-h">${esc(b.band)} · ${b.everyone ? "every student takes one" : "optional"}${b.everyone && b.pick === NO ? `<span class="sv-red"> · choose one</span>` : ""}</h3>`
     + b.options.map(x => stuOptHTML(x, radio(k, b.band, x.code, b.pick === x.code), skel, "")).join("")
     + `<div class="sv-plain"><label class="sv-opt${b.pick === NO ? " on" : ""}">${radio(k, b.band, NO, b.pick === NO)}<span>None</span></label>`
     + `<label class="sv-opt${b.pick === EX ? " on" : ""}" title="Not taking this subject: no lesson in this band. Written into the Note.">${radio(k, b.band, EX, b.pick === EX)}<span>Exempt</span></label></div>`).join("");
-  const other = v.other.map(x => stuOptHTML(x, `<input type="checkbox" data-svother="${esc(x.code)}" data-svf="${esc("other|" + x.code)}"${x.dropped ? ` data-svdrop="1"` : ""}${x.why ? "" : ` data-svown="1"`}${x.on ? " checked" : ""}>`, skel, x.why)).join("");
+  /* svown: a group of the class (outside a band, or a second one of a band): unticked, it is simply taken off; any other is crossed out until Save */
+  const other = v.other.map(x => stuOptHTML(x, `<input type="checkbox" data-svother="${esc(x.code)}" data-svf="${esc("other|" + x.code)}"${x.dropped ? ` data-svdrop="1"` : ""}${own.has(x.code) ? ` data-svown="1"` : ""}${x.on ? " checked" : ""}>`, skel, x.why)).join("");
   return (bands || (other ? "" : `<p class="muted small">No groups on step 5 include ${esc(cls)} yet.</p>`)) + (other ? `<h3 class="sv-h">Other groups</h3>${other}` : "");
 }
 const SV_LESSON = c => c === "L" || c === "A";
+const SV_ROW = 20;   /* a period row's height in px */
 function stuWeekHTML(v, skel, cls) {
   if (S.practice) return `<p class="muted">A practice copy shows no week.</p>`;
   if (S.skel === false) return `<p class="muted">No timetable is published yet, so there is no week to show.</p>`;
@@ -2683,7 +2721,8 @@ function stuWeekHTML(v, skel, cls) {
       if (!x.lessons.length) return `<td class="sv-c${SV_LESSON(x.code) ? "" : " brk"}"></td>`;
       const live = x.lessons.filter(l => l.state !== "gone"), st = live.some(l => l.state === "clash") ? "clash" : (live[0] || x.lessons[0]).state;
       const tip = x.lessons.map(l => [l.code, l.short, l.room, { new: "new", gone: "left", clash: "a clash" }[l.state] || ""].filter(Boolean).join(" · ")).join("\n");
-      return `<td class="sv-c ${st === "same" ? "" : esc(st)}" rowspan="${x.rowspan}" title="${esc(tip)}"><div class="sv-in" style="max-height:${x.rowspan * 15 - 2}px">${x.lessons.map(l => `<div class="sv-l ${esc(l.state)}">${esc(l.short || l.code)}${l.room ? `<small>${esc(l.room)}</small>` : ""}</div>`).join("")}</div></td>`;
+      const room = x.rowspan > 1;   /* the room on a second line only when the cell is tall enough */
+      return `<td class="sv-c ${st === "same" ? "" : esc(st)}" rowspan="${x.rowspan}" title="${esc(tip)}"><div class="sv-in" style="max-height:${x.rowspan * (SV_ROW + 1) - 2}px">${x.lessons.map(l => `<div class="sv-l ${esc(l.state)}">${esc(l.short || l.code)}${room && l.room ? `<small>${esc(l.room)}</small>` : ""}</div>`).join("")}</div></td>`;
     };
     let body = "";
     rows.forEach((r, p) => {
@@ -2691,38 +2730,41 @@ function stuWeekHTML(v, skel, cls) {
       let n = 1; while (brk[p] && p + n < rows.length && brk[p + n] === brk[p]) n++;
       body += `<tr><th class="sv-p">${p + 1}</th>${brk[p] ? `<td class="sv-brk" colspan="${wk.days.length}"${n > 1 ? ` rowspan="${n}"` : ""}>${esc(brk[p])}</td>` : r.map(cell).join("")}</tr>`;
     });
-    return `<div class="sv-wk">${wk.name ? `<h5>${esc(wk.name)} week</h5>` : ""}<table class="sv-grid" style="min-width:${24 + wk.days.length * 48}px"><tr><th class="sv-p"></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${body}</table></div>`;
+    const min = 26 + wk.days.length * 56;   /* each day column at least about 56px: two weeks side by side when both fit, else one under the other */
+    return `<div class="sv-wk" style="flex-basis:${min}px;min-width:${min}px">${wk.name ? `<h5>${esc(wk.name)} week</h5>` : ""}<table class="sv-grid"><tr><th class="sv-p"></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${body}</table></div>`;
   }).join("");
+  const more = left.length > 8 ? `, and ${left.length - 8} more` : "";
   return (k ? "" : `<p class="muted small">Class ${esc(cls)} is not on the published timetable.</p>`)
     + `<div class="sv-weekwrap">${tables}</div>`
-    + (left.length ? `<p class="sv-left">Lessons left: ${esc(left.join(", "))}</p>` : "")
+    + (left.length ? `<p class="sv-left">Lessons left: ${esc(left.slice(0, 8).join(", ") + more)}</p>` : "")
     + `<div class="sv-key"><span><i class="new"></i>new lessons</span><span><i class="gone"></i>lessons left</span><span><i class="clash"></i>a clash</span></div>`;
 }
-function stuScreen() {   /* the card for the open student (above the list) */
+function stuScreen() {   /* the panel for the open student, over the page */
   const o = S.stuOpen; if (!o) return "";
   const codes = stuCodes(), skel = stuSkelFor(), v = StudentView.view(S.spec, codes, skel, o.orig, o.picks), r = o.row, cls = o.picks.cls || "", names = classNames();
   const title = o.i < 0 ? "A new student" : o.orig.name || o.orig.id || "A student";
   const clsSel = `<select id="svCls">${o.i < 0 || !cls ? opt("", cls, "") : ""}${names.map(c => opt(c, cls)).join("")}${cls && !names.includes(cls) ? opt(cls, cls, `${cls} (not on step 2)`) : ""}</select>`;
   const plain = S.skel === false || S.practice;
-  return `<div class="card sv-card" id="stuCard"><h2>${esc(title)}</h2>
+  return `<div class="sv-back" id="stuBack"><div class="card sv-card" id="stuCard" data-svn="${o.n}" role="dialog" aria-label="${esc(title)}">
+    <div class="sv-head"><h2>${esc(title)}</h2>
     <div class="sv-top"><label class="f">Name<input id="svName" type="text" value="${esc(r.name)}" autocomplete="off"></label><label class="f">Student ID<input id="svId" type="text" value="${esc(r.id)}" autocomplete="off"></label><label class="f">Class${clsSel}</label><span class="f sv-lv">Level<b>${esc(clsLevel(cls) || "–")}</b></span></div>
     <p class="muted small sv-codeline" id="svCode">${esc(stuCodeLine())}</p>
-    <div class="sv-cols"><div class="sv-bands">${stuBandsHTML(v, skel, cls)}<label class="f sv-note">Note<input id="svNote" type="text" value="${esc(r.note)}" autocomplete="off"></label></div>
-      <div class="sv-week">${stuWeekHTML(v, skel, cls)}</div></div>
-    <div class="sv-foot"><span id="svSum">${esc(v.summary)}</span><span class="row"><button data-svcancel="1">Cancel</button><button class="primary" data-svsave="1">${plain ? "Save" : "Save · the timetable changes at once"}</button></span></div></div>`;
+    ${o.elsewhere ? `<p class="sv-warn" id="svWarn">This student was changed elsewhere while this was open. Save keeps both: only what you changed here is written.</p>` : ""}</div>
+    <div class="sv-body" data-svscroll="body"><div class="sv-bands" data-svscroll="bands">${stuBandsHTML(v, skel, cls, codes)}<label class="f sv-note">Note<input id="svNote" type="text" value="${esc(r.note)}" autocomplete="off"></label></div>
+      <div class="sv-week" data-svscroll="week">${stuWeekHTML(v, skel, cls)}</div></div>
+    <div class="sv-foot"><span id="svSum">${esc(v.summary)}</span><span class="row"><button data-svcancel="1">Cancel</button><button class="primary" data-svsave="1">${plain ? "Save" : "Save · the timetable changes at once"}</button></span></div></div></div>`;
 }
-function stuDraw() {   /* the card alone again (the list below stays put); the focus and the week's sideways scroll are kept */
-  const c = $("#stuCard"); if (!c || !S.stuOpen) return;
+function stuDraw() {   /* the panel alone again; the focus and where each area was scrolled to are kept */
+  const c = $("#stuBack"); if (!c || !S.stuOpen) return;
   const a = document.activeElement, fk = a && c.contains(a) ? (a.id ? `#${CSS.escape(a.id)}` : a.dataset.svf ? `[data-svf="${CSS.escape(a.dataset.svf)}"]` : "") : "";
-  const w = c.querySelector(".sv-weekwrap"), sl = w ? w.scrollLeft : 0;
   c.outerHTML = stuScreen();
-  const n = $("#stuCard"), w2 = n && n.querySelector(".sv-weekwrap"); if (w2) w2.scrollLeft = sl;
-  if (fk && n) { const el = n.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
+  stuAfter();
+  const n = $("#stuBack"); if (fk && n) { const el = n.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
 }
 function stuLines() {   /* after a box is left: the personal-code line and the summary */
   const c = $("#svCode"), s = $("#svSum"); if (c) c.textContent = stuCodeLine(); if (s) s.textContent = stuView().summary;
 }
-function stuPick(el) {   /* a radio of a band, a tick of Other groups or the class: new picks, then the card again */
+function stuPick(el) {   /* a radio of a band, a tick of Other groups or the class: new picks, then the panel again */
   const o = S.stuOpen, ds = el.dataset, SVm = StudentView;
   if (el.id === "svCls") { o.row.class = el.value; o.picks = SVm.setClass(S.spec, stuCodes(), o.picks, el.value, stuExempt(o.row.note, el.value)); stuDraw(); return; }
   if (ds.svband !== undefined) { o.picks = { ...o.picks, band: { ...o.picks.band, [ds.svband]: el.value } }; stuDraw(); return; }
@@ -2734,29 +2776,34 @@ function stuPick(el) {   /* a radio of a band, a tick of Other groups or the cla
     stuDraw();
   }
 }
-function stuSave() {
+function stuSave() {   /* writes only what was changed here: the boxes changed, the class when changed, the groups left and joined, the Exempt lines when one moved */
   const o = S.stuOpen; if (!o) return;
   Object.entries(SV_TEXT).forEach(([id, k]) => { const el = document.getElementById(id); if (el) o.row[k] = el.value; });
-  const id = String(o.row.id || "").trim(), name = String(o.row.name || "").trim(), cls = o.picks.cls || "", isNew = o.i < 0;
+  stuCheck(); if (S.stuOpen !== o) { render(); return; }
+  const isNew = o.i < 0, cur = isNew ? null : S.spec.students[o.i], typed = stuTyped(o), cls = o.picks.cls || "", clsMoved = cls !== stuTrim(o.orig.class);
+  const val = k => typed.includes(k) || !cur ? stuTrim(o.row[k]) : stuTrim(cur[k]), id = val("id"), name = val("name");
   if (isNew) {
     if (!id) { toast("Type the student's ID."); return; }
     if (!name) { toast("Type the student's name."); return; }
     if (!cls) { toast("Pick the student's class."); return; }
   } else if (!id && !name) { toast("Type the student's ID."); return; }
-  stuCheck(); if (S.stuOpen !== o) { render(); return; }
-  if (id && (isNew || id !== String(o.orig.id || "").trim()) && S.spec.students.some((s, j) => j !== o.i && stuKey(s) === id)) { toast(`${id} is already on the list.`); return; }
-  const v = stuView();
+  const v = stuView(), exMoved = stuExemptMoved(o, v);
+  if (!isNew && !typed.length && !v.changed && !exMoved) { stuClose(); return; }   /* nothing changed: nothing written */
+  if (id && (isNew || typed.includes("id")) && S.spec.students.some((s, j) => j !== o.i && stuKey(s) === id)) { toast(`${id} is already on the list.`); return; }
   if (v.asks.length && !confirm(v.asks.join("\n") + "\n\nSave anyway?")) return;
-  const groups = StudentView.apply(o.orig, o.picks).groups, note = String(o.row.note || "").trim() || null;
+  const now = StudentView.groupsOf(o.picks), gone = o.orig.groups.filter(c => !now.includes(c)), joined = now.filter(c => !o.orig.groups.includes(c));
   let st;
-  if (isNew) { st = { id, name, class: cls, level: clsLevel(cls) || null, groups, note }; S.spec.students.push(st); }
+  if (isNew) { st = { id, name, class: cls, level: clsLevel(cls) || null, groups: StudentView.apply(o.orig, o.picks).groups, note: stuTrim(o.row.note) || null }; S.spec.students.push(st); }
   else {
-    st = S.spec.students[o.i];
-    if ((st.class || "") !== cls) st.level = clsLevel(cls) || null;
-    Object.assign(st, { id: id || null, name: name || null, class: cls || null, note, groups });
+    st = cur;
+    typed.forEach(k => { st[k] = stuTrim(o.row[k]) || null; });
+    if (clsMoved) { st.class = cls || null; st.level = clsLevel(cls) || null; }
+    if (gone.length || joined.length) { const was = st.groups || []; st.groups = was.filter(c => !gone.includes(c)).concat(joined.filter(c => !was.includes(c))); }
   }
-  const shown = [...new Set([...v.bands.map(b => b.band), ...Object.keys(o.picks.exemptWas || {})])], picked = v.bands.filter(b => b.pick === StudentView.EXEMPT).map(b => b.band);
-  setExempt(st, shown, picked);   /* the Note's "Exempt: band" lines, as the groups picker writes them */
+  if (isNew || exMoved || clsMoved) {
+    const shown = [...new Set([...v.bands.map(b => b.band), ...Object.keys(o.picks.exemptWas || {})])], picked = v.bands.filter(b => b.pick === StudentView.EXEMPT).map(b => b.band);
+    setExempt(st, shown, picked);   /* the Note's "Exempt: band" lines, as the groups picker writes them */
+  }
   save();
   S.stuSaved = stuKey(st); S.stuOpen = null;
   const q = S.stu.q.trim().toLowerCase();
