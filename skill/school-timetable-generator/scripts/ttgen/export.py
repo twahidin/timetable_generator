@@ -17,7 +17,7 @@ from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import filled_lessons, double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
+from .spec import filled_lessons, renamed_teachers, renamed, double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -217,6 +217,7 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
     edit: edit(lessons, spec, days) -> lessons, called on the lessons read from the file just before the model is made (the app's fixes)."""
     db = read_db(timetable_path) if is_db(timetable_path) else None
     spec_given = spec is not None
+    names_now = renamed_teachers(spec) if spec_given else {}   # a teacher renamed on step 4: the file may still name them by an earlier name
     if spec is not None:
         own = read_template(setup_path) if setup_path else (db[5] if db else None)
         file_school = str((((own or {}).get("school") or {}).get("name")) or "").strip()
@@ -285,6 +286,8 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
                 if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
     finally:
         if wbu is not None: wbu.close()
+    if names_now:
+        for x in out: x["teachers"] = renamed(x["teachers"], names_now)
     if edit: out = edit(out, spec, days)
     m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
     m["file_school"] = file_school if spec_given else str((setup.get("school") or {}).get("name") or "").strip()

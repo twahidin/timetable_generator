@@ -694,6 +694,70 @@ def test_a_group_with_an_emptied_teacher_box_still_takes_a_timetable():
     finally:
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_a_draft_reads_an_earlier_name_as_the_teachers_name_now():
+    """a teacher renamed on step 4 keeps the old name in the row's earlier_names; a timetable that still names the old teacher is
+    read as naming the new one: no warning that step 5 and the timetable differ, and a change made on step 8 before the rename still applies"""
+    import copy
+    from ttgen import reader, spec as spec_mod
+    f = spec_mod.renamed_teachers
+    rows = [{"name": "Mdm Lee", "earlier_names": ["New Teacher 3", "", None, 7, "Arjun Nair", "Shared"]}, {"name": "Arjun Nair", "earlier_names": "nope"},
+            {"name": "Lim Hui Min", "earlier_names": ["Shared", "Miss Lim"]}, {"name": ""}, None, {"earlier_names": ["Nobody"]}]
+    assert f({"teachers": rows}) == {"New Teacher 3": "Mdm Lee", "Miss Lim": "Lim Hui Min"} and f({}) == {} and f({"teachers": None}) == {}
+    d = copy.deepcopy(SPEC); reader.derive(d)
+    i = next(i for i, x in enumerate(d["lessons"]) if x.get("block") and x.get("teachers") and x.get("periods")); g = d["lessons"][i]; old = g["teachers"][0]
+    ti = next(k for k, t in enumerate(SPEC["teachers"]) if t["name"] == old); other = next(t["name"] for t in SPEC["teachers"] if t["name"] not in g["teachers"])
+    key = f"dep:G:{g['code']}:teachers"
+    file_rows = [dict(id=1, day=DAYS[0], p=0, n=1, level=g["level"], block=g["block"], classes=g["classes"], subject=g["subject"], group=g["code"], teachers=list(g["teachers"]))]
+    upload = lambda rows: c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(rows)), "timetable.xlsx"), replace="1"), content_type="multipart/form-data")
+    def renamed(to, earlier):
+        s = copy.deepcopy(SPEC); s["teachers"][ti]["name"] = to
+        if earlier: s["teachers"][ti]["earlier_names"] = earlier
+        for x in s["lessons"]: x["teachers"] = [to if t == old else t for t in x.get("teachers") or []]
+        return s
+    cards = lambda: [t for card in board()["cards"] for row in card["rows"] for t in row["teachers"]]
+    try:
+        assert upload(file_rows).status_code == 200 and not any(w["key"] == key for w in draft.info()["warnings"])
+        assert c.put("/api/setup", json=dict(spec=renamed("Mdm Lee", [old]), why="a rename")).status_code == 200
+        j = draft.info(); assert not any(w["key"] == key for w in j["warnings"]), [w["text"] for w in j["warnings"] if w["key"] == key]
+        assert "Mdm Lee" in cards() and old not in cards()
+        assert c.put("/api/setup", json=dict(spec=renamed("Mdm Lee", None), why="no earlier name")).status_code == 200   # without the field the old reading stands
+        assert any(w["key"] == key for w in draft.info()["warnings"]) and old in cards()
+        # a change made on step 8 before the rename names the old teacher, and is replayed after it
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200
+        file_rows[0]["teachers"] = [other]; assert upload(file_rows).status_code == 200
+        draft.fix(dict(kind="teacher", key=f"G:{g['code']}", teachers=[old]))
+        assert c.put("/api/setup", json=dict(spec=renamed("Mdm Lee", [old]), why="a rename")).status_code == 200
+        j = draft.info(); assert not j["fix_problems"], j["fix_problems"]
+        assert "Mdm Lee" in cards() and old not in cards() and other not in cards()
+        s = renamed("Mdm Lee", [old]); s["teachers"].append(dict(name=old, short=old, dept=SPEC["teachers"][ti].get("dept"), _id="zz11zz11zz"))   # the old name is a teacher again: never mapped
+        assert c.put("/api/setup", json=dict(spec=s, why="the name is in use")).status_code == 200
+        assert old in cards()
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
+def test_a_trade_made_before_a_rename_is_replayed_with_the_new_name():
+    """a trade stored on step 8 names its two teachers (x, y) as they were called then; after one of them is renamed on step 4
+    the trade still applies, and each group's card names the right teacher, the renamed one by the new name"""
+    import copy
+    T0, T1 = TEACHERS[0], TEACHERS[1]; ka, kb = f"C:{CLASSES[0]}:{SUBJ}", f"C:{CLASSES[1]}:{SUBJ}"
+    rows = [dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[T0], room=ROOMS[0]),
+            dict(id=2, day=DAYS[1], p=L1, n=1, level=LEVEL, classes=[CLASSES[1]], subject=SUBJ, teachers=[T1], room=ROOMS[1])]
+    def renamed(old, to):
+        s = copy.deepcopy(SPEC); t = next(t for t in s["teachers"] if t["name"] == old); t["name"] = to; t["earlier_names"] = [old]
+        for x in s["lessons"]: x["teachers"] = [to if v == old else v for v in x.get("teachers") or []]
+        return s
+    names = lambda i: [t for row in card(i)["rows"] for t in row["teachers"]]
+    try:
+        for old, one, two in ((T0, "Mdm Lee", None), (T1, None, "Mdm Lee")):   # the renamed teacher is x, then y
+            save_draft(rows); draft.fix(dict(kind="trade", a=ka, b=kb, x=T0, y=T1))
+            assert c.put("/api/setup", json=dict(spec=renamed(old, "Mdm Lee"), why="a rename")).status_code == 200
+            j = draft.info(); assert not j["fix_problems"], j["fix_problems"]
+            assert taught(1) == [[two or T1]] and taught(2) == [[one or T0]], (taught(1), taught(2))   # traded: 1 has y, 2 has x
+            assert names(1) == [two or T1] and names(2) == [one or T0], (names(1), names(2))
+            assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     import re
     fresh()

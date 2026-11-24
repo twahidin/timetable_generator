@@ -92,7 +92,8 @@ With the default times (each is a setting in Relief settings):
   has left a lesson without work gets "Please set work" on Telegram (made until 22:00 only: never in the night).
 - **06:30, the morning message.** On a school day, each member of the relief team on Telegram gets one message with everything that
   waits for today: how many absences and lessons, how many wait for approval, are approved and not sent out, are sent out and wait
-  for 06:45, have nobody free, or are sent out already, and who is away. When nothing is to cover, no message.
+  for 06:45, have nobody free, or are sent out already, and who is away. When nothing is to cover, no message. A member of the team
+  away the whole day today gets none (when the whole team is, all of them get it; answered by the lead on 24 November).
 - **06:45, the earliest send-out.** Every relief of today sent out before now goes to its relief teacher, made from the record as it
   is now. A relief told before its day gets its morning reminder. From now until the cut-off, Send out sends at once.
 - **07:00.** The second "Please set work" goes to a teacher who is away today and still has a lesson without work.
@@ -174,12 +175,14 @@ is to tell (once a minute and after each save), under a key of its own, and sent
   come that are open, waiting for approval, or approved and not sent out, the line "Today still has {n} to arrange: open Today."
   is above the rows; nobody is pinged for them.
 - **The "not yet acknowledged" report** lists, under "Approved, not sent out", each relief of today approved and not sent out, and
-  no all clear goes while one is left.
+  no all clear goes while one is left. Once its lesson has started, still never sent out, the next report lists it once under
+  "Started, never sent out", and the all clear counts it (24 November).
 - **The team gets no ping in the evening.** The morning message at 06:30 replaces it. The ping "Relief asked for today" is replaced
   by the late request.
 - **A head's own choice in Plan relief needs no Approve.** It is told to the relief teacher at once in school hours.
 - **The teacher who is away** sees "Being arranged" until the relief teacher acknowledges, then the name, and is told it on
-  Telegram. They also get "Please set work" at 18:00 and 07:00 when a lesson has no work (the evening one never after 22:00).
+  Telegram (from 06:45 to before 18:00; an acknowledgement in the evening or the night at 06:45 the next morning, from 24 November).
+  They also get "Please set work" at 18:00 and 07:00 when a lesson has no work (the evening one never after 22:00).
 - **The team is told when a teacher blocks the bot.**
 - **`/relief`** no longer ends with "{officer} will be told."
 - If the bot is already connected, the first minute after the deploy sends "Covered" to the teacher who is away for each lesson
@@ -210,18 +213,18 @@ from the morning time to before the cut-off of a school day.
 
 | Message | To | When | Outside its hours |
 |---|---|---|---|
-| The morning message (new) | each of the relief team on Telegram | the morning time of a school day, when a lesson of today is to cover; once a day | made when the app is back, until the cut-off; never after it |
+| The morning message (new) | each of the relief team on Telegram, but a member away the whole day today (unless the whole team is) | the morning time of a school day, when a lesson of today is to cover; once a day | made when the app is back, until the cut-off; never after it |
 | The late request (new, in place of the ping) | each of the team but who sent it and the teacher who is away; never for an exam's or event's backup | an absence for today sent between the morning time and the cut-off, once its picks are in, or five minutes on | not made outside the team's window, and never later |
 | Relief for you (changed: no files, Open in the app) | the relief teacher | once approved and sent out (or chosen by a head when planning), in school hours | held to the next start of school hours |
 | Reminder of a relief (new) | the relief teacher | 24 hours before (else the last cut-off before) and the morning itself, for a relief told before its day; not within 12 hours of the last message of that relief | in school hours alone |
 | Kept, moved, no longer needed, not happening, on again (unchanged words) | the relief teacher | at once | in school hours alone |
 | Relief needed again (new) | each of the team but the relief teacher who is away and the teacher whose lesson it is | when an approved relief goes back to open because its teacher is away; with the new pick, or five minutes on | only in the team's window, never later; for a lesson of today found before the morning time, the morning message counts it |
-| Who covers you (new) | the teacher who is away | when the relief teacher acknowledges; never for a backup | any hour |
+| Who covers you (new) | the teacher who is away | when the relief teacher acknowledges, from the earliest send-out time to before the evening work time (06:45 to 18:00), any day; never for a backup | held to the next earliest send-out time, if still so then |
 | Request to change, new pick (unchanged words) | each of the team | at once | in the team's window, or after the cut-off for a lesson of today until it starts; else the next morning time |
 | The blocked-bot alert (new) | each of the team but the person | when a message to them is refused because they blocked the bot; one a person a day | the first team window after it was found; given up when it ends |
 | Cancelled, the team's copy (unchanged words) | the team | at once | waits for the next morning time, if still true |
 | Cancelled to the planner, the teacher who is away, the officer | as before | at once | any hour |
-| Not yet acknowledged, all clear | the team | as before, from an hour before the first period; the report also lists what is approved and not sent out, and no all clear goes while one is left | as before |
+| Not yet acknowledged, all clear | the team | as before, from an hour before the first period; the report also lists what is approved and not sent out, and no all clear goes while one is left; one whose lesson has started is named once under "Started, never sent out" | as before |
 | Relief planned for you, the reminder to acknowledge | the teacher who is away | as before | any hour |
 | Please set work (new) | the teacher who is away; never for a backup | 18:00 the calendar day before (made until 22:00 of that evening only) and 07:00 on the day, while a lesson of that day needs cover, is still to come and has no work; not within 30 minutes of the request; each once | any hour, on purpose |
 | The reporting officer's | the officer | at once | any hour |
@@ -315,6 +318,15 @@ acknowledgement", one line a relief of today approved and not sent out whose les
 
 > Approved, not sent out ({n}):
 > • {name} · {lesson} {periods} ({start})
+
+Since 24 November it gains one more block, after "Started without acknowledgement", one line a relief of today approved and never
+sent out whose lesson has started, said once:
+
+> Started, never sent out:
+> • {name} · {lesson} {periods} ({start})
+
+and the all clear then says "✅ {hh:mm} · No reliefs are waiting now: {k} started without acknowledgement, {m} never sent out."
+(each part only when it is not 0).
 
 On a request to change, after **Approve {name}**: "✅ Approved: {name}, {hh:mm}." and the button **📤 Send out to {short name}**;
 after it: "📤 Sent out: {name}, {hh:mm}." or "📤 Sent out: {name}, {hh:mm}. Will be sent at {hh:mm}." when it is held. When the
@@ -530,7 +542,7 @@ Quiet times (Task 6):
 
 The morning message and the late request (Task 7):
 - Its counts miss a damaged file's lessons; when one lesson of an absence cannot be read, the whole absence is left out (logged).
-- A team member who is away today still gets it (stage 2's roster narrows who gets it; an open question).
+- A team member who is away the whole day today does not get it (answered on 24 November); one away for some periods does.
 - A late request whose picks come after the cut-off pings nobody; one sent in the last five minutes before the cut-off may not ping.
 - On the day of the deploy, an absence already pinged by the ping before can be pinged once more as a late request (only if that ping
   ran on the live site with a bot connected; left as it is, below).
@@ -559,14 +571,16 @@ Relief needed again (Task 10):
 Files and Who covers you (Task 11):
 - Work set after the relief teacher was told (06:45) is not sent to them on Telegram; it shows in Reliefs I'm covering (the lead's
   call 47).
-- "Who covers you" goes at whatever hour the relief teacher acknowledges, the evening too.
+- "Who covers you" goes from 06:45 to before 18:00, any day; an acknowledgement in the evening or the night is told at 06:45 the
+  next morning (answered on 24 November). An acknowledgement at 18:30 is told the next morning too.
 - If the bot is connected before the deploy, the first minute after it sends "Covered" for every lesson acknowledged since and not
   over, at once.
 
 The report (fix round):
 - A relief approved and not sent out now brings the "not yet acknowledged" report at its first time, an hour before the first
   period. Where the first period starts before 07:30, that report reaches the team before the 06:30 morning message.
-- A relief approved and never sent out whose lesson has started is in no report (open question 11).
+- A relief approved and never sent out whose lesson has started is listed once under "Started, never sent out" (open question 11,
+  answered on 24 November).
 
 The blocked-bot alert (Task 12):
 - A block on Friday evening is told on Monday at 06:30.
@@ -616,8 +630,12 @@ After the final review of the whole branch, in four commits (three of code, then
 
 1. A team member who is away today still gets the morning message (stage 2's roster will narrow it to the two on duty). Leave out a
    team member who is away?
+   Answered on 24 November: yes. Built: a member away the whole day today (not for some periods) gets no morning message; when
+   the whole team is away, all of them get it.
 2. "Who covers you" goes when the relief teacher acknowledges, at whatever hour (an acknowledgement at 21:00 sends it at 21:00, to the
    teacher who is away). Hold it to the morning?
+   Answered on 24 November: hold. Built: it goes from 06:45 to before 18:00 on any day; one acknowledged outside that is told at
+   06:45 the next morning, if it is still so then.
 3. A head's own choice on an exam's or event's backup is approved and sent out at once, like any planned absence (ruling 8b). Or
    should a backup always wait for the team?
 4. Across a break, "24 hours before" is the last school day before the lesson, at the cut-off (a Monday lesson after a week's break:
@@ -636,9 +654,13 @@ After the final review of the whole branch, in four commits (three of code, then
     sending allowed"). Should a message go then after all?
 11. A relief approved and never sent out leaves the report once its lesson has started, with no line anywhere. Should the report
     gain a line "Started, never sent out", as it has "Started without acknowledgement"?
+    Answered on 24 November: yes. Built: the next report lists it once under "Started, never sent out", and the all clear says
+    how many were never sent out.
 12. After the cut-off, the line "Today still has {n} to arrange" counts lessons that are open, waiting for approval, or approved
     and not sent out. It does not count a request to change for a lesson of today (that request still reaches the team on
     Telegram). Should it be counted too?
+
+Answered on 24 November: 1 yes, 2 hold, 11 yes; the others kept as they are. The earlier list's answer 6 (the Next button on Telegram) is confirmed.
 
 The design's own points the lead may change (each is built as the design says):
 - Item 3's two readings: the relief teacher (not the reporting officer) is "the officer covering"; the teacher who is away (not a head
@@ -662,7 +684,7 @@ cancel the trial absences afterwards (the team and any reporting officer named g
 in the order of a day:
 
 1. Deploy. Nothing is to be done. Two warnings for the day of the deploy, both only if a bot is already connected (on the live site
-   none is): the first minute sends "Covered" for each lesson acknowledged since the bot was connected and not yet over, and "Please
+   none is): the first minute between 06:45 and 18:00 sends "Covered" for each lesson acknowledged since the bot was connected and not yet over, and "Please
    set work" for each reminder whose time it is then; and an absence already pinged under the old kind of ping can be pinged once
    more as a late request. Open **Relief settings**: the times show 06:30, 06:45, 14:00, and 18:00 and 07:00; save once.
    Look at **Today**: reliefs approved before the deploy read as told, and nobody gets a message about them.
@@ -680,7 +702,8 @@ in the order of a day:
 8. 06:45: the held reliefs reach their teachers as they are now (the changed one to its new teacher, the cancelled one to nobody), each
    once. The planned relief of step 2 gets its morning reminder.
 9. 07:00: "Please set work" again if work is still missing; set the work and see no third message.
-10. A relief teacher acknowledges: the teacher who is away gets "Covered" with the name, and My absences shows the name.
+10. A relief teacher acknowledges before 18:00: the teacher who is away gets "Covered" with the name, and My absences shows the name.
+    One acknowledged after 18:00 shows the name in My absences at once, and "Covered" comes at 06:45 the next morning.
 11. After 06:30, send a late trial request for today: the team (but the sender and the teacher who is away) get "Late request for
     today" within five minutes. On Telegram, press **Approve**, then **📤 Send out to {name}**: it goes at once.
 12. Mark a trial relief teacher as away for a lesson they were to cover: the lesson goes back to open, the AI picks again, the team gets
@@ -810,3 +833,10 @@ holidays." then gains "or days with no relief duty".
   token and key shapes 0.
 - After the last review, corrected in words here and in `docs/DEPLOY.md` (ruling F9, no code changed): step 7 of the first morning;
   a relief on an absence asked for while rolled back; the report's two new known limits; open questions 11 and 12.
+- The lead's answers of 24 November (1 yes, 2 hold, 11 yes), built on branch `relief-send-out-answers` from main d9aebf3: reviewed
+  by a fresh reviewer, with no Critical or Important finding (it followed a held "Who covers you" from the evening to 06:45: made
+  again once, never lost; a relief that started and was never sent out is named once). Every suite on that code, one at a time, run
+  by the controller: all 31 `tests/*.py` and all 25 `tests/*.test.js` pass (`test_relief_telegram` 448, `test_relief_team` 82,
+  `smoke` 103). Two readings of the answers were the controller's own and may be changed: "away" means away the whole day; the
+  evening limit for "Who covers you" is the evening work time (18:00), so an acknowledgement at 18:30 is told the next morning.
+  Not checked: no real Telegram bot, as before.

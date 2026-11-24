@@ -124,6 +124,21 @@ def setup_entries_values():
     assert [e["where"] for e in s2] == ["School & day"] * 3 and s2[0]["text"].startswith("name: ")
 
 @t
+def an_earlier_name_reads_as_earlier_names():
+    """a rename on step 4 sets the teacher's name and earlier_names and the lessons' teachers in one save: no entry shows the raw key"""
+    spec = samples.secondary(); sync.ensure_ids(spec)
+    T = spec["teachers"][0]; L = next(r for r in spec["lessons"] if T["name"] in (r.get("teachers") or []))
+    by = H.by_of("Ann Lee", "password")
+    ops = [["set", "teachers", T["_id"], "name", "Mdm Lee"], ["set", "teachers", T["_id"], "earlier_names", [T["name"]]],
+           ["set", "lessons", L["_id"], "teachers", ["Mdm Lee" if x == T["name"] else x for x in L["teachers"]]]]
+    es = H.setup_entries(spec, ops, by, "b9", 3)
+    assert len(es) == 3 and es[1]["field"] == "earlier_names", es
+    assert not any("earlier_names" in (e.get("text") or "") + (e.get("label") or "") for e in es), [e["text"] for e in es]
+    assert es[1]["text"] == f"Mdm Lee: Earlier names (none) → {T['name']}", es[1]["text"]
+    r = H.refused_about(spec, ["set", "teachers", T["_id"], "earlier_names", ["X"]])
+    assert "earlier_names" not in r["text"] and "Earlier names" in r["text"], r
+
+@t
 def code_kept_in_setup_rows_only():
     fresh()
     spec = samples.secondary(); sync.ensure_ids(spec)

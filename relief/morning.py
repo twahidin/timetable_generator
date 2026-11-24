@@ -1,5 +1,8 @@
 """The morning message: on a duty day (hours.duty_day), at the morning time of the relief settings, one message on Telegram to each
-person on duty (hours.on_duty: stage 1, the whole relief team who can be reached) with everything that waits for today.
+person on duty (hours.on_duty: stage 1, the whole relief team who can be reached) with everything that waits for today. A person
+on duty who is away the whole day today (an absence of theirs, not cancelled, not an exam's or event's backup, dated today, with no
+periods: _away_all_day) gets none; one away for some periods only does. When that would leave nobody, it goes to all on duty (a
+message nobody gets is worse than one to a person away). Their own absence is counted and named in it as any other.
 
 tick (every minute: tell.MINUTE, after relief/report.py's) makes it. The day is claimed (state morning_last, the day's ordinal,
 raised by tgdb.raise_state before anything is queued, in one step) so that a restart or a second copy of the app never makes it
@@ -77,6 +80,17 @@ def counts(pub, settings, records, now, links) -> dict:
 
 
 # ---- every minute
+def _away_all_day(records, iso) -> set:
+    """the names away the whole day on iso: an absence of theirs, not cancelled, not an exam's or event's backup, dated iso, with
+    no periods; a record that cannot be read is passed over"""
+    out = set()
+    for r in records:
+        try:
+            if not r.get("cancelled") and not r.get("exams") and iso in (r.get("dates") or []) and words.away(r) == "whole day": out.add(r["teacher"])
+        except Exception as e: _log.warning("an absence could not be read (%s)", type(e).__name__)
+    return out
+
+
 def _morning(s):
     today, h = s.now.date(), _hours.of(s.settings)
     if not _hours.duty_day(s.settings, s.pub, today) or not _hours.at(today, h.morning) <= s.now < _hours.at(today, h.cut_off): return []
@@ -86,6 +100,7 @@ def _morning(s):
     if not names: return []                     # nobody to tell: the day is not done with
     records, unread = _report._records()
     for kind in sorted(set(unread.values())): _log.warning("an absence could not be read (%s)", kind)
+    names = [n for n in names if n not in _away_all_day(records, today.isoformat())] or names     # nobody left: all of them, as before
     v = counts(s.pub, s.settings, records, s.now, _fill._links(s.pub, s.settings.get("calendar") or {}))
     if not tgdb.raise_state("morning_last", today.toordinal()) or not v["lessons"]: return []
     iso, button = today.isoformat(), dict(text=tell.OPEN_TODAY, url=(s.bot.get("base") or "") + "/relief#today")
