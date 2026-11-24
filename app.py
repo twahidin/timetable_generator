@@ -14,7 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, compare, draft, history, putback, refit, refit_plan, store, sync, typed, versions
-from accounts import passwords, people, rights as rights_table
+from accounts import passwords, people, renames, rights as rights_table
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 from relief import links as relief_links
@@ -893,6 +893,13 @@ def draft_upload():
 def draft_get():
     return _checked(lambda: draft.info() or {"draft": None})
 
+@app.get("/api/draft/renames")
+@need("committee")
+def draft_renames():
+    """the renamed teachers a publish will ask about (_rename_pairs, as _renames_shown gives them). Kept out of /api/draft:
+    every answer that carries the draft must equal that one (the page compares them so as not to redraw)"""
+    return jsonify(renames=_renames_shown(_rename_pairs()))
+
 @app.post("/api/draft/decide")
 @need("committee")
 def draft_decide():
@@ -1312,6 +1319,15 @@ def api_compare_xlsx():
 @app.post("/api/draft/publish")
 @need("committee")
 def draft_publish():
+    """publish the draft. Each renamed teacher with an account or a Telegram link (_rename_pairs) needs a choice in the body
+    ({"renames": {old: "same" | "different"}}): without it, or without an admin for an account, nothing is published (409).
+    After the publish the accounts and links follow (_apply_renames), then the exams-to-relief sync, as before"""
+    body = request.get_json(force=True, silent=True)
+    choices = body.get("renames") if isinstance(body, dict) else None
+    choices = choices if isinstance(choices, dict) else {}
+    pairs = _rename_pairs()
+    why = renames.refusal(pairs, choices, has("admin"))
+    if why: return {"error": why, "renames": _renames_shown(pairs)}, 409
     try:
         got = draft.publish()
         _draft_entry("publish", "Published the timetable", "Step 9 · Publish")
@@ -1321,6 +1337,10 @@ def draft_publish():
     except LookupError: return {"error": NO_SETUP}, 409
     except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
     pub = store.published()
+    lines = _apply_renames(pairs, choices, pub) if pairs and pub else []
+    try: store.published_note("renamed", lines)   # an empty list too, so an older list never lingers
+    except Exception as e: print(f"WARNING: what followed the renamed teachers could not be kept ({type(e).__name__})", file=sys.stderr, flush=True)
+    got = dict(got, renamed=lines) if isinstance(got, dict) else got
     if pub:      # a lesson that moved into (or out of) a duty or an event window goes to (or leaves) relief at once
         with exams_schedules.editing(): _relief_sync(pub)
     return jsonify(got)
@@ -1381,7 +1401,8 @@ def pub_info():
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
                 files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []),
                 choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""),
-                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
+                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []),
+                renamed=m.get("renamed", []))
 
 def _group_label(p):
     """the committee page's label for a person: their role's label, then " · " and their committees' labels joined by
@@ -2291,6 +2312,90 @@ def admin_remove():
     except Exception as e: print(f"WARNING: a Telegram chat could not be unlinked after a removal ({type(e).__name__})", file=sys.stderr, flush=True)
     _account_entry("remove", [name], [dict(name=name, field="removed", was=was, now=None)], f"Removed {name}", by_=by_)
     return jsonify(done=True, text=REMOVED.format(name))
+
+# ---- a renamed teacher (step 4 keeps the old name in earlier_names): the publish asks whether it is the same person
+RENAME_JOINED = "{new} (was {old}): their account followed."
+RENAME_TG_TOO = " Their Telegram link followed too."
+RENAME_REMOVED = "{old}'s account is removed: {new} starts fresh."
+RENAME_TG_MOVED = "{new} (was {old}): their Telegram link followed."
+RENAME_TG_GONE = "{old}'s Telegram link is removed: {new} starts fresh."
+RENAME_SLIP = " They need a new code slip."
+RENAME_FAILED = "{new} (was {old}): could not be finished. Tell whoever looks after the app."
+
+def _pub_names(pub):
+    """the names of the teacher rows of a published timetable, stripped (as relief/people.py reads them)"""
+    rows = (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers") or []
+    return {str(t.get("name") or "").strip() for t in rows if isinstance(t, dict)} - {""}
+
+def _rename_pairs():
+    """renames.pairs for the setup as it is now against the timetable published now, for the person signed in; [] when
+    nothing is published, accounts are off or the accounts file cannot be read"""
+    pub = store.published()
+    if not pub or not accounts_on(): return []
+    data, ok = people._read()
+    if not ok: return []
+    try: linked = set(relief_links.linked())
+    except Exception as e:
+        print(f"WARNING: the Telegram links could not be read for a rename ({type(e).__name__})", file=sys.stderr, flush=True); linked = set()
+    spec, _ = store.load_setup()
+    p = who()
+    return renames.pairs(_pub_names(pub), spec, data, linked, me=p["name"] if p else None)
+
+def _renames_shown(pairs):
+    """the pairs as the page gets them: an account's details (and who is the last admin) for admins only"""
+    if has("admin"): return [dict(p, needs_admin=False) for p in pairs]
+    return [dict(p, has=(["an account"] if p["account"] else []) + (["Telegram"] if p["telegram"] else []), needs_admin=p["account"],
+                 no_remove=p["no_remove"] if p["no_remove"] == renames.OWN else None) for p in pairs]
+
+def _apply_renames(pairs, choices, pub_after):
+    """after a publish that went through: each pair whose new name is on the timetable just published (and its old name is
+    not) gets its choice, in order -> one sentence a pair. A pair that fails is logged and said, and the others go on"""
+    p = who()
+    me, by_ = (p["name"] if p else None), by()
+    on = {x["name"] for x in relief_people.people(pub_after, [])}
+    lines = []
+    for pr in pairs:
+        old, new = pr["old"], pr["new"]
+        if new not in on or old in on: continue
+        try: lines.append(_apply_rename(pr, choices[old], me, by_) + RENAME_SLIP)
+        except Exception as e:
+            print(f"WARNING: a renamed teacher's account or Telegram link could not be finished ({type(e).__name__})", file=sys.stderr, flush=True)
+            lines.append(RENAME_FAILED.format(old=old, new=new))
+    return lines
+
+def _rename_drop(me, old):
+    """people.drop inside an update, refused again on the records as they are now (one's own account, the last admin)"""
+    def change(d):
+        if old == me: raise Refused(renames.OWN)
+        if people.usable_admins(d) == [old]: raise Refused(renames.LAST_ADMIN.format(old))
+        return people.drop(d, old)
+    return _update_as(me, change)
+
+def _apply_rename(pr, choice, me, by_):
+    """one pair's choice -> its sentence (without the code slip's)"""
+    old, new, say = pr["old"], pr["new"], dict(old=pr["old"], new=pr["new"])
+    if choice == "same":
+        moved = relief_links.move(old, new)
+        if not pr["account"]: return (RENAME_TG_MOVED if moved == "moved" else RENAME_TG_GONE).format(**say)
+        if not pr["joins"]:
+            was = _rename_drop(me, old)
+            _account_entry("remove", [old], [dict(name=old, field="removed", was=was, now=None)], f"Removed {old}: {new} took over their timetable", by_=by_)
+            return RENAME_REMOVED.format(**say)
+        held = session.get("n", 0)
+        def change(d):
+            n0 = people.record(d, old)["n"]
+            out = people.join(d, old, new)
+            return out, (people.record(d, new)["n"] if me == old and n0 == held else None)
+        changes, keep = _update_as(me, change)
+        if keep is not None: session["who"], session["n"] = new, keep   # the publisher was the old name: still signed in, as the new name
+        _account_entry("rename", [old, new], [dict(name=new, field="renamed", was=old, now=new)] + changes,
+                       f"{old} is now {new}: their account followed", by_=by_)
+        return RENAME_JOINED.format(**say) + (RENAME_TG_TOO if moved == "moved" else "")
+    relief_links.forget(old)
+    if not pr["account"]: return RENAME_TG_GONE.format(**say)
+    was = _rename_drop(me, old)
+    _account_entry("remove", [old], [dict(name=old, field="removed", was=was, now=None)], f"Removed {old}: {new} took over their timetable", by_=by_)
+    return RENAME_REMOVED.format(**say)
 
 @app.post("/api/admin/bulk")
 @need("admin")

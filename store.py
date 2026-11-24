@@ -276,6 +276,17 @@ def published():
             _cache.update(stamp=stamp, value=dict(meta=meta, model=model, codes=codes, views={}))
         return _cache["value"]
 
+def published_note(key, value):
+    """one more key in the published timetable's meta.json (under the store's locks), the cache cleared; nothing when nothing is published"""
+    meta_path = os.path.join(PUB, "meta.json")
+    with _publishing, _lock:
+        if not os.path.exists(meta_path): return
+        meta = read_json(meta_path, None)
+        if not isinstance(meta, dict): return
+        meta[key] = value
+        write_json(meta_path, meta)
+        _cache.update(stamp=None, value=None)
+
 def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spec=None, extra=None, edit=None):
     """export everything into a fresh folder, then swap it in so viewers never see a half-written timetable. The
     timetable is a workbook with a Lessons sheet or a timetable database; setup_xlsx may be None for a database this app

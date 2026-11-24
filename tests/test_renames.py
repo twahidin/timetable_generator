@@ -306,4 +306,261 @@ def move_colon_name_spares_other_alerts():
     assert links.move("A:B", LEE) == "moved"
     assert set(links.alerts("2000-01-01")) == {("A:B:C", "2026-11-24")}, links.alerts("2000-01-01")   # only the other name's alert is left
 
+# ---- the publish asks, refuses and applies (the routes)
+import json, pickle  # noqa: E402,F401
+import app as A, draft as D, history as H, putback as PB  # noqa: E402
+from relief import people as RP  # noqa: E402
+from ttgen.samples import secondary  # noqa: E402
+
+PWS = {NT3: secrets.token_hex(8), PRIYA: secrets.token_hex(8)}
+HASHES = {n: PW.hash_pw(v) for n, v in PWS.items()}
+USERS = {NT3: "nt3", PRIYA: "priya"}
+def admin_rec(n): return dict(group="teacher", extras=dict(timetable=True, relief=False, exams=None, admin=True), username=USERS[n], pw=HASHES[n])
+SLIP = " They need a new code slip."
+def joined_line(old, new, tg=False): return f"{new} (was {old}): their account followed." + (" Their Telegram link followed too." if tg else "") + SLIP
+def removed_line(old, new): return f"{old}'s account is removed: {new} starts fresh." + SLIP
+def tg_moved_line(old, new): return f"{new} (was {old}): their Telegram link followed." + SLIP
+def tg_gone_line(old, new): return f"{old}'s Telegram link is removed: {new} starts fresh." + SLIP
+
+def publish_pub(names):
+    """what store.published() reads: a fake school with these teachers"""
+    pub = RP.fake_pub([dict(name=n, dept="MA") for n in names])
+    pub["meta"].update(published_at="1 Nov 2026, 09:00", ok=True)
+    pub["model"].update(classes=[dict(name="1A", level="Sec 1")], class_ix={}, teacher_ix={}, room_ix={}, students=[dict(id="S001", name="Sam Student", cls="1A")])
+    os.makedirs(store.PUB, exist_ok=True)
+    with open(os.path.join(store.PUB, "model.pkl"), "wb") as f: pickle.dump(pub["model"], f)
+    store.write_json(os.path.join(store.PUB, "meta.json"), pub["meta"])
+    store._cache.update(stamp=None, value=None)
+
+def pub_names():
+    return [t["name"] for t in store.published()["model"]["setup"]["teachers"]]
+
+CALLS = []
+def stand_in(without=()):
+    """the slow publish: a new fake published timetable from the setup's teacher rows"""
+    def publish(*a, **k):
+        CALLS.append(1)
+        spec, _ = store.load_setup()
+        publish_pub([t["name"] for t in spec["teachers"] if t["name"] not in without])
+        return {"published": True}
+    return publish
+
+def pw_client(name):
+    c = A.app.test_client()
+    r = c.post("/login/password", data=dict(username=USERS[name], password=PWS[name]))
+    assert r.status_code == 302, (name, r.status_code)
+    return c
+
+def committee_client():
+    c = A.app.test_client()
+    r = c.post("/login", data=dict(code=CODES["COMMITTEE_CODE"]))
+    assert r.status_code == 302, r.status_code
+    return c
+
+def sess(c):
+    with c.session_transaction() as x: return dict(x)
+
+def account_entries(): return H.read(kinds=["account"], limit=10 ** 6)
+
+def since(n0):
+    """the account entries written after there were n0, oldest first (the History reads newest first)"""
+    es = account_entries(); return list(reversed(es[:len(es) - n0]))
+
+def raw_accounts():
+    with open(P.PATH, encoding="utf-8") as f: return f.read()
+
+def scene(records, linked=(), published=(NT3, ARJUN, PRIYA)):
+    """the accounts, the links, the timetable published now and a setup in which NT3's row is now LEE's"""
+    tg_clear()
+    put(records)
+    for i, n in enumerate(linked): links.link(n, 500 + i, f"@{i}")
+    publish_pub(list(published))
+    spec = secondary()
+    spec["teachers"] = [dict(name=LEE, short="Lee", dept="MA", earlier_names=[NT3]), dict(name=ARJUN, short="Arjun", dept="MA"),
+                        dict(name=PRIYA, short="Priya", dept="MA")]
+    store.replace_setup(spec, "Saved")
+    assert store.load_setup()[0]["teachers"][0]["earlier_names"] == [NT3]
+    CALLS.clear()
+    A.draft.publish = stand_in()
+
+def publish(c, body=None):
+    r = c.post("/api/draft/publish", json=body) if body is not None else c.post("/api/draft/publish")
+    return r.status_code, r.get_json()
+
+REAL_PUBLISH, REAL_INFO = A.draft.publish, A.draft.info
+A.draft.info = lambda *a, **k: {"draft": {"name": "x"}}
+try:
+    @t
+    def get_lists_the_pairs():
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        got = pw_client(PRIYA).get("/api/draft/renames").get_json()
+        assert got["renames"] == [dict(old=NT3, new=LEE, has=["HOD", "username", "Telegram"], account=True, telegram=True, joins=True,
+                                       no_remove=None, needs_admin=False)], got
+        got = committee_client().get("/api/draft/renames").get_json()
+        assert got["renames"] == [dict(old=NT3, new=LEE, has=["an account", "Telegram"], account=True, telegram=True, joins=True,
+                                       no_remove=None, needs_admin=True)], got
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)})
+        got = committee_client().get("/api/draft/renames").get_json()
+        assert [(p["has"], p["needs_admin"]) for p in got["renames"]] == [(["an account"], True)], got
+        scene({NT3: admin_rec(NT3)})                                                 # the last admin: a sentence for admins only
+        assert committee_client().get("/api/draft/renames").get_json()["renames"][0]["no_remove"] is None
+        assert pw_client(NT3).get("/api/draft/renames").get_json()["renames"][0]["no_remove"] == OWN
+        os.remove(os.path.join(store.PUB, "meta.json")); store._cache.update(stamp=None, value=None)
+        assert committee_client().get("/api/draft/renames").get_json()["renames"] == []         # nothing published
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)})
+        c = committee_client()
+        assert c.get("/api/draft").get_json() == {"draft": {"name": "x"}}           # the draft's answer is unchanged: no renames in it
+        assert A.app.test_client().get("/api/draft/renames").status_code == 401
+
+    @t
+    def publish_without_a_choice_is_refused():
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)})
+        c = pw_client(PRIYA)                                                         # a sign-in writes its time: before it, not after
+        before = raw_accounts()
+        code, got = publish(c)
+        assert code == 409 and got["error"] == choose(NT3, LEE) and [p["old"] for p in got["renames"]] == [NT3], (code, got)
+        assert CALLS == [] and pub_names() == [NT3, ARJUN, PRIYA] and raw_accounts() == before
+        code, got = publish(c, {"renames": {NT3: "maybe"}})
+        assert code == 409 and got["error"] == choose(NT3, LEE) and CALLS == []
+
+    @t
+    def the_committee_code_cannot_publish_an_account():
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)})
+        code, got = publish(committee_client(), {"renames": {NT3: "same"}})
+        assert code == 409 and got["error"] == admin_needed(LEE) and got["renames"][0]["has"] == ["an account"], (code, got)
+        assert CALLS == [] and pub_names() == [NT3, ARJUN, PRIYA]
+        scene({PRIYA: admin_rec(PRIYA)}, linked=[NT3])                               # only a Telegram link
+        n0 = len(account_entries())
+        code, got = publish(committee_client(), {"renames": {NT3: "same"}})
+        assert code == 200 and got["renamed"] == [tg_moved_line(NT3, LEE)] and got["published"] is True, (code, got)
+        assert set(links.linked()) == {LEE} and len(account_entries()) == n0
+        assert NT3 not in P.load()["people"] and NT3 not in P.load()["removed"] and LEE not in P.load()["people"]   # nothing of the accounts changes
+        scene({PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        code, got = publish(committee_client(), {"renames": {NT3: "different"}})
+        assert code == 200 and got["renamed"] == [tg_gone_line(NT3, LEE)] and links.linked() == {}, (code, got)
+        assert NT3 not in P.load()["removed"]
+
+    def history_view(c, eid):
+        got = c.get("/api/history?limit=500").get_json()
+        return next(e for e in got["entries"] if e.get("id") == eid)
+
+    @t
+    def same_person():
+        scene({NT3: dict(group="hod", depts=["MA"], username="nt3x", pw=HASH, note="x", n=2), PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        n0 = len(account_entries())
+        c = pw_client(PRIYA)
+        code, got = publish(c, {"renames": {NT3: "same"}})
+        assert code == 200 and got["renamed"] == [joined_line(NT3, LEE, tg=True)], (code, got)
+        d = P.load(); r = P.record(d, LEE)
+        assert (r["group"], r["username"], r["pw"], r["note"]) == ("hod", "nt3x", HASH, "x") and NT3 not in d["people"] and d["removed"][NT3] == 3, r
+        assert set(links.linked()) == {LEE}
+        es = since(n0)
+        assert len(es) == 1 and es[0]["what"] == "rename" and es[0]["people"] == [NT3, LEE], es
+        assert es[0]["text"] == f"{NT3} is now {LEE}: their account followed" and es[0]["changes"][0] == dict(name=LEE, field="renamed", was=NT3, now=LEE), es
+        assert HASH not in json.dumps(es) and HASH not in json.dumps(got)
+        st = c.get("/api/status").get_json()
+        assert st["published"]["renamed"] == [joined_line(NT3, LEE, tg=True)], st["published"]
+        assert history_view(c, es[0]["id"])["text"] == es[0]["text"]
+        r = c.post("/api/history/back", json=dict(id=es[0]["id"]))
+        assert r.status_code == 409 and r.get_json()["error"] == PB._ADMIN, (r.status_code, r.get_json())
+        assert P.record(P.load(), LEE)["username"] == "nt3x"
+        # a second publish with the same body: the pairs are settled
+        before, n1 = raw_accounts(), len(account_entries())
+        code, got = publish(c, {"renames": {NT3: "same"}})
+        assert code == 200 and got["renamed"] == [] and raw_accounts() == before and len(account_entries()) == n1, (code, got)
+        assert c.get("/api/status").get_json()["published"]["renamed"] == []
+
+    @t
+    def a_different_person():
+        scene({NT3: dict(group="hod", username="nt3x", pw=HASH), PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        n0 = len(account_entries())
+        c = pw_client(PRIYA)
+        code, got = publish(c, {"renames": {NT3: "different"}})
+        assert code == 200 and got["renamed"] == [removed_line(NT3, LEE)], (code, got)
+        d = P.load()
+        assert NT3 not in d["people"] and NT3 in d["removed"] and links.linked() == {}
+        assert P.record(d, LEE) == P.record({}, LEE), P.record(d, LEE)
+        es = since(n0)
+        assert len(es) == 1 and es[0]["what"] == "remove" and es[0]["text"] == f"Removed {NT3}: {LEE} took over their timetable", es
+        ch = es[0]["changes"]
+        assert len(ch) == 1 and ch[0]["name"] == NT3 and ch[0]["field"] == "removed" and ch[0]["now"] is None and ch[0]["was"]["username"] == "nt3x", ch
+        assert HASH not in json.dumps(es)
+        assert history_view(c, es[0]["id"])["text"] == es[0]["text"]
+        r = c.post("/api/history/back", json=dict(id=es[0]["id"]))
+        assert r.status_code == 409 and r.get_json()["error"] == PB.REMOVED.format(NT3), (r.status_code, r.get_json())
+
+    @t
+    def same_person_whose_new_name_has_a_sign_in():
+        scene({NT3: dict(group="hod", username="nt3x"), LEE: dict(group="sh", username="lee"), PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        lee = P.record(P.load(), LEE)
+        n0 = len(account_entries())
+        code, got = publish(pw_client(PRIYA), {"renames": {NT3: "same"}})
+        assert code == 200 and got["renamed"] == [removed_line(NT3, LEE)], (code, got)
+        d = P.load()
+        assert NT3 not in d["people"] and P.record(d, LEE) == lee and set(links.linked()) == {LEE}
+        assert [e["what"] for e in since(n0)] == ["remove"]
+        scene({NT3: dict(group="hod", username="nt3x"), LEE: dict(group="sh", username="lee"), PRIYA: admin_rec(PRIYA)}, linked=[NT3, LEE])
+        lee_chat = tg_state()[0][LEE][0]
+        code, got = publish(pw_client(PRIYA), {"renames": {NT3: "same"}})
+        assert code == 200 and set(links.linked()) == {LEE} and tg_state()[0][LEE][0] == lee_chat
+
+    @t
+    def the_publisher_is_the_renamed_person():
+        scene({NT3: admin_rec(NT3), PRIYA: admin_rec(PRIYA)})
+        other = pw_client(NT3)                                                       # another session of theirs
+        c = pw_client(NT3)
+        code, got = publish(c, {"renames": {NT3: "different"}})
+        assert code == 409 and got["error"] == OWN and CALLS == [], (code, got)       # the route gives renames.pairs `me`
+        code, got = publish(c, {"renames": {NT3: "same"}})
+        assert code == 200 and got["renamed"] == [joined_line(NT3, LEE)], (code, got)
+        st = c.get("/api/status")
+        assert st.status_code == 200 and st.get_json()["who"] == LEE, st.get_json()
+        assert c.get("/api/admin/people").status_code == 200
+        s = sess(c)
+        assert s["who"] == LEE and s["n"] == P.record(P.load(), LEE)["n"], s
+        assert other.get("/api/status").status_code == 401                          # nobody else stays signed in as them
+        assert pw_client(PRIYA).get("/api/status").status_code == 200
+
+    @t
+    def a_new_name_not_published_is_skipped():
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        A.draft.publish = stand_in(without={LEE})
+        c = pw_client(PRIYA)
+        before = raw_accounts()
+        code, got = publish(c, {"renames": {NT3: "different"}})
+        assert code == 200 and got["renamed"] == [] and CALLS == [1], (code, got)
+        assert raw_accounts() == before and set(links.linked()) == {NT3}
+
+    @t
+    def a_critical_draft_changes_nothing():
+        scene({NT3: dict(group="hod", username="nt3x"), PRIYA: admin_rec(PRIYA)}, linked=[NT3])
+        def critical(*a, **k): raise D.Critical(2)
+        A.draft.publish = critical
+        c = pw_client(PRIYA)
+        before = raw_accounts()
+        code, got = publish(c, {"renames": {NT3: "different"}})
+        assert code == 409 and got == {"error": D.critical_text(2), "critical": 2}, (code, got)
+        assert raw_accounts() == before and set(links.linked()) == {NT3} and pub_names() == [NT3, ARJUN, PRIYA]
+
+    @t
+    def one_pair_failing_does_not_stop_the_others():
+        scene({NT3: dict(group="hod", username="nt3x"), ARJUN: dict(group="sh", username="arjun"), PRIYA: admin_rec(PRIYA)})
+        spec, _ = store.load_setup()
+        spec["teachers"] = [dict(name=LEE, short="Lee", dept="MA", earlier_names=[NT3]), dict(name="Mr Tan", short="Tan", dept="MA", earlier_names=[ARJUN]),
+                            dict(name=PRIYA, short="Priya", dept="MA")]
+        store.replace_setup(spec, "Saved")
+        real_join = P.join
+        def broken(d, old, new):
+            if old == NT3: raise RuntimeError("no")
+            return real_join(d, old, new)
+        A.people.join = broken
+        try: code, got = publish(pw_client(PRIYA), {"renames": {NT3: "same", ARJUN: "same"}})
+        finally: A.people.join = real_join
+        assert code == 200 and got["renamed"] == [f"{LEE} (was {NT3}): could not be finished. Tell whoever looks after the app.",
+                                                  joined_line(ARJUN, "Mr Tan")], (code, got)
+        d = P.load()
+        assert NT3 in d["people"] and P.record(d, "Mr Tan")["username"] == "arjun" and pub_names() == [LEE, "Mr Tan", PRIYA]
+finally:
+    A.draft.publish, A.draft.info = REAL_PUBLISH, REAL_INFO
+
 print(f"{COUNT} renames tests passed")
