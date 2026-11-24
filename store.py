@@ -157,13 +157,22 @@ def _risky(ops):
     edits = [o for o in ops if isinstance(o, list) and len(o) > 1 and o[0] in ("add", "set", "merge") and o[1] == "teachers"]
     return len(dels) > BIG_DELETE or any(len(o) > 1 and o[1] == "teachers" for o in dels) or len(edits) >= BIG_TEACHERS
 
+def _student_ids(ops):
+    """the distinct _ids of the student rows the operations name, in order"""
+    out = []
+    for op in ops:
+        if not (isinstance(op, list) and len(op) > 2 and op[1] == "students"): continue
+        i = op[2].get("_id") if op[0] == "add" and isinstance(op[2], dict) else op[2] if op[0] in ("set", "merge", "del") else None
+        if isinstance(i, str) and i and i not in out: out.append(i)
+    return out
+
 class Refused(Exception):
     """a change the caller's check turned down; the message is a sentence for the person"""
 
 class Replaced(Exception):
     """the whole setup was replaced after the version the change was made on: it is not applied"""
 
-def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag=None):
+def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag=None, told=None):
     """apply a change to the current setup; returns (the new version, refused).
     check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied.
     filter(spec, ops) -> (allowed, refused) also runs under the lock: only the allowed operations are applied (one
@@ -171,7 +180,9 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag
     handed back for the caller to report.
     since: the version the change was made on; when the setup was replaced after it, Replaced is raised and nothing
     is applied (the change belongs to a setup that is gone)
-    tag: a dict added to each kind-"setup" entry of the applied operations (not to refused entries or the app's follow-ups)"""
+    tag: a dict added to each kind-"setup" entry of the applied operations (not to refused entries or the app's follow-ups)
+    told: a dict that, when operations were applied, gets the batch id ("batch") and the student rows they named
+    ("students": [(before, after)], deep copies; None for a row added or deleted)"""
     with _setup_lock:
         cur = _load()
         if not cur: raise LookupError("no setup")
@@ -193,7 +204,13 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None, tag
         if tag:
             for e in entries: e.update(copy.deepcopy(tag))
         entries += _refused_entries(cur["spec"], all_ops, refused, by, cur["v"] + 1)   # before the change is applied
+        named = _student_ids(ops) if told is not None else []
+        was = {r.get("_id"): r for r in copy.deepcopy(cur["spec"].get("students") or []) if isinstance(r, dict)} if named else {}
         sync.apply(cur["spec"], ops)
+        if told is not None:
+            now_rows = {r.get("_id"): r for r in cur["spec"].get("students") or [] if isinstance(r, dict)}
+            pairs = [(was.get(i), copy.deepcopy(now_rows.get(i))) for i in named]
+            told.update(batch=batch, students=[p for p in pairs if p != (None, None)])
         cur["v"] += 1
         _log.append(dict(v=cur["v"], client=client, ops=ops))
         # the net for a stale or second tab, a head's tab and whole setups: put the Class Parents' lessons right and log it
@@ -309,6 +326,17 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spe
             shutil.rmtree(old, ignore_errors=True)
             _cache.update(stamp=None, value=None)
         return m
+
+def swap_model(model, **meta):
+    """put a new model in the published folder in place of the old one, with meta laid over meta.json (the caller
+    holds _publishing); nothing else in the folder changes"""
+    meta_path = os.path.join(PUB, "meta.json")
+    if not os.path.exists(meta_path): raise FileNotFoundError(meta_path)
+    tmp = os.path.join(PUB, "model.pkl.tmp")
+    with open(tmp, "wb") as f: pickle.dump(model, f)
+    os.replace(tmp, os.path.join(PUB, "model.pkl"))
+    write_json(meta_path, {**(read_json(meta_path) or {}), **meta})
+    with _lock: _cache.update(stamp=None, value=None)
 
 def codes_csv(model):
     buf = io.StringIO(); w = csv.writer(buf)
