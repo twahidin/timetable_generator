@@ -58,13 +58,14 @@ Telegram card.
 - **Absent teachers** are told of relief somebody else planned, with a button that opens the app to set work and one to
   cancel (one line saying why, then a second press; not for an exam or event duty's backup, which the exams committee
   or the event's teacher in charge stops), and get one reminder. They are told who covers each lesson once that relief
-  teacher acknowledges, and are reminded to set work at 18:00 the evening before and 07:00 on the day while a lesson has
+  teacher acknowledges (when that is in the evening or at night, they are told at 06:45 the next morning), and are reminded to set work at 18:00 the evening before and 07:00 on the day while a lesson has
   none. `/relief` asks for relief on Telegram with the
   app's own questions, work and files included; a lesson takes as many messages as wanted (a text, then a file) until
   **Next**; What's in then says "asked on Telegram".
 - **Reporting officers** are told who is away and when, with the kind of reason alone; the Ask for relief form and
   `/relief` say when the reporting officer is not on Telegram, so the teacher tells them.
-- **The relief team** gets the morning message (06:30, a setting) with everything waiting for today and who is away; a
+- **The relief team** gets the morning message (06:30, a setting; not a member away the whole day) with everything
+  waiting for today and who is away; a
   late request for an absence for today sent after the morning message and before the cut-off (14:00, a setting), once
   its picks wait for approval; "Relief needed again" when an approved relief's teacher is away then; an alert when a
   teacher blocks the bot; each request to change with its new pick and an **Approve** button, a report of who has not

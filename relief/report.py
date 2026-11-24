@@ -16,10 +16,13 @@ teacher has neither acknowledged it nor asked to change it and its first period 
 key} keeps the mark of the report that listed it, and it is listed again when no copy of that report went or may still go (all
 dropped or failed, or none was queued before the app stopped). A cover of today approved and NOT sent out (cover.sent_out), its
 lesson needed, not stopped and not started, is listed as approved, not sent out (one sent out and held goes by itself, and is not).
-report:{date}:{HHMM of the mark}:{name} goes to each of the team who can be reached, when a relief waits, has just started or is
-approved and not sent out; its button reminds those it lists as waiting (nobody was told of one not sent out). When none waits,
-none is approved and not sent out, and a report went since the last all clear, clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many
-started without. It waits while a request to change of a lesson still to start is with the team, since neither would be true, and
+Once its lesson has started, still approved and never sent out, it is listed as started, never sent out, once, in the report of
+the next mark, as one started without acknowledgement is (the same state started:{relief key}, the same _listed).
+report:{date}:{HHMM of the mark}:{name} goes to each of the team who can be reached, when a relief waits, has just started (either
+block) or is approved and not sent out; its button reminds those it lists as waiting (nobody was told of one not sent out). When
+none waits, none is approved and not sent out (and not started), and a report went since the last all clear,
+clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many started without acknowledgement and how
+many started and were never sent out (also when those are today's only reliefs). It waits while a request to change of a lesson still to start is with the team, since neither would be true, and
 while an absence, or a lesson or cover of today in one, cannot be read (what can be is reported): it may hold a relief that waits.
 While the exams, or today in them, cannot be read (tell.known) no lesson counts as stopped, nothing is said to have started and
 there is no all clear: one may be stopped.
@@ -80,19 +83,22 @@ _log = logging.getLogger("relief.telegram")
 
 
 # ---- the texts (the plan's messages)
-def report_text(hm, waiting, started, unsent=()):
-    """each of waiting, started and unsent (approved and not sent out): dict(who, lesson, periods, start ("" without times),
-    how: "sent 07:20" and the like; not for unsent)"""
+def report_text(hm, waiting, started, unsent=(), never=()):
+    """each of waiting, started, unsent (approved and not sent out) and never (started and never sent out): dict(who, lesson,
+    periods, start ("" without times), how: "sent 07:20" and the like; not for unsent nor never)"""
     lines = [f"⏰ {hm} · Not yet acknowledged ({len(waiting)})"]
     lines += [" · ".join([f"• {v['who']}", f"{v['lesson']} {v['periods']}"] + ([f"starts {v['start']}"] if v["start"] else []) + [v["how"]]) for v in waiting]
     if unsent: lines += [f"Approved, not sent out ({len(unsent)}):"] + [f"• {v['who']} · {v['lesson']} {v['periods']}{tell._from(v['start'])}" for v in unsent]
     if started: lines += ["Started without acknowledgement:"] + [f"• {v['who']} · {v['lesson']} {v['periods']}{tell._from(v['start'])}" for v in started]
+    if never: lines += ["Started, never sent out:"] + [f"• {v['who']} · {v['lesson']} {v['periods']}{tell._from(v['start'])}" for v in never]
     return "\n".join(lines)
 
 
-def clear_text(hm, n, k):
-    """n: today's approved reliefs; k: how many of them started and were never acknowledged"""
-    if k: return f"✅ {hm} · No reliefs are waiting now: {k} started without acknowledgement."
+def clear_text(hm, n, k, m=0):
+    """n: today's approved reliefs; k: how many of them started and were never acknowledged; m: how many of today's started and
+    were never sent out (not counted in n)"""
+    parts = ([f"{k} started without acknowledgement"] if k else []) + ([f"{m} never sent out"] if m else [])
+    if parts: return f"✅ {hm} · No reliefs are waiting now: " + ", ".join(parts) + "."
     return f"✅ {hm} · " + (f"All {n} reliefs for today are acknowledged." if n != 1 else "The 1 relief for today is acknowledged.")
 
 
@@ -159,18 +165,19 @@ def _records():
 
 def _relief(w, r, x, i, c):
     """cover c (the i-th) of lesson x as a relief that counts (approved, and it has reached its teacher); or, state "unsent", one
-    approved and not sent out (cover.sent_out) whose lesson has not started; else None (one sent out and held goes by itself)"""
+    approved and not sent out (cover.sent_out) whose lesson has not started; or, state "never", one approved and never sent out whose
+    lesson has started; else None (one sent out and held goes by itself)"""
     s = _cover.state(r, x, c)
     if s not in tell.APPROVED: return None
     datetime.datetime.fromisoformat(c["approved"]["at"])     # an approval whose time cannot be read is passed over (w.passed): it may be one that waits
     ckey, who, starts = _cover.cover_key(x, i), c["relief"], _starts(c, w.bnds)
     over = w.now.hour * 60 + w.now.minute >= starts
     if not _cover.reached(r, x, c, w.now, w.settings, w.pub):
-        if s != "approved" or _cover.sent_out(c) is not None or over: return None
-        s = "unsent"
+        if s != "approved" or _cover.sent_out(c) is not None: return None
+        s = "never" if over else "unsent"
     if not isinstance(who, str): raise ValueError("no name")
     key = tell.key_of(w.said.told, r, c, ckey)
-    return dict(who=who, lesson=words.class_group(x), periods=words.periods_text(c), start=words.times(w.pub, x, c)[0], how="" if s == "unsent" else _how(w, who, key),
+    return dict(who=who, lesson=words.class_group(x), periods=words.periods_text(c), start=words.times(w.pub, x, c)[0], how="" if s in ("unsent", "never") else _how(w, who, key),
                 state=s, key=key, starts=starts, over=over, cover=dict(id=r["id"], ckey=ckey, absent=r["teacher"], approved_at=c["approved"].get("at")))
 
 
@@ -244,21 +251,23 @@ def _report(s):
     records, unread = _records()
     w.passed = len(unread)
     rows = sorted((v for r in records for v in _reliefs(w, r)), key=lambda v: (v["starts"], v["who"], v["key"]))
-    unsent, rows = [v for v in rows if v["state"] == "unsent"], [v for v in rows if v["state"] != "unsent"]
+    unsent, never = [v for v in rows if v["state"] == "unsent"], [v for v in rows if v["state"] == "never"]
+    rows = [v for v in rows if v["state"] not in ("unsent", "never")]
     waiting = [v for v in rows if v["state"] == "approved" and not v["over"]]
     started = [v for v in rows if v["state"] == "approved" and v["over"] and not _listed(w, v)] if w.links is not None else []
+    never_new = [v for v in never if not _listed(w, v)] if w.links is not None else []
     text, ref = None, dict(date=date, mark=mark, made=now.isoformat(timespec="seconds"))
-    if waiting or started or unsent:                          # while one is approved and not sent out there is no all clear
-        text = report_text(f"{now:%H:%M}", waiting, started, unsent)
+    if waiting or started or unsent or never_new:             # while one is approved and not sent out there is no all clear
+        text = report_text(f"{now:%H:%M}", waiting, started, unsent, never_new)
         buttons = [[dict(text=AGAIN, what="remind", extra=dict(date=date, covers=[v["cover"] for v in waiting]))]] if waiting else []
         buttons.append([dict(text=OPEN_TODAY, url=(bot.get("base") or "") + "/relief#today")])
         kind, key = "report", f"report:{date}:{hhmm(mark).replace(':', '')}"
-    elif rows and w.links is not None and not w.passed and not any(v["state"] == "change" and not v["over"] for v in rows):
+    elif (rows or never) and w.links is not None and not w.passed and not any(v["state"] == "change" and not v["over"] for v in rows):
         n = _spell(w)
         if n is not None:
-            text = clear_text(f"{now:%H:%M}", len(rows), sum(v["state"] != "acknowledged" for v in rows))
+            text = clear_text(f"{now:%H:%M}", len(rows), sum(v["state"] != "acknowledged" for v in rows), len(never))
             kind, key, buttons, ref = "clear", f"clear:{date}:{n}", [], dict(ref, n=n)
-    if not tgdb.raise_state(last, mark, [f"started:{v['key']}" for v in started]) or text is None: return []
+    if not tgdb.raise_state(last, mark, [f"started:{v['key']}" for v in started + never_new]) or text is None: return []
     return _to_each(team, kind, key, text, buttons, ref)
 
 
