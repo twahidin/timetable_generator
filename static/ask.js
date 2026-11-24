@@ -65,6 +65,12 @@ var Ask = (function () {
 
   /* the words and the style class for an option's state */
   function verdict(option) {
+    var f = option.fixes && option.fixes[0];
+    if (f && f.kind === "trade") {   /* a trade reads as a direct swap of two teachers' classes, or not */
+      if (option.state === "ok") return { text: "Direct swap", cls: "ok" };
+      if (option.state === "prefer") return { text: "Direct swap, bends a rule", cls: "prefer" };
+      return { text: "Not a direct swap", cls: "no" };
+    }
     if (option.state === "ok") return { text: "Clean", cls: "ok" };
     if (option.state === "prefer") return { text: "Bends a rule", cls: "prefer" };
     return { text: "Lands with a problem", cls: "no" };

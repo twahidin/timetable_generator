@@ -79,6 +79,14 @@ t("verdict: the three states", () => {
   assert.deepStrictEqual(Ask.verdict({ state: "no" }), { text: "Lands with a problem", cls: "no" });
 });
 
+t("verdict: a trade is a direct swap or not", () => {
+  const tr = st => ({ state: st, fixes: [{ kind: "trade", a: "k1", b: "k2", x: "Mr Tan", y: "Ms Lee" }] });
+  assert.deepStrictEqual(Ask.verdict(tr("ok")), { text: "Direct swap", cls: "ok" });
+  assert.deepStrictEqual(Ask.verdict(tr("prefer")), { text: "Direct swap, bends a rule", cls: "prefer" });
+  assert.deepStrictEqual(Ask.verdict(tr("no")), { text: "Not a direct swap", cls: "no" });
+  assert.deepStrictEqual(Ask.verdict({ state: "ok", fixes: [{ kind: "teacher" }] }), { text: "Clean", cls: "ok" });
+});
+
 t("send: one fix, two fixes, anyway and none", () => {
   const fix = { kind: "move", id: 7, d: 1, p: 2 }, o = { fixes: [fix], text: "x", disturbs: [], state: "ok", why: "", apply: "yes" };
   assert.deepStrictEqual(Ask.send(o, "s1"), { url: "/api/draft/fix", body: { kind: "move", id: 7, d: 1, p: 2, stamp: "s1" } });

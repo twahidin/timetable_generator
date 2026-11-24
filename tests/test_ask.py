@@ -213,8 +213,8 @@ def test_teachers_words():
     assert f"Allowance {w['allowance']:g} periods." in o4["disturbs"], o4["disturbs"]   # an allowance alone
     assert f"It changes all 2 lessons of {fixes.what(m['lessons'][0])}." in o["disturbs"]   # lessons 1 and 3 are of the same class and subject
     one = ask.teachers(m, spec, days, pool, lesson(BANDID, group="G2"))["options"][0]; assert not any("It changes all" in d for d in one["disturbs"])   # a group is one lesson
-    busy = [o for o in a["options"] if not o["who"]["free"]]; assert len(busy) <= ask.BUSY and all(o["who"]["doing"] and o["state"] == "no" and o["apply"] == "anyway" for o in busy)
-    assert a["options"].index(busy[0]) > max(i for i, o in enumerate(a["options"]) if o["who"]["free"]) if busy else True
+    assert all(o["who"]["free"] for o in a["options"])   # a busy teacher is never listed
+    assert not hasattr(ask, "BUSY")
 
 def test_teachers_none_and_unknown():
     m, spec, days, pool = now()
@@ -322,7 +322,7 @@ def test_trades_found():
         assert len(a["options"]) == 1, a; o = a["options"][0]
         assert o["fixes"] == [trade(KA, KB, E1, E2)] and o["apply"] == "yes" and o["state"] in helper.OK and o["text"] == helper.say(m, spec, days, o["fixes"][0]), o
         assert f"It changes 1 lesson of {key_name(KA)} and 1 of {key_name(KB)}." in o["disturbs"], o["disturbs"]
-        assert a["stopped"] is False and a["more"] == 0 and a["text"] and a["title"].startswith(fixes.what(m["lessons"][0]) + " · "), a
+        assert a["stopped"] is False and a["more"] == 0 and a["text"] == f"1 direct swap is possible for {E1}." and a["title"].startswith(fixes.what(m["lessons"][0]) + " · "), a
         n = len(stored()); r = c.post("/api/draft/fix", json=o["fixes"][0]); assert r.status_code == 200 and len(stored()) == n + 1, r.get_json()
         assert stored()[-1]["kind"] == "trade"; assert c.post("/api/draft/undo").status_code == 200 and len(stored()) == n
 
@@ -362,7 +362,7 @@ def test_trades_pretest_counts_a_clash_without_judging_it():
         try:
             with most(0): a = ask.trades(m, spec, days, pool, lesson(1))
         finally: back()
-        assert seen == [] and a["options"] == [] and a["more"] == 1 and a["text"] == "No trade of this lesson is clean. 1 would land with a problem.", (seen, a)
+        assert seen == [] and a["options"] == [] and a["more"] == 1 and a["text"] == f"No direct swap is possible for {E1}. 1 would land with a problem.", (seen, a)
         a = ask.trades(m, spec, days, pool, lesson(1)); (o,) = a["options"]   # shown, it is judged as every option is
         assert o["fixes"] == [trade(KA, KB, E1, E2)] and o["state"] == "no" and o["apply"] == "none" and E2 in o["why"] and a["more"] == 0, a
     rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 1, L1, [CC], MT_SUBJ, [E1])]   # E1 teaches lesson 3 when lesson 2 meets
@@ -371,14 +371,14 @@ def test_trades_pretest_counts_a_clash_without_judging_it():
         try:
             with most(0): a = ask.trades(m, spec, days, pool, lesson(1))
         finally: back()
-        assert seen == [] and a["text"] == "No trade of this lesson is clean. 1 would land with a problem.", (seen, a)
+        assert seen == [] and a["text"] == f"No direct swap is possible for {E1}. 1 would land with a problem.", (seen, a)
     rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1, [CB], SUBJ, [E2])]   # E2 busy then with the lesson E2 gives away: no clash, so it is judged
     with fresh(rows) as (m, spec, days, pool):
         seen, back = recorded_judge()
         try:
             with most(0): a = ask.trades(m, spec, days, pool, lesson(1))
         finally: back()
-        assert len(seen) == 1 and a["text"].startswith("1 trade is possible"), (seen, a["text"])
+        assert len(seen) == 1 and a["text"] == f"1 direct swap is possible for {E1}.", (seen, a["text"])
 
 def test_trades_time_budget():
     E4 = [t["name"] for t in SPEC["teachers"] if t.get("dept") == "EL"][3]
@@ -395,6 +395,41 @@ def test_trades_text_and_refusals():
     with fresh(rows) as (m, spec, days, pool):
         a = ask.trades(m, spec, days, pool, lesson(1)); assert a["options"] == [] and a["text"], a   # nobody on the lesson to trade
         raises(ValueError, lambda: ask.trades(m, spec, days, pool, dict(kind="place", by="class", name=CA, d=0, p=0)), "Point at a lesson for this.")
+    with fresh([lw(1, 0, L1, [CA], SUBJ, [E1])]) as (m, spec, days, pool):   # no one else of the subject or its department teaches it
+        a = ask.trades(m, spec, days, pool, lesson(1)); assert a["options"] == [] and a["text"] == "No trade of this lesson can be made.", a
+    E4 = [t["name"] for t in SPEC["teachers"] if t.get("dept") == "EL"][3]
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 2, L1, [CC], SUBJ, [E3]), dict(lw(4, 3, L1, ["2A"], SUBJ, [E4]), level="P2"), lw(5, 1, L1, [CC], MT_SUBJ, [E1])]
+    with fresh(rows) as (m, spec, days, pool):   # E1 teaches lesson 5 when lesson 2 meets: the trade with E2 lands with a problem
+        a = ask.trades(m, spec, days, pool, lesson(1))
+        assert a["text"] == f"2 direct swaps are possible for {E1}. 1 more would land with a problem.", a["text"]
+
+# ----------------------------------------------------------------------------------------------- who else could teach it: only who is free, department first
+DEPT = fixes._on_card(SPEC, SUBJ)[1]; assert DEPT
+OUT = [t["name"] for t in SPEC["teachers"] if t.get("dept") == "MA"][:2]   # of another department, on no lesson of the subject's card
+def all_busy_but(free):
+    """lesson 1 of CA and SUBJ by E1, and one lesson at its time holding every other teacher of the setup but those in free"""
+    return [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1, [CB], SUBJ2, [t["name"] for t in SPEC["teachers"] if t["name"] not in free and t["name"] != E1])]
+
+def test_teachers_department_first_and_the_sentence():
+    m, spec, days, pool = now(); a = ask.teachers(m, spec, days, pool, lesson(LESSON)); ranks = [o["who"]["rank"] for o in a["options"]]
+    assert a["options"] and ranks == sorted(ranks), ranks
+    with fresh(all_busy_but(OUT[:1])) as (m, spec, days, pool):
+        ch = fixes.choices(m, spec, days, 1, None, pool)["teachers"]
+        assert not [t["name"] for t in ch if t["rank"] <= 2 and t["free"] and t["name"] != E1], ch   # every teacher of rank 0 to 2 is busy then
+        what = fixes.what(next(x for x in m["lessons"] if x["id"] == 1)); a = ask.teachers(m, spec, days, pool, lesson(1))
+        assert a["text"] == f"No one in {DEPT} is free to take {what}. 1 teacher from another department is free.", a["text"]
+        assert [o["who"]["name"] for o in a["options"]] == OUT[:1] and a["more"] == 0, a
+    with fresh(all_busy_but(OUT)) as (m, spec, days, pool):
+        what = fixes.what(next(x for x in m["lessons"] if x["id"] == 1)); a = ask.teachers(m, spec, days, pool, lesson(1))
+        assert a["text"] == f"No one in {DEPT} is free to take {what}. 2 teachers from other departments are free.", a["text"]
+        assert [o["who"]["name"] for o in a["options"]] == OUT, a
+
+def test_teachers_sentence_without_a_department():
+    with fresh(all_busy_but(OUT[:1])) as (m, spec, days, pool):
+        bare = dict(spec, subjects=[dict(s, dept="") if s["subject"] == SUBJ else s for s in spec["subjects"]]); assert fixes._on_card(bare, SUBJ)[1] == ""
+        a = ask.teachers(m, bare, days, pool, lesson(1))
+        assert a["text"].startswith(f"No one who teaches {SUBJ} is free to take "), a["text"]
+        assert a["text"].endswith(" 1 teacher from another department is free."), a["text"]
 
 # ----------------------------------------------------------------------------------------------- filling a period
 FILL = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1 + 2, [CA], SUBJ2, [E2]), lw(3, 1, L1, [CA], SUBJ, [E1], n=2), lw(4, 2, L1, [CA], SUBJ2, [E2]),
