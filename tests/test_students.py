@@ -11,6 +11,7 @@ import app as A, store  # noqa: E402
 import access, history, putback, students  # noqa: E402,F401
 from ttgen import export as E  # noqa: E402,F401
 from ttgen.template import write_template  # noqa: E402
+students.FILES_WAIT = 3600   # no test before the thread test starts a remake by accident
 
 c = A.app.test_client()
 assert c.post("/login", data={"as": "committee", "code": CODE}).status_code == 302
@@ -292,8 +293,10 @@ def no_setup_is_not_an_empty_list():
     fresh(); real = store.setup_record
     store.setup_record = lambda *a, **k: dict(v=1, spec=None)
     try:
+        n0 = len(history.read(kinds=[students.KIND], limit=10 ** 6))
         s = students.status(); r = c.post("/api/students/update").get_json(); n = len(history.read(kinds=[students.KIND], limit=10 ** 6))
     finally: store.setup_record = real
+    assert n == n0, (n0, n)
     assert (s["published"], s["listed"], s["same"], s["differ"], s["differ_n"], s["counts"], s["can_update"], s["no_setup"]) == (True, 0, 0, [], 0, dict(change=0, add=0, remove=0), False, True)
     assert r["outcome"]["text"] == "" and len(store.published()["model"]["students"]) == 3
 
@@ -307,6 +310,71 @@ def a_repeated_id_is_left_once():
     fresh(); set_students(PEOPLE + [PEOPLE[0] | dict(name="Aisha Two")])
     s = students.status(); assert [(d["id"], d["kind"], d["why"]) for d in s["differ"]] == [("S001", "left", "this ID is on the list twice")]
     c.post("/api/students/update"); assert pub_student("S001")["name"] == "Aisha Rahman" and len(store.published()["model"]["students"]) == 3
+
+@t
+def the_files_are_remade_and_carry_the_change():
+    fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
+    meta = store.published()["meta"]; assert meta["files_behind"] is True and c.get("/api/status").get_json()["published"]["files_behind"] is True
+    old = os.path.getmtime(os.path.join(store.PUB, meta["files"]["excel"])); time.sleep(1.1)
+    assert students.files_now() is True
+    meta2 = store.published()["meta"]
+    assert meta2["files_behind"] is False and meta2["files_at"] and meta2["published_at"] == meta["published_at"]
+    assert c.get("/api/status").get_json()["published"]["files_behind"] is False
+    assert os.path.getmtime(os.path.join(store.PUB, meta2["files"]["excel"])) > old and pub_student("S002")["name"] == "Ben K"
+    wb = openpyxl.load_workbook(os.path.join(store.PUB, meta2["files"]["excel"]), read_only=True)
+    assert any("Ben K" in str(v) for row in wb["Students"].iter_rows(values_only=True) for v in row if v)
+    for f in ("setup.xlsx", "model.pkl", "meta.json"): assert os.path.exists(os.path.join(store.PUB, f)), f
+    assert not os.path.isdir(os.path.join(store.PUB, "PDF", "Students"))
+
+@t
+def a_change_during_the_remake_is_kept():
+    fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
+    from ttgen import export as E; real = E.export_all
+    def slow(m, out, **kw):                      # a student change lands while the files are being written
+        r = real(m, out, **kw); change(["set", "students", row_id("S003"), "name", "Chen L"]); return r
+    store.export_all = slow                      # patch the name store.remake_files calls
+    try: assert students.files_now() is False
+    finally: store.export_all = real
+    assert pub_student("S003")["name"] == "Chen L" and store.published()["meta"]["files_behind"] is True
+    assert students.files_now() is True and store.published()["meta"]["files_behind"] is False
+
+@t
+def a_publish_during_the_remake_wins():
+    fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
+    from ttgen import export as E; real = E.export_all; seen = {}
+    def slow(m, out, **kw):
+        r = real(m, out, **kw)
+        if not seen: seen["x"] = 1; time.sleep(1.1); store.export_all = real; publish(); store.export_all = slow
+        return r
+    store.export_all = slow
+    try: assert students.files_now() is True
+    finally: store.export_all = real
+    assert "files_behind" not in store.published()["meta"] or store.published()["meta"]["files_behind"] is False
+
+@t
+def a_failed_remake_leaves_the_files_behind():
+    fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
+    before = sorted(os.listdir(store.PUB)); real = store.export_all
+    def boom(m, out, **kw): raise KeyError("x")
+    store.export_all = boom
+    try: raises(KeyError, students.files_now)
+    finally: store.export_all = real
+    assert store.published()["meta"]["files_behind"] is True and sorted(os.listdir(store.PUB)) == before
+    assert [d for d in os.listdir(os.path.dirname(store.PUB)) if d.startswith("published.")] == []
+
+@t
+def the_thread_runs_after_the_wait_and_after_a_restart():
+    fresh(); students.FILES_WAIT = 0
+    try:
+        change(["set", "students", row_id("S002"), "name", "Ben K"])
+        deadline = time.time() + 60
+        while store.published()["meta"].get("files_behind") and time.time() < deadline: time.sleep(0.2)
+        assert store.published()["meta"]["files_behind"] is False
+        with store._publishing: store.swap_model(store.published()["model"], files_behind=True)   # as a restart finds it
+        students.resume_files(); deadline = time.time() + 60
+        while store.published()["meta"].get("files_behind") and time.time() < deadline: time.sleep(0.2)
+        assert store.published()["meta"]["files_behind"] is False
+    finally: students.FILES_WAIT = 3600
 
 if __name__ == "__main__":
     for f in TESTS: f()

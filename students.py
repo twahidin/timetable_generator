@@ -2,11 +2,14 @@
 the published timetable are brought up to date at once, and nothing else in it changes. Students are matched by
 student ID (the published records have no row id). A student who cannot follow is left as the published timetable
 has them, with the reason in words."""
-import collections, copy
+import collections, copy, sys, threading, time
 import history, store
 from ttgen import export as E
 
 KIND = "students-published"
+FILES_WAIT = 60   # seconds with no student change before the files to download are made again (a test lowers it)
+_files = dict(last=0.0, pending=False, running=False)   # the last change, a remake wanted, the one thread alive
+_files_lock = threading.Lock()
 
 def key(row):
     return str(row.get("id") or row.get("name") or "").strip()
@@ -75,6 +78,43 @@ def _commit(model, new_students, updated, added, removed, rows_now):
     checks["ok"] = not checks["problems"]
     new["checks"] = checks
     store.swap_model(new, students=len(new["students"]), ok=checks["ok"], problems=checks["problems"][:20], students_at=store.now(), files_behind=True)
+    try: schedule_files()
+    except Exception as e: print("the files to download could not be scheduled (" + type(e).__name__ + ")", file=sys.stderr)   # the update is made
+
+def _files_run():
+    """the one background thread: waits until FILES_WAIT seconds have passed since the last change, remakes the files,
+    and goes again while a change arrived meanwhile; an error is told by its type alone and the thread stops"""
+    try:
+        while True:
+            with _files_lock:
+                if not _files["pending"]: _files["running"] = False; return
+            while time.time() - _files["last"] < FILES_WAIT: time.sleep(0.2)   # FILES_WAIT read on every poll
+            with _files_lock: _files["pending"] = False
+            if store.remake_files() is False:
+                with _files_lock: _files["pending"] = True
+    except BaseException as e:
+        print("warning: the files to download could not be made (" + type(e).__name__ + ")", file=sys.stderr)
+    with _files_lock: _files["running"] = False
+
+def schedule_files():
+    """a student change was written: the files to download are made again once no change has come for FILES_WAIT seconds"""
+    with _files_lock:
+        _files["last"] = time.time(); _files["pending"] = True
+        if _files["running"]: return
+        _files["running"] = True
+    try: threading.Thread(target=_files_run, name="files-to-download", daemon=True).start()
+    except BaseException:
+        with _files_lock: _files["running"] = False
+        raise
+
+def files_now():
+    """remake the files to download at once (for tests): store.remake_files()"""
+    return store.remake_files()
+
+def resume_files():
+    """at start: the files are made again when the published timetable says they are behind"""
+    pub = store.published()
+    if pub and pub["meta"].get("files_behind"): schedule_files()
 
 def follow(pairs, by, batch=None):
     """bring the students these (before, after) rows name up to date on the published timetable, reading the setup as

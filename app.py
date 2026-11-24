@@ -1413,7 +1413,8 @@ def pub_info():
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
                 files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []),
                 choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""),
-                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
+                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []),
+                files_behind=bool(m.get("files_behind")))
 
 def _group_label(p):
     """the committee page's label for a person: their role's label, then " · " and their committees' labels joined by
@@ -3467,6 +3468,8 @@ def events_who(id):
 
 startup_log()
 move_relief_lists()
+try: students.resume_files()                                     # the files to download, if a restart found them behind a student change
+except Exception as e: print("warning: the files to download were not resumed (" + type(e).__name__ + ")", file=sys.stderr)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)

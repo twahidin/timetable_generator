@@ -21,6 +21,8 @@ os.makedirs(RUNS, exist_ok=True)
 KEEP_SAVES = 48
 _lock = threading.Lock()
 _publishing = threading.Lock()   # one publish at a time: each writes the same folder before swapping it in
+_remaking = threading.Lock()     # one remake of the files to download at a time (remake_files); never taken by a publish or a student update
+_turns = dict(publish=0, swap=0)  # how many publishes and model swaps this process has made (precise: published_at and students_at are to the minute)
 
 def now():
     return datetime.datetime.now().astimezone().strftime("%d %b %Y, %H:%M")
@@ -325,6 +327,7 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spe
             os.replace(tmp, PUB)
             shutil.rmtree(old, ignore_errors=True)
             _cache.update(stamp=None, value=None)
+            _turns["publish"] += 1
         return m
 
 def swap_model(model, **meta):
@@ -333,10 +336,57 @@ def swap_model(model, **meta):
     meta_path = os.path.join(PUB, "meta.json")
     if not os.path.exists(meta_path): raise FileNotFoundError(meta_path)
     tmp = os.path.join(PUB, "model.pkl.tmp")
-    with open(tmp, "wb") as f: pickle.dump(model, f)
-    os.replace(tmp, os.path.join(PUB, "model.pkl"))
+    try:
+        with open(tmp, "wb") as f: pickle.dump(model, f)
+        os.replace(tmp, os.path.join(PUB, "model.pkl"))
+    finally:
+        if os.path.exists(tmp): os.remove(tmp)
     write_json(meta_path, {**(read_json(meta_path) or {}), **meta})
-    with _lock: _cache.update(stamp=None, value=None)
+    with _lock:
+        _cache.update(stamp=None, value=None)
+        _turns["swap"] += 1
+
+def remake_files():
+    """make the files to download again from the published model as it is now and swap them in as a publish does; None
+    when nothing is published, True when the files are up to date (or a publish made its own meanwhile), False when a
+    student change arrived while they were made (files_behind stays and the caller runs it again). The export runs with
+    no lock held, so a student update never waits for it; only the copy and swap at the end take _publishing. If the
+    export fails its folder is removed, files_behind is left as it was and the error goes out."""
+    meta_path = os.path.join(PUB, "meta.json")
+    with _remaking:
+        with _lock:                               # a publish swaps folders under _lock: meta and model come from one folder
+            turns = dict(_turns)                  # read first: a swap after this is seen at the end, never missed
+            if not os.path.exists(meta_path): return None
+            meta0 = read_json(meta_path, {}) or {}
+            with open(os.path.join(PUB, "model.pkl"), "rb") as f: m = pickle.load(f)   # its own copy: export_all may change it
+        tmp, old = PUB + ".files", PUB + ".old"
+        shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
+        try:
+            out = export_all(m, tmp, log=lambda *a: None)
+            shutil.rmtree(os.path.join(tmp, "PDF", "Classes"), ignore_errors=True)   # as publish: single PDFs are in the zip and made on demand
+            for k in ("Teachers", "Rooms", "Students"): shutil.rmtree(os.path.join(tmp, "PDF", k), ignore_errors=True)
+            files = dict(excel=os.path.basename(out["excel"]), html=os.path.basename(out["html"]), zip=os.path.basename(out["pdf_zip"]), db=os.path.basename(out["db"]),
+                         books={os.path.basename(p).split(" - ")[0].lower(): os.path.relpath(p, tmp) for p in out["pdf_books"]})
+            with _publishing:
+                if not os.path.exists(meta_path): shutil.rmtree(tmp, ignore_errors=True); return None
+                meta = read_json(meta_path, {}) or {}
+                if _turns["publish"] != turns["publish"] or meta.get("published_at") != meta0.get("published_at"):
+                    shutil.rmtree(tmp, ignore_errors=True); return True   # a publish made its own files
+                for f in os.listdir(PUB):         # what the export does not make: the model, the setup and the timetable it was published from
+                    if f in ("model.pkl", "setup.xlsx") or f.startswith("timetable."): shutil.copy(os.path.join(PUB, f), os.path.join(tmp, f))
+                behind = _turns["swap"] != turns["swap"] or meta.get("students_at") != meta0.get("students_at")
+                write_json(os.path.join(tmp, "meta.json"), {**meta, "files": files, "files_at": now(), "files_behind": behind})
+                with _lock:
+                    shutil.rmtree(old, ignore_errors=True)
+                    os.replace(PUB, old)
+                    try: os.replace(tmp, PUB)
+                    except BaseException: os.replace(old, PUB); raise   # the published folder is never left missing
+                    shutil.rmtree(old, ignore_errors=True)
+                    _cache.update(stamp=None, value=None)
+                return not behind
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
 
 def codes_csv(model):
     buf = io.StringIO(); w = csv.writer(buf)
