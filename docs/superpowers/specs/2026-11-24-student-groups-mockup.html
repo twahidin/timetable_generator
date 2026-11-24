@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One student's groups: mockup</title>
+<style>:root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2433;--muted:#5d6678;--line:#e3e7ee;--navy:#1f4e78;--accent:#2563eb;--warn:#b42318;--warn-bg:#fdecec;--ok:#067647;--ok-bg:#e7f6ee;--chip:#eef2f8;--new:#dbeafe;--gone:#f1f3f6}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:13px;padding:12px}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:7px 12px}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.note{color:var(--muted);font-size:12px;margin:0 0 8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;max-width:780px}
+h1{font-size:17px;margin:0}.sub{color:var(--muted);font-size:12.5px;margin:2px 0 10px}
+.cols{display:grid;grid-template-columns:330px 1fr;gap:14px;align-items:start}
+h3{font-size:11.5px;margin:10px 0 3px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+h3:first-child{margin-top:0}
+.opt{display:grid;grid-template-columns:16px 1fr auto;gap:6px;align-items:center;padding:4px 6px;border:1px solid var(--line);border-radius:8px;margin-bottom:3px}
+.opt.on{border-color:var(--accent);background:var(--new)}
+.opt.was{background:var(--gone)}
+.opt.bad{background:var(--warn-bg);border-color:#f3c4bf}
+.opt small{display:block;color:var(--muted);font-size:11px}
+.opt.bad small{color:var(--warn)}
+.dot{width:12px;height:12px;border-radius:50%;border:1.5px solid #9aa3b2;background:#fff}
+.on .dot{border-color:var(--accent);background:radial-gradient(var(--accent) 45%,#fff 50%)}
+.n{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);white-space:nowrap}
+.n.over{color:var(--warn);font-weight:600}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-size:11px;color:var(--muted);font-weight:600;padding:3px;text-align:center}
+td{border:1px solid var(--line);height:34px;text-align:center;font-size:11.5px;padding:1px;line-height:1.15}
+td small{display:block;color:var(--muted);font-size:9.5px}
+td.p{border:none;color:var(--muted);font-size:11px;width:22px}
+td.new{background:var(--new);border-color:var(--accent);font-weight:600}
+td.gone{background:var(--gone);color:#9aa3b2;text-decoration:line-through}
+td.rec{background:#fafbfc;color:var(--muted);font-size:10.5px}
+.key{display:flex;gap:12px;margin-top:6px;font-size:11.5px;color:var(--muted)}
+.key i{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid var(--line)}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.foot b{font-weight:600}
+</style></head><body>
+<p class="note">Mockup with made-up names. Step: Students. You clicked a student in the list and chose Geography in place of History.</p>
+<div class="card">
+  <h1>Aisha Rahman</h1>
+  <div class="sub">S0412 · Class 3B · Sec 3 · personal code stays the same</div>
+  <div class="cols">
+    <div>
+      <h3>English · every student takes one</h3>
+      <div class="opt on"><span class="dot"></span><span>3EL2 · English<small>Ms Tan · room 3B</small></span><span class="n">28 of 30</span></div>
+      <h3>Humanities · every student takes one</h3>
+      <div class="opt was"><span class="dot"></span><span>3HIS1 · History<small>was in this group</small></span><span class="n">24 of 30</span></div>
+      <div class="opt on"><span class="dot"></span><span>3GEO2 · Geography<small>Mr Lim · Geography Room · fits</small></span><span class="n">23 of 30</span></div>
+      <div class="opt"><span class="dot"></span><span>3GEO1 · Geography<small>Mdm Wong · room 3D · fits</small></span><span class="n over">31 of 30 · full</span></div>
+      <h3>Science · every student takes one</h3>
+      <div class="opt on"><span class="dot"></span><span>3PHY1 · Physics<small>Mr Goh · Physics Lab 1</small></span><span class="n">26 of 28</span></div>
+      <div class="opt bad"><span class="dot"></span><span>3BIO2 · Biology<small>Clashes: Tue period 4, with 3EL2 English</small></span><span class="n">20 of 28</span></div>
+      <h3>Other groups</h3>
+      <div class="opt"><span class="dot" style="border-radius:3px"></span><span>3ART1 · Art elective<small>Ms Devi · Art Room · fits</small></span><span class="n">12 of 20</span></div>
+    </div>
+    <div>
+      <table>
+        <tr><th></th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th></tr>
+        <tr><td class="p">1</td><td>EL<small>3B</small></td><td>MA<small>3B</small></td><td class="new">GEO<small>Geog Rm</small></td><td>PE<small>Hall</small></td><td>MA<small>3B</small></td></tr>
+        <tr><td class="p">2</td><td>EL<small>3B</small></td><td>MA<small>3B</small></td><td class="new">GEO<small>Geog Rm</small></td><td>PE<small>Hall</small></td><td>EL<small>3B</small></td></tr>
+        <tr><td class="p">3</td><td>PHY<small>Lab 1</small></td><td class="gone">HIS</td><td>MT<small>3B</small></td><td>MA<small>3B</small></td><td>PHY<small>Lab 1</small></td></tr>
+        <tr><td class="p"></td><td class="rec" colspan="5">Recess</td></tr>
+        <tr><td class="p">4</td><td>PHY<small>Lab 1</small></td><td>EL<small>3B</small></td><td>MT<small>3B</small></td><td class="gone">HIS</td><td>CCE<small>3B</small></td></tr>
+        <tr><td class="p">5</td><td>MT<small>3B</small></td><td class="new">GEO<small>Geog Rm</small></td><td>MA<small>3B</small></td><td class="gone">HIS</td><td>CCE<small>3B</small></td></tr>
+        <tr><td class="p">6</td><td>MA<small>3B</small></td><td></td><td>EL<small>3B</small></td><td>MT<small>3B</small></td><td class="new">GEO<small>Geog Rm</small></td></tr>
+        <tr><td class="p">7</td><td class="gone">HIS</td><td>PHY<small>Lab 1</small></td><td>ART<small>3B</small></td><td>EL<small>3B</small></td><td></td></tr>
+      </table>
+      <div class="key"><span><i style="background:var(--new);border-color:var(--accent)"></i>new lessons</span><span><i style="background:var(--gone)"></i>lessons left</span><span><i style="background:var(--warn-bg)"></i>a clash</span></div>
+    </div>
+  </div>
+  <div class="foot"><span><b>Moves from 3HIS1 History to 3GEO2 Geography.</b> 4 lessons change. No clash.</span><span><button>Cancel</button> <button class="primary">Save · the timetable changes at once</button></span></div>
+</div>
+</body></html>
