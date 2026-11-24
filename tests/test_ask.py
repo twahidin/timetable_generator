@@ -1,5 +1,5 @@
 """Plain-assert tests for the look-ups about one lesson (ask.py): .venv/bin/python tests/test_ask.py"""
-import contextlib, io, os, secrets, sys, tempfile
+import contextlib, io, os, re, secrets, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODE = secrets.token_hex(4)
@@ -413,15 +413,16 @@ def all_busy_but(free):
 def test_teachers_department_first_and_the_sentence():
     m, spec, days, pool = now(); a = ask.teachers(m, spec, days, pool, lesson(LESSON)); ranks = [o["who"]["rank"] for o in a["options"]]
     assert a["options"] and ranks == sorted(ranks), ranks
+    assert not a["text"].startswith("No one") and re.match(r"^(1 teacher is|\d+ teachers are) free to take ", a["text"]), a["text"]   # a teacher of rank 0 to 2 is free: the ordinary sentence
     with fresh(all_busy_but(OUT[:1])) as (m, spec, days, pool):
         ch = fixes.choices(m, spec, days, 1, None, pool)["teachers"]
         assert not [t["name"] for t in ch if t["rank"] <= 2 and t["free"] and t["name"] != E1], ch   # every teacher of rank 0 to 2 is busy then
         what = fixes.what(next(x for x in m["lessons"] if x["id"] == 1)); a = ask.teachers(m, spec, days, pool, lesson(1))
-        assert a["text"] == f"No one in {DEPT} is free to take {what}. 1 teacher from another department is free.", a["text"]
+        assert a["text"] == f"No one in {DEPT} is free to take {what}. 1 teacher outside {DEPT} is free.", a["text"]
         assert [o["who"]["name"] for o in a["options"]] == OUT[:1] and a["more"] == 0, a
     with fresh(all_busy_but(OUT)) as (m, spec, days, pool):
         what = fixes.what(next(x for x in m["lessons"] if x["id"] == 1)); a = ask.teachers(m, spec, days, pool, lesson(1))
-        assert a["text"] == f"No one in {DEPT} is free to take {what}. 2 teachers from other departments are free.", a["text"]
+        assert a["text"] == f"No one in {DEPT} is free to take {what}. 2 teachers outside {DEPT} are free.", a["text"]
         assert [o["who"]["name"] for o in a["options"]] == OUT, a
 
 def test_teachers_sentence_without_a_department():
@@ -429,7 +430,7 @@ def test_teachers_sentence_without_a_department():
         bare = dict(spec, subjects=[dict(s, dept="") if s["subject"] == SUBJ else s for s in spec["subjects"]]); assert fixes._on_card(bare, SUBJ)[1] == ""
         a = ask.teachers(m, bare, days, pool, lesson(1))
         assert a["text"].startswith(f"No one who teaches {SUBJ} is free to take "), a["text"]
-        assert a["text"].endswith(" 1 teacher from another department is free."), a["text"]
+        assert a["text"].endswith(" 1 other teacher is free."), a["text"]
 
 # ----------------------------------------------------------------------------------------------- filling a period
 FILL = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1 + 2, [CA], SUBJ2, [E2]), lw(3, 1, L1, [CA], SUBJ, [E1], n=2), lw(4, 2, L1, [CA], SUBJ2, [E2]),

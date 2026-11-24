@@ -153,7 +153,7 @@ def teachers(m, spec, days, pool, sub):
     teachers on the subject or its step 3 card, the subject's department, anyone), judged through check until MOST options are made (more: the free teachers
     not reached); a free teacher whose change breaks or bends a rule is listed as check judges it. A busy teacher is never an option. When no teacher of the
     first three kinds is free the sentence says so: "No one in {department} is free to take {what}." (the step 3 card's department; with none on the card
-    "No one who teaches {subject} is free to take {what}."), then how many from other departments are"""
+    "No one who teaches {subject} is free to take {what}."), then how many outside the department are (with none: how many other teachers are)"""
     sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
     if not rows: return dict(text=NOT_FOUND, title=f"Lesson {i}", lines=[], options=[], more=0, stopped=False)
     ch = fixes.choices(m, spec, days, i, sub["group"], pool); row = next(x for x in rows if x["group"] == ch["group"]); key = fixes._row_key(row); ks = ch["key"]
@@ -179,8 +179,8 @@ def teachers(m, spec, days, pool, sub):
     elif near: text = f"{_plural(len(free), 'teacher is', 'teachers are')} free to take {what}."
     else:
         e = verify.planned_rows(spec).get(key); subject = (e["subject"] if e else row["subject"]).strip(); dept = fixes._on_card(spec, subject)[1]
-        text = (f"No one in {dept} is free to take {what}." if dept else f"No one who teaches {subject} is free to take {what}.") + \
-            f" {_plural(len(free), 'teacher from another department is', 'teachers from other departments are')} free."
+        text = (f"No one in {dept} is free to take {what}. " + _plural(len(free), f"teacher outside {dept} is", f"teachers outside {dept} are") + " free." if dept else
+                f"No one who teaches {subject} is free to take {what}. " + _plural(len(free), "other teacher is", "other teachers are") + " free.")
     return _answer(*P, sub, text, out, len(free) - reached)
 
 def rooms(m, spec, days, pool, sub):

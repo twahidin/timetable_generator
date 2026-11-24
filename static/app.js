@@ -3828,7 +3828,7 @@ async function bdLoad() {   // the board again for the draft the page has; with 
   const gen = ++BD.gen, up = S.draft.upload_id || null, air = b.drag !== null || !!b.wait, other = b.up !== undefined && b.up !== up;   // up: the upload the board is for (undefined: none yet)
   b.sig = bdSig(S.draft); b.up = up;
   if (b.ask || b.del) toast("The timetable changed. Ask again.");
-  if (other) { b.sel = null; b.note = ""; b.about = null; b.place = null; if (air) b.lost = true; }   // lesson ids restart with each upload: the old id may now be another lesson (the Ask tab's too)
+  if (other) { b.sel = null; b.note = ""; b.about = null; b.place = null; if (air) b.lost = true; }   // lesson ids restart with each upload: the old id may now be another lesson (the open page's too)
   b.slots = null; b.slotsFor = null; b.asking = null; b.ask = null; b.del = null; b.failFor = null; b.hv = "";   // the slots belong to the draft they were asked on; their colours go at once
   if (air) { b.changed = true; b.pt = b.lost ? BDWHY.gone : BDWHY.changed; bdOver(null); } else { b.drag = null; b.pt = ""; }
   bdPaint(); if (air) { bdLineDraw(); bdWant(); }   // in the air: the dragged card's slots for the new draft are fetched at once
@@ -4091,7 +4091,7 @@ function bdPopHTML() {   // the pop-out beside where the pointer was last presse
   }
   if (b.ask) {   // a lesson dropped where another is: what collides there (or why it cannot simply go there), then Swap, Put it beside, Put it here anyway, Cancel, as the place allows
     const q = b.ask.q, dis = FX.busy ? " disabled" : "";
-    return `<span>${esc(q.text)}</span>${q.lines.map(l => `<span class="bdcl"><b>${esc(l.kind)}</b> ${esc(l.text)}</span>`).join("")}${q.more ? `<span class="muted small">and ${q.more} more</span>` : ""}${q.why ? `<span class="bdwhy">${esc(q.why)}</span>` : ""}${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.anyway ? `<button data-bdanyway="1"${dis}>${esc(q.anyway)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
+    return `<span>${esc(q.text)}</span>${q.lines.map(l => `<span class="bdcl">${l.kind ? `<b>${esc(l.kind)}</b> ` : ""}${esc(l.text)}</span>`).join("")}${q.more ? `<span class="muted small">and ${q.more} more</span>` : ""}${q.why ? `<span class="bdwhy">${esc(q.why)}</span>` : ""}${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.anyway ? `<button data-bdanyway="1"${dis}>${esc(q.anyway)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
   }
   return "";
 }
@@ -4278,7 +4278,7 @@ function bdAct(c, a, drag, end, hand) {   // a judged place: ask, make the chang
   const b = S.board;
   if (a.act === "fetch") { bdAskPlace(c, a.slot, drag, end, hand); return; }
   if (a.act === "ask") { b.ask = { id: c.id, slot: a.slot, q: Board.question(c, a.slot, b.data), hand: hand || null }; b.del = null; bdLineDraw(); return; }
-  bdTimeThen(c, c.entry ? Board.addFix(c.entry, a.slot, "move") : Board.fix(c, a.slot, "move"), hand);
+  bdTimeThen(c, c.entry ? Board.addFix(c.entry, a.slot) : Board.fix(c, a.slot, "move"), hand);
 }
 function bdTry(c, at, drag, end, hand) { bdAct(c, bdSlotAt(c, at), drag, end, hand); }   // a change of time: a place was clicked or dropped on
 const BD_STOP = {};   // a wait that ended without an answer to go on with (said already, or the step was left)
@@ -4816,7 +4816,7 @@ async function akAsk(q, from) {   // a starter asked about what the tab is about
   if (ok) { if (j.title) e.title = j.title; if (j.stamp) e.stamp = j.stamp; }
   bdSideDraw(); fxReveal(akEntryEl(A.log.indexOf(e)));
 }
-const akPreOff = () => { const A = S.board && S.board.about; if (A) A.pre = null; };   // a new draft: the Ask tab's preview was of the timetable before it
+const akPreOff = () => { const A = S.board && S.board.about; if (A) A.pre = null; };   // a new draft: the page's preview was of the timetable before it
 const akEntryEl = i => $(`#bdSide .akentry[data-akentry="${i}"]`);
 function akHTML(b) {   // the page: what it is about, Lift out and Delete this lesson (or the delete question), the lesson's warnings, a band's groups, the starters, the chosen group's lists, the log, Clear
   const A = b.about, sub = A.sub, d = b.data || {}, c = A.card !== null ? bdCard(A.card) : null, title = akTitle(b), gone = akGone(b, sub), pt = Ask.parts(sub, c), dis = FX.busy ? " disabled" : "";
@@ -4881,7 +4881,7 @@ async function akPreview(id) {   // Preview: what the option would do, under it,
   if (j) pre.got = j; else A.pre = null;
   bdSideDraw(); fxReveal($("#bdSide .akopt .fxpre"));
 }
-function akApply(id) {   // Apply: the option sent with the mark of the timetable it was made for, the selection left as it is; Apply anyway asks first (the Ask tab's question: ak), with the option's sentence and then the problem's
+function akApply(id) {   // Apply: the option sent with the mark of the timetable it was made for, the selection left as it is; Apply anyway asks first (the page's question: ak), with the option's sentence and then the problem's
   const b = S.board, A = b && b.about, e = A && A.log[Number(String(id).split(".")[0])], o = akOption(id); if (!e || !o) return;
   if (akStale(e)) { toast(BDWHY.again); bdSideDraw(); return; }   // the page caught up meanwhile
   const s = Ask.send(o, e.stamp); if (!s) return;
