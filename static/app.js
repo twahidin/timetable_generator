@@ -100,7 +100,9 @@ function takeSpec(spec) {   // a newer copy with others' changes in it: redraw n
   const rows = s => ["lessons", "students", "teachers"].map(k => (s[k] || []).map(r => r._id).join()).join("|");
   if (rows(spec) !== rows(S.spec)) unpick();   // ticks are by row number
   LIST_KEYS.forEach(k => spec[k] = spec[k] || []);
+  const stuMoved = JSON.stringify(spec.students) !== JSON.stringify((S.spec && S.spec.students) || []);   /* another member's save, a restore or a load changed the list */
   S.spec = spec; SYNC.held = null; save({ quiet: true, remote: true }); render();
+  if (stuMoved) stuStale();
 }
 function tryHeld() { if (!SYNC.held || !S.spec || !canRedraw()) return false; takeSpec(working()); return true; }
 function scheduleSync() {   // after a change: send it shortly (changes in quick succession go together)
@@ -229,6 +231,7 @@ async function openServer(srv, step) {
   if (!(isHead() && !S.practice)) VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms (a workbook may hold another): written with the next change. Not on a department head's page: the server refuses a head's change to step 1
   if (step != null) S.step = step;
   ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
+  if (typeof stuStale === "function") stuStale();   /* (a test may lift this function out alone) a whole setup opened (a restore, a workbook, a progress file): the list against the published timetable is asked again */
 }
 /* a whole setup (a blank template, a workbook, a progress file, an earlier copy) goes on the server for the school, then
    the server's copy opens here */
@@ -945,7 +948,8 @@ function render() {
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
   const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
-  const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
+  const same = G.shown === id; if (!same && id === "students") S.stuSaid = null;   /* the "Saved." line belongs to the visit it was said in */
+  const boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const bars = same ? [...main.querySelectorAll("[id]")].filter(e => /^h[vctbw][A-Z]/.test(e.id)).map(e => [e.id, e.value]) : [];   // the boxes of the "Add …" bars (hvPre, hcNames, htDept…): kept as they are
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && focusKey(f);
   document.querySelector(".layout").classList.toggle("wide", id === "edit" || id === "publish");   // the setup's "Things to fix" column is not shown on steps 8 and 9: the timetable takes its width
@@ -1744,7 +1748,7 @@ const VIEWS = {
         <textarea id="stuPaste" rows="5" spellcheck="false" placeholder="Student ID&#9;Name&#9;Class&#9;Groups&#10;S001&#9;Tan Wei Ming&#9;1A&#9;1ELP1, 1MAP1, 1SCP1"></textarea>
         <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (.xlsx or .csv)<input type="file" id="stuFile" accept=".xlsx,.csv,.tsv,.txt" hidden></label><button class="primary" data-stu="replace">Replace the list</button><button data-stu="add">Add to the list</button><span class="muted small" id="stuMsg"></span></div></div></div>
       ${stuStatusHTML()}${stuScreen()}<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">The list</h2>
-        <div class="row"><select id="stuCls">${clsOpts}</select><input id="stuQ" type="search" placeholder="Search ID or name" title="Type, then press Enter" value="${esc(f.q)}" style="width:190px"><span class="muted small">${rows.length === L.length ? `${L.length} students` : `${rows.length} of ${L.length}`}</span>${L.length ? `<button class="small danger" data-stu="clear">Remove all</button>` : ""}</div></div>
+        <div class="row"><button data-stuopen="-1">+ Add student</button><select id="stuCls">${clsOpts}</select><input id="stuQ" type="search" placeholder="Search ID or name" title="Type, then press Enter" value="${esc(f.q)}" style="width:190px"><span class="muted small">${rows.length === L.length ? `${L.length} students` : `${rows.length} of ${L.length}`}</span>${L.length ? `<button class="small danger" data-stu="clear">Remove all</button>` : ""}</div></div>
       ${stuBar()}${L.length ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th><input type="checkbox" data-pickall="students" title="Tick every student shown (${rows.length})" ${all ? "checked" : ""}></th><th></th><th>Student ID</th><th>Name</th><th>Class</th><th>Level</th>${combos.length ? "<th>Combination</th>" : ""}<th>Groups (click to pick)</th><th>Note</th><th></th></tr>
       ${rows.slice(0, MAX).map(([s, i]) => `<tr id="students-${i}" class="${rowCls(out, crit, "students", i)}${P.students.has(i) || (S.stuSaved && stuKey(s) === S.stuSaved) ? " picked" : ""}" title="${esc((out.students[i] || []).join(" "))}"><td><input type="checkbox" data-pick="students.${i}" ${P.students.has(i) ? "checked" : ""}></td><td><button class="small" data-stuopen="${i}" title="Open this student: groups and week">Open</button></td><td>${inp(`spec.students.${i}.id`, s.id, "text", 'style="width:110px"')}</td><td style="min-width:190px">${inp(`spec.students.${i}.name`, s.name)}</td><td style="min-width:88px">${sel(`spec.students.${i}.class`, s.class, classNames())}</td><td class="calc">${esc(clsLevel(s.class) || s.level || "")}</td>${combos.length ? `<td>${sel(`spec.students.${i}.combination`, s.combination, combos)}</td>` : ""}<td style="min-width:260px">${chips(`spec.students.${i}.groups`, s.groups, "groups", `data-cls="${esc(s.class || "")}"`)}</td><td>${inp(`spec.students.${i}.note`, s.note)}</td><td>${delBtn("students", i)}</td></tr>`).join("")}
       </table></div>${rows.length > MAX ? `<p class="muted small">Showing the first ${MAX}. Pick a class or search to see the rest.</p>` : ""}`
@@ -1854,7 +1858,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split(".");
     const no = k === "lessons" && otherRow(S.spec.lessons[Number(i)]) ? OTHER_ROW : k === "blocks" ? bandWhy(S.spec.blocks[Number(i)]) : ""; if (no) { toast(no); return; }   /* a head signed in as a person: as the server rules */ if (k === "students" && !stuDelOk(Number(i))) return;   /* the published timetable loses the student too: asked first */ if (k === "teachers" && TV.open !== null) { if (TV.open === Number(i)) tkOpen(null); else if (TV.open > Number(i) && !TV.openId) TV.open--; } if (k === "venues") { const gone = VenueView.cleanName((S.spec.venues[Number(i)] || {}).room); if (gone && !S.spec.venues.some((v, j) => j !== Number(i) && v && VenueView.cleanName(v.room) === gone)) VenueView.dropRoom(S.spec, gone); }   // it leaves any combined venue made of it
-    S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") { vvOpen(null); VenueView.syncKinds(S.spec); } if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+    S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") { vvOpen(null); VenueView.syncKinds(S.spec); } if (k === "rules") Choices.prune(S.spec); unpick(); save(); if (k === "students") syncNow(); /* sent at once: a second ✕ goes in a save of its own, so each one removes its student */ render(); return; }   // a choice on a deleted rule goes with it
   if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
   if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
   if (b.dataset.cfcancel) { CF.open = false; render(); return; }
@@ -2831,6 +2835,7 @@ function stuFlash(i) {   /* the saved row: in view, and marked for a moment */
 /* ---------------- the Students step's status line: the list against the published timetable, as the server compares
    them (S.pubStu, its last answer); the button that brings them into step; what the last save did there (S.stuSaid) */
 const PUB_KEEPS = " The published timetable keeps its students until you press Update the published timetable.";
+const PUB_REPLACE = " Students on the new list are updated on the published timetable at once. Students missing from it stay there until you press Update the published timetable.";
 const pubHasStudents = () => !S.practice && !!(S.pubStu && S.pubStu.published && S.pubStu.students > 0);
 function stuStatusHTML() {
   if (S.practice) return `<div class="card sv-status" id="stuStatus" tabindex="-1"><p class="muted" style="margin:0">Practice copy: nothing here reaches the published timetable.</p></div>`;
@@ -2865,7 +2870,8 @@ function stuStatusTake(st, seq) {   /* a new status from the server; seq: when i
   stuPubWatch(false); paintPublished();
 }
 async function stuPubFetch() {   /* a failed fetch says nothing and leaves the last status */
-  if (S.practice || S.pubBusy) return;
+  if (S.practice) return;
+  if (S.pubBusy) { S.pubAgain = true; return; }   /* asked again while one is out: once more when it is back */
   S.pubBusy = true; const seq = S.pubSeqN = (S.pubSeqN || 0) + 1;
   let ok = false;
   try {
@@ -2874,7 +2880,12 @@ async function stuPubFetch() {   /* a failed fetch says nothing and leaves the l
     if (r.ok) { const j = await r.json(); ok = true; if (!S.practice) { stuStatusTake(j, seq); stuStatusPaint(); } }
   } catch (e) { }
   finally { S.pubBusy = false; }
+  if (S.pubAgain) { S.pubAgain = false; if (G.shown === "students") { stuPubFetch(); return; } S.pubStu = undefined; }
   if (!ok) { S.pubWait = true; stuPubWatch(false); }   /* silent; tried again in 20 seconds, not at every drawing */
+}
+function stuStale() {   /* the list changed under the page: the status is asked again on the step, and off it is out of date */
+  if (S.practice) return;
+  if (G.shown === "students") stuPubFetch(); else S.pubStu = undefined;
 }
 /* after each drawing of the page and each new status: the first fetch (and one each time the step is opened), and while
    the files are being remade, one more every 20 seconds so the line goes by itself; nothing off the step or in practice */
@@ -2885,20 +2896,28 @@ function stuPubWatch(entered) {
   if (S.pubWait || (S.pubStu && S.pubStu.files_behind)) { if (!S.pubWatchT) S.pubWatchT = setTimeout(() => { S.pubWatchT = null; S.pubWait = false; if (G.shown === "students") stuPubFetch(); }, 20000); }
   else { clearTimeout(S.pubWatchT); S.pubWatchT = null; }
 }
-async function stuUpdate() {   /* Update the published timetable: the whole list into step, after asking with the counts */
-  const p = S.pubStu; if (!p || !p.can_update || S.pubUpd || S.practice) return;
-  const c = p.counts || {}, parts = [];
-  if (c.change) parts.push(`${c.change} student${c.change === 1 ? "" : "s"} change${c.change === 1 ? "s" : ""}.`);
-  if (c.add) parts.push(`${c.add} ${c.add === 1 ? "is" : "are"} added.`);
-  if (c.remove) parts.push(c.remove === 1 ? "1 is on the published timetable but not on this list. This student will be removed from it." : `${c.remove} are on the published timetable but not on this list. They will be removed from it.`);
-  parts.push("Go on?");
-  if (!confirm(parts.join(" "))) return;
-  S.pubUpd = true; stuStatusPaint(); const seq = S.pubSeqN = (S.pubSeqN || 0) + 1;
+async function stuUpdate() {   /* Update the published timetable: the whole list into step, after asking with the counts as they are
+   now (a fresh status first); the counts asked about go with it, and the server refuses when they no longer hold */
+  if (!S.pubStu || !S.pubStu.can_update || S.pubUpd || S.practice) return;
+  S.pubUpd = true; stuStatusPaint();
   try {
-    const r = await fetch("/api/students/update", { method: "POST" });
+    let seq = S.pubSeqN = (S.pubSeqN || 0) + 1, p = null;
+    try { const r0 = await fetch("/api/students/published"); if (r0.status === 401) { location.href = "/login"; return; } if (r0.ok) p = await r0.json(); } catch (e) { }
+    if (!p || typeof p !== "object") { toast("The published timetable could not be updated."); return; }
+    stuStatusTake(p, seq);
+    if (!p.published || !p.can_update) { toast("Nothing to update."); return; }
+    const c = p.counts || {}, n = k => Number(c[k]) || 0, expect = { change: n("change"), add: n("add"), remove: n("remove") }, parts = [];
+    if (expect.change) parts.push(`${expect.change} student${expect.change === 1 ? "" : "s"} change${expect.change === 1 ? "s" : ""}.`);
+    if (expect.add) parts.push(`${expect.add} ${expect.add === 1 ? "is" : "are"} added.`);
+    if (expect.remove) parts.push(expect.remove === 1 ? "1 is on the published timetable but not on this list. This student will be removed from it." : `${expect.remove} are on the published timetable but not on this list. They will be removed from it.`);
+    parts.push("Go on?");
+    stuStatusPaint();
+    if (!confirm(parts.join(" "))) return;
+    seq = S.pubSeqN = (S.pubSeqN || 0) + 1;
+    const r = await fetch("/api/students/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expect }) });
     if (r.status === 401) { location.href = "/login"; return; }
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) toast(j.error || "The published timetable could not be updated.");
+    if (!r.ok) { if (j.status) stuStatusTake(j.status, seq); toast(j.error || "The published timetable could not be updated."); }   /* 409: the numbers changed; the card shows the new ones */
     else { S.stuSaid = null; stuStatusTake(j.status, seq); toast((j.outcome && j.outcome.text) || "Nothing to update."); }   /* what the last save said is out of date now */
   } catch (e) { toast("The published timetable could not be updated."); }
   finally { S.pubUpd = false; stuStatusPaint(true); }
@@ -2910,6 +2929,7 @@ function stuHeard(j, key, seq) {
   if (s && s.status) stuStatusTake(s.status, seq);
   else if (s) stuPubFetch();   /* the save said what it did but not how the list now stands: ask */
   if (s && s.error) toast(s.error);
+  if (o && o.held > 0 && o.text) toast(o.text);   /* students held back: said where it is seen, as well as in the card */
   if (key) {
     const t = o ? stuTrim(o.text) : "", done = o ? [...(o.updated || []), ...(o.added || [])].map(String) : [];
     S.stuSaid = { text: t ? `Saved. ${t}` : "Saved.", pdf: done.includes(key) ? key : null };
@@ -3091,7 +3111,7 @@ function stuApply(mode) {
   const text = $("#stuPaste").value; if (!text.trim()) { toast("Paste the rows, or choose a file, first."); return; }
   const r = readStudents(text); if (r.error) { toast(r.error); return; }
   let updated = 0;
-  if (mode === "replace") { if (L.length && !confirm(`Replace the ${L.length} students on the list with these ${r.students.length}?${pubHasStudents() ? PUB_KEEPS : ""}`)) return; S.spec.students = r.students; }
+  if (mode === "replace") { if (L.length && !confirm(`Replace the ${L.length} students on the list with these ${r.students.length}?${pubHasStudents() ? PUB_REPLACE : ""}`)) return; S.spec.students = r.students; }
   else {
     const at = new Map(L.map((s, i) => [stuKey(s), i]));
     for (const s of r.students) { const k = stuKey(s); if (k && at.has(k)) { L[at.get(k)] = s; updated++; } else L.push(s); }
