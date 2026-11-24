@@ -1034,7 +1034,7 @@ def _ask_every_question():   # Ask about this: every look-up answers on the solv
         for sub in ([dict(kind="place", by=by, name=name, d=d, p=p) for by, name in (("class", c0), ("teacher", x["teachers"][0]), ("room", x["room"] or next(iter(m["room_ix"]))))] if q in ("fill", "free") else [])\
                    + ([dict(kind="lesson", id=x["id"])] if q != "fill" else []):
             r = c.get("/api/draft/about", query_string=dict(q=q, **{k: v for k, v in sub.items()})); j = r.get_json(); assert r.status_code == 200, (q, sub, j)
-            assert (j["text"] or q == "here") and j["title"] and isinstance(j["options"], list) and len(j["options"]) <= lookups.MOST + max(lookups.BUSY, lookups.USED) and j["stamp"] == c.get("/api/draft").get_json()["stamp"], (q, sub, j)
+            assert (j["text"] or q == "here") and j["title"] and isinstance(j["options"], list) and len(j["options"]) <= lookups.MOST + lookups.USED and j["stamp"] == c.get("/api/draft").get_json()["stamp"], (q, sub, j)
             for o in j["options"]:
                 pv = A.draft.preview(o["fixes"]); assert pv["state"] in ("ok", "prefer", "no"), (q, o, pv); asked += 1
     assert asked, "no option was offered by any look-up"
