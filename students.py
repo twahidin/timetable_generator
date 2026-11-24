@@ -240,9 +240,9 @@ def _seats(rooms, capacities):
     """the one room's capacity as a whole number above 0, else None"""
     if len(rooms) != 1: return None
     cap = capacities.get(rooms[0])
-    try: n = int(str(cap).strip())
+    try: x = float(str(cap).strip())
     except (TypeError, ValueError): return None
-    return n if n > 0 else None
+    return int(x) if x > 0 and x == int(x) else None
 
 def skeleton():
     """the published timetable's shape for the student screen: days, periods, each class's whole-class lessons and each

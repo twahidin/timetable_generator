@@ -412,8 +412,6 @@ def the_skeleton_holds_what_the_screen_needs():
     assert k["groups"]["GB1"]["slots"] == [[d2, L1, 1]] and k["groups"]["GX"]["band"] == ""
     assert k["classes"][CA]["whole"] == [[m["days"].index(DAYS[0]), L1, 1, E.abbrev(SUBJ), R1]] and k["classes"][CB]["whole"] == []
     assert len(k["classes"][CA]["codes"]) == len(m["days"])
-    seats = k["groups"]["GA1"]["seats"]; cap = next(r["capacity"] for r in m["rooms"] if r["name"] == R1)
-    assert seats == (int(cap) if str(cap).strip().isdigit() and int(cap) > 0 else None)
     assert NOSE.get("/api/students/skeleton").status_code == 401
 
 @t
@@ -427,6 +425,38 @@ def the_skeleton_is_gzipped_when_asked_and_404_when_nothing_is_published():
     assert r.headers.get("Content-Encoding") == "gzip"
     import gzip
     assert json.loads(gzip.decompress(r.get_data()))["stamp"] == students.stamp(store.published())
+
+def _swap(**over):
+    """the published model replaced by a shallow copy with the given keys changed (the cached model is never changed)"""
+    m = dict(store.published()["model"]); m.update(over)
+    with store._publishing: store.swap_model(m)
+
+def _lessons_with(code, **kw):
+    out = []
+    for L in store.published()["model"]["lessons"]:
+        out.append(dict(L, **kw) if L["group"] == code else L)
+    return out
+
+@t
+def a_changed_lesson_changes_the_stamp():
+    for kw in (dict(room=R2), dict(p=L1 + 1)):
+        fresh(); before = students.stamp(store.published()); at = store.published()["meta"]["published_at"]
+        _swap(lessons=_lessons_with("GA1", **kw))
+        after = students.stamp(store.published())
+        assert after != before and after.startswith(at + "|") and before.startswith(at + "|"), kw
+
+@t
+def seats_read_a_whole_number_in_any_form():
+    def seats(caps, lessons=None):
+        fresh(); m = store.published()["model"]
+        rooms = [dict(r, capacity=caps[r["name"]]) if r["name"] in caps else r for r in m["rooms"]]
+        _swap(rooms=rooms, **(dict(lessons=lessons(m)) if lessons else {}))
+        return c.get("/api/students/skeleton").get_json()["groups"]
+    for cap, want in ((12, 12), (12.0, 12), ("12", 12), ("12.0", 12), (12.5, None), (0, None), ("", None), (None, None), ("abc", None)):
+        assert seats({R1: cap})["GA1"]["seats"] == want, cap
+    assert seats({R1: 20, R2: 30}, lambda m: [dict(L, room=R2) if L["group"] == "GA1" and L is [x for x in m["lessons"] if x["group"] == "GA1"][0] else L for L in m["lessons"]])["GA1"]["seats"] == 30
+    two = lambda m: m["lessons"] + [dict([x for x in m["lessons"] if x["group"] == "GA1"][0], id=99, d=0, room=R2)]
+    assert seats({R1: 20, R2: 30}, two)["GA1"]["seats"] is None
 
 @t
 def the_stamp_ignores_a_student_change_and_status_carries_it():
