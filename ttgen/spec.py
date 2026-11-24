@@ -206,6 +206,28 @@ def filled_lessons(rows):
     named = lambda v: [t for t in v if t is not None and str(t).strip()] if isinstance(v, list) else []
     return [{"level": None, "block": None, "classes": [], **x, "teachers": named(x.get("teachers"))} for x in rows or [] if isinstance(x, dict) and str(x.get("subject") or "").strip()]
 
+def renamed_teachers(spec):
+    """{earlier name: name now} from the teachers' earlier_names (a teacher renamed on step 4 keeps the names the row had
+    before). A name is matched exactly. Left out: a row that is not a dict or has no name; an earlier_names that is not a
+    list; an entry that is not a non-blank string; an earlier name that is a teacher's name now; one two rows claim"""
+    rows = (spec or {}).get("teachers") if isinstance(spec, dict) else None
+    rows = [t for t in (rows if isinstance(rows, list) else []) if isinstance(t, dict) and isinstance(t.get("name"), str) and t["name"].strip()]
+    now = {t["name"] for t in rows}
+    claims = {}
+    for t in rows:
+        e = t.get("earlier_names")
+        for n in e if isinstance(e, list) else ():
+            if isinstance(n, str) and n.strip() and n not in now and t["name"] not in claims.get(n, ()): claims.setdefault(n, []).append(t["name"])
+    return {n: v[0] for n, v in claims.items() if len(v) == 1}
+
+def renamed(names, m):
+    """the names with each earlier name read as the name now (by m from renamed_teachers); a name met twice is kept once, in its first place"""
+    out = []
+    for n in names:
+        v = m.get(n, n) if isinstance(n, str) else n
+        if not (isinstance(v, str) and v in out): out.append(v)
+    return out
+
 def end_rows(school):
     """'Lessons end by (Monday to Thursday)' rows on Settings -> [(label, weekdays, minutes after midnight)]"""
     import re

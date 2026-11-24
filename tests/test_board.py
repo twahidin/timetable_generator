@@ -694,6 +694,47 @@ def test_a_group_with_an_emptied_teacher_box_still_takes_a_timetable():
     finally:
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_a_draft_reads_an_earlier_name_as_the_teachers_name_now():
+    """a teacher renamed on step 4 keeps the old name in the row's earlier_names; a timetable that still names the old teacher is
+    read as naming the new one: no warning that step 5 and the timetable differ, and a change made on step 8 before the rename still applies"""
+    import copy
+    from ttgen import reader, spec as spec_mod
+    f = spec_mod.renamed_teachers
+    rows = [{"name": "Mdm Lee", "earlier_names": ["New Teacher 3", "", None, 7, "Arjun Nair", "Shared"]}, {"name": "Arjun Nair", "earlier_names": "nope"},
+            {"name": "Lim Hui Min", "earlier_names": ["Shared", "Miss Lim"]}, {"name": ""}, None, {"earlier_names": ["Nobody"]}]
+    assert f({"teachers": rows}) == {"New Teacher 3": "Mdm Lee", "Miss Lim": "Lim Hui Min"} and f({}) == {} and f({"teachers": None}) == {}
+    d = copy.deepcopy(SPEC); reader.derive(d)
+    i = next(i for i, x in enumerate(d["lessons"]) if x.get("block") and x.get("teachers") and x.get("periods")); g = d["lessons"][i]; old = g["teachers"][0]
+    ti = next(k for k, t in enumerate(SPEC["teachers"]) if t["name"] == old); other = next(t["name"] for t in SPEC["teachers"] if t["name"] not in g["teachers"])
+    key = f"dep:G:{g['code']}:teachers"
+    file_rows = [dict(id=1, day=DAYS[0], p=0, n=1, level=g["level"], block=g["block"], classes=g["classes"], subject=g["subject"], group=g["code"], teachers=list(g["teachers"]))]
+    upload = lambda rows: c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(rows)), "timetable.xlsx"), replace="1"), content_type="multipart/form-data")
+    def renamed(to, earlier):
+        s = copy.deepcopy(SPEC); s["teachers"][ti]["name"] = to
+        if earlier: s["teachers"][ti]["earlier_names"] = earlier
+        for x in s["lessons"]: x["teachers"] = [to if t == old else t for t in x.get("teachers") or []]
+        return s
+    cards = lambda: [t for card in board()["cards"] for row in card["rows"] for t in row["teachers"]]
+    try:
+        assert upload(file_rows).status_code == 200 and not any(w["key"] == key for w in draft.info()["warnings"])
+        assert c.put("/api/setup", json=dict(spec=renamed("Mdm Lee", [old]), why="a rename")).status_code == 200
+        j = draft.info(); assert not any(w["key"] == key for w in j["warnings"]), [w["text"] for w in j["warnings"] if w["key"] == key]
+        assert "Mdm Lee" in cards() and old not in cards()
+        assert c.put("/api/setup", json=dict(spec=renamed("Mdm Lee", None), why="no earlier name")).status_code == 200   # without the field the old reading stands
+        assert any(w["key"] == key for w in draft.info()["warnings"]) and old in cards()
+        # a change made on step 8 before the rename names the old teacher, and is replayed after it
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200
+        file_rows[0]["teachers"] = [other]; assert upload(file_rows).status_code == 200
+        draft.fix(dict(kind="teacher", key=f"G:{g['code']}", teachers=[old]))
+        assert c.put("/api/setup", json=dict(spec=renamed("Mdm Lee", [old]), why="a rename")).status_code == 200
+        j = draft.info(); assert not j["fix_problems"], j["fix_problems"]
+        assert "Mdm Lee" in cards() and old not in cards() and other not in cards()
+        s = renamed("Mdm Lee", [old]); s["teachers"].append(dict(name=old, short=old, dept=SPEC["teachers"][ti].get("dept"), _id="zz11zz11zz"))   # the old name is a teacher again: never mapped
+        assert c.put("/api/setup", json=dict(spec=s, why="the name is in use")).status_code == 200
+        assert old in cards()
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     import re
     fresh()
