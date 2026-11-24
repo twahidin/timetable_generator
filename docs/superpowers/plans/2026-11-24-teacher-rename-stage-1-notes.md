@@ -22,9 +22,12 @@ For whoever builds stages 2 and 3 (the account, reliefs and exam duties follow t
 - `settle` does not run from `save()` on a head's page.
 - History stores the field as the key `earlier_names`; only the page's word differs.
 - Toasts now stay longer when long, for every toast, not only this one.
-- Minor, left as is: `uses` matches a name exactly as stored, spaces included; the handler and `rename()` each clean the new name (two copies of one rule); `fixes.apply` works the rename map out again.
+- Minor, left as is: `uses` matches a name exactly as stored, spaces included; `fixes.apply` works the rename map out again. (The new name is cleaned in one place, `TeacherView.cleanName`, used by the handler and `rename()`.)
 - The workbook's own extra sheets (sheets a school adds to its setup workbook, which the app keeps and writes back) are never rewritten, so a teacher's old name stays there.
 - Not built: the account (role, committees, username, password, Telegram link), reliefs and exam duties still stay under the old name; the new name needs a new code slip.
+- History's Put back of a rename does not carry groups given to the new name after the rename: they are left with the new name, marked "(not on list)", for a person to pick again.
+- Step 8's line "Made from configuration vN; the setup is now vM. Changes since then are not in this timetable." appears after a rename as after any save, although the rename itself is read in.
+- A change made on step 8 after a rename, followed by Undo of the rename on step 4, is listed under the changes that could not be applied ("… is not on the setup's list of teachers"), until the rename is redone or the change is undone.
 
 ## Checked in a browser
 
@@ -45,5 +48,5 @@ By the controller, with real clicks and typing, on a scratch copy of the seconda
 
 ## Not checked
 
-- A head signed in as a person with departments (only the shared heads code was tried).
+- A head signed in as a person with their own departments was not tried in a browser (the shared heads code was).
 - A narrow window; dark mode.
