@@ -591,6 +591,19 @@ def a_head_sees_step_3_changes_to_their_subjects():
     assert "Since you last signed in" in html and "2 changes by 1 person" in html and f"{CORA} · Step 3 · Subjects" in html, html
 
 @t
+def a_rename_goes_back_whole():
+    """a rename on step 4 is one save: the name, earlier_names and the lessons' teachers; putting it back restores all three"""
+    sp = start(); T = sp["teachers"][0]; old = T["name"]
+    i = next(k for k, r in enumerate(sp["lessons"]) if old in (r.get("teachers") or [])); L = sp["lessons"][i]; was = list(L["teachers"])
+    c = as_person(CORA)
+    change(c, ["set", "teachers", T["_id"], "name", "Mdm Lee"], ["set", "teachers", T["_id"], "earlier_names", [old]],
+           ["set", "lessons", L["_id"], "teachers", ["Mdm Lee" if x == old else x for x in was]])
+    es = entries(); assert len(es) == 3 and field("teachers", 0, "earlier_names") == [old], es
+    assert back(as_person(DEV), es[1]["id"])[0] == 200
+    row = store.setup_record()["spec"]["teachers"][0]
+    assert row["name"] == old and "earlier_names" not in row and field("lessons", i, "teachers") == was, row
+
+@t
 def teacher_cannot_post():
     start()
     r = as_person(TEA, "code").post("/api/history/back", json={"id": "x"}); assert r.status_code == 401, r.status_code

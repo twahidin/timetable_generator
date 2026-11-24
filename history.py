@@ -26,6 +26,8 @@ WHERE = {"venues": "Step 1 · Venues", "classes": "Step 2 · Classes", "subjects
 _SCHOOL_DAY = "School & day"
 _NAME_FIELD = {"venues": "room", "classes": "class", "subjects": "subject", "teachers": "name", "blocks": "block",
                "roles": "role", "students": "name"}
+_FIELD_WORDS = {"earlier_names": "Earlier names"}   # a field whose key is not a word on the page
+def _word(field): return _FIELD_WORDS.get(field, field) if isinstance(field, str) else field
 SCHOOL_TZ = datetime.timezone(datetime.timedelta(hours=8))   # school time, whatever the server's clock zone
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 _DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -376,9 +378,9 @@ def _row_entry(work, op):
         else:
             e["now"] = copy.deepcopy(r.get(field)) if r else None
             if name == "set":
-                e["text"] = _cut(f"{lab}: {field} {_show(e['was'])} → {_show(e['now'])}")
+                e["text"] = _cut(f"{lab}: {_word(field)} {_show(e['was'])} → {_show(e['now'])}")
             else:
-                e["text"] = _cut(f"{lab}: {field} + {_show(op[4])} − {_show(op[5])}")
+                e["text"] = _cut(f"{lab}: {_word(field)} + {_show(op[4])} − {_show(op[5])}")
     return dict(section=section, row=rid, field=field, was=copy.deepcopy(was), where=WHERE.get(section, "Setup"), **extra), finish
 
 
@@ -452,9 +454,9 @@ def refused_about(spec, op):
             elif name == "del":
                 text = f"Delete {lab}"
             elif name == "set":
-                text = f"{lab}: {op[3]} → {_show(op[4])}"
+                text = f"{lab}: {_word(op[3])} → {_show(op[4])}"
             else:
-                text = f"{lab}: {op[3]} + {_show(op[4])} − {_show(op[5])}"
+                text = f"{lab}: {_word(op[3])} + {_show(op[4])} − {_show(op[5])}"
             return dict(label=lab, depts=depts, text=_cut("Refused: " + text), where=WHERE.get(section, "Setup"))
         if name in ("school", "day", "top"):
             e, _ = _plain_entry(spec, op)

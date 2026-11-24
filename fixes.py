@@ -181,7 +181,13 @@ def apply(lessons, fixes, spec, days):
     add's id depends only on its place among the adds, so a later fix made for "the second add" still finds it."""
     L, texts, problems, touched, was, pool = copy.deepcopy(lessons), [], [], set(), [], []
     nxt = 1 + max([x["id"] for x in L], default=0)
+    names_now = spec_mod.renamed_teachers(spec)
     for f in fixes:
+        if names_now and isinstance(f, dict):   # a fix made before a teacher was renamed on step 4 names them by an earlier name
+            f = dict(f)
+            if isinstance(f.get("teachers"), list): f["teachers"] = spec_mod.renamed(f["teachers"], names_now)
+            for k in ("x", "y"):
+                if f.get("kind") == "trade" and isinstance(f.get(k), str): f[k] = names_now.get(f[k], f[k])
         try: texts.append(apply_one(L, f, spec, days, new_id=nxt, touched=touched, was=was, pool=pool))
         except Exception as e: problems.append(f"A fix could not be applied: {e if isinstance(e, ValueError) else 'it is not complete.'}")
         if isinstance(f, dict) and f.get("kind") == "add": nxt += 1

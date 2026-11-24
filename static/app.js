@@ -25,7 +25,9 @@ const DROPPED = "The committee replaced the school's setup, so the changes you h
 function save(o) {
   // ids first, then the Class Parents rule (a lesson it makes takes its id from its class and subject); hand: only a person's own edit may mark "Changed by hand"
   // a head cannot change these lessons: running the rule on a head's page would make a missing lesson the server then refuses, reported to the head as a change they never made
-  if (S.spec) { Sync.ensureIds(S.spec); if (!(isHead() && !S.practice)) Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); }
+  // earlier_names put right (a teacher added by any path takes their name off every earlier_names), in the same save and Undo entry; save() does not run it on a head's page, where it would change other departments' teacher rows
+  // TeacherView.rename still settles: a head's rename touches another row's earlier_names only when that row already lists the old or new name; the server refuses that operation and nothing else is lost
+  if (S.spec) { Sync.ensureIds(S.spec); if (!(isHead() && !S.practice)) { TeacherView.settle(S.spec); Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); } }
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
     if (S.snap && js && !(o && o.quiet)) {   // an entry holds the operations that take back (and bring again) this change
@@ -389,7 +391,8 @@ async function oldChoice(k) {
   S.asking = null; render();
   toast({ file: "Saved to a file. They are no longer kept in this browser.", use: "They are the school's setup now.", discard: "Discarded." }[k]);
 }
-function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, 3200); }
+function toastMs(m) { return Math.min(12000, 3200 + 45 * Math.max(0, String(m == null ? "" : m).length - 60)); }   // a long toast stays longer: 3.2 s up to 60 characters, 45 ms more for each one beyond, at most 12 s
+function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, toastMs(m)); }
 
 /* ---------------- lists */
 const sc = () => S.spec.school;
@@ -2025,7 +2028,17 @@ document.addEventListener("change", async e => {
   if (/^spec\.choices\.\d+\.second$/.test(path) && v === null) v = "no limit";   // a number setting's second choice left blank
   const vrn = /^spec\.venues\.(\d+)\.room$/.exec(path), vwas = vrn ? (S.spec.venues[Number(vrn[1])] || {}).room : null;
   if (vrn && v !== null) v = VenueView.cleanName(v) || null;   // a room's name: runs of spaces made one, the ends trimmed
-  setPath(path, v);
+  const tkn = /^spec\.teachers\.(\d+)\.name$/.exec(path), tkt = tkn ? S.spec.teachers[Number(tkn[1])] : null;
+  let tkr = null;   // a teacher's new name (either name box: the open card or the Table view): it carries to their groups, form-teacher places and Teacher rules
+  if (tkn && v !== null) v = TeacherView.cleanName(v) || null;   // a teacher's name: runs of spaces made one, the ends trimmed (a blank one is an emptied box)
+  if (tkt && typeof tkt.name === "string" && tkt.name.trim() !== "" && v !== null) {
+    if (tkHead() && v !== tkt.name) { const why = TeacherView.blocked(S.spec, tkt.name, otherRow, cpBlock); if (why) { toast(why); render(); return; } }   // nothing saved; the box goes back
+    tkr = TeacherView.rename(S.spec, Number(tkn[1]), v);
+    if (tkr && tkr.error) { toast(tkr.error); render(); return; }   // another teacher's name: nothing saved, the box goes back
+    if (tkr && tkr.same) { render(); return; }   // the stored name with stray spaces: nothing saved, the box goes back to it
+  }
+  if (!tkr) setPath(path, v);   // a rename has set the name itself
+  if (tkr) toast(TeacherView.renameText(tkr));
   if (vrn && v && VenueView.cleanName(vwas)) VenueView.renameRoom(S.spec, vwas, v);   // a combined venue made of it follows the new name, in the same save
   if (/^spec\.venues\.\d+\.(kind|room)$/.test(path)) VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms
   if (tkp && !tkHead() && S.spec.teachers[Number(tkp[1])]) TeacherView.tidy(S.spec.teachers[Number(tkp[1])]);   // a home department now equal to the second takes the second off, in the same save
@@ -2042,7 +2055,7 @@ document.addEventListener("change", async e => {
   save(); render(); poll();
   if (/^spec\.venues\.\d+\.(building|floor)$/.test(path) && VV.view === "blocks" && VV.open !== null) { const o = document.getElementById(`venues-${VV.open}`); if (o) o.scrollIntoView({ block: "nearest" }); }   // the room moved to its new place and stays open
 });
-function renameRefs() { /* references are by name; renaming leaves old names flagged as "(not on list)" for the user to fix */ }
+function renameRefs() { /* references are by name; renaming a room, class, subject or band leaves old names flagged as "(not on list)" for the user to fix. A teacher's new name is carried before this (TeacherView.rename in the change handler) */ }
 
 /* ---------------- rows and helpers */
 const periodAt = t => Math.min(Number(sc().periods_per_day) - 1, Math.max(0, Math.ceil((mins(t) - mins(sc().start_time)) / Number(sc().period_minutes || 20))));   // the first period that starts at or after t

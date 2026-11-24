@@ -172,6 +172,7 @@
     if (e.kind === "account" && S.admin && Array.isArray(e.people) && e.people.length) return ["/admin", "Open the admin page"];
     return null;
   }
+  const FIELD_WORDS = { earlier_names: "Earlier names" };   // a field whose key is not a word on the page
   function body(e) {
     const where = e.where ? h("span", { class: "where", text: String(e.where) }) : null;
     const text = typeof e.text === "string" ? e.text : "";
@@ -181,7 +182,7 @@
     }
     const field = ["set", "school", "day", "top"].includes(e.op) && e.kind !== "account" && "was" in e && "now" in e;
     if (e.kind === "setup" && field) {
-      return [where, h("span", { text: `${plain(e.label)}${e.field && !String(e.label || "").endsWith(String(e.field)) ? ": " + e.field : ""}: ` }),
+      return [where, h("span", { text: `${plain(e.label)}${e.field && !String(e.label || "").endsWith(String(e.field)) ? ": " + (Object.prototype.hasOwnProperty.call(FIELD_WORDS, e.field) ? FIELD_WORDS[e.field] : e.field) : ""}: ` }),
         shown(e.was, "was"), " → ", shown(e.now, "now")];
     }
     return [where, h("span", { text })];
