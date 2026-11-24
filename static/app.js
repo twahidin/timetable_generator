@@ -25,7 +25,8 @@ const DROPPED = "The committee replaced the school's setup, so the changes you h
 function save(o) {
   // ids first, then the Class Parents rule (a lesson it makes takes its id from its class and subject); hand: only a person's own edit may mark "Changed by hand"
   // a head cannot change these lessons: running the rule on a head's page would make a missing lesson the server then refuses, reported to the head as a change they never made
-  // earlier_names put right (a teacher added by any path takes their name off every earlier_names), in the same save and Undo entry; not on a head's page, where it would change other departments' teacher rows
+  // earlier_names put right (a teacher added by any path takes their name off every earlier_names), in the same save and Undo entry; save() does not run it on a head's page, where it would change other departments' teacher rows
+  // TeacherView.rename still settles: a head's rename touches another row's earlier_names only when that row already lists the old or new name; the server refuses that operation and nothing else is lost
   if (S.spec) { Sync.ensureIds(S.spec); if (!(isHead() && !S.practice)) { TeacherView.settle(S.spec); Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); } }
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
@@ -390,7 +391,8 @@ async function oldChoice(k) {
   S.asking = null; render();
   toast({ file: "Saved to a file. They are no longer kept in this browser.", use: "They are the school's setup now.", discard: "Discarded." }[k]);
 }
-function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, 3200); }
+function toastMs(m) { return Math.min(12000, 3200 + 45 * Math.max(0, String(m == null ? "" : m).length - 60)); }   // a long toast stays longer: 3.2 s up to 60 characters, 45 ms more for each one beyond, at most 12 s
+function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, toastMs(m)); }
 
 /* ---------------- lists */
 const sc = () => S.spec.school;
