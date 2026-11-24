@@ -201,17 +201,19 @@ is not on step 3, and a named subject the class has only in groups.
    clash or a broken rule), blue has another lesson there and asks, grey cannot take it (a break, outside the day).
    A lesson dropped where it clashes lands there and is marked on its card, and the counters above the board (Not placed,
    No teacher, In two places, In a break, No room) count what is wrong; a click on one steps through its lessons. A drop
-   on another lesson asks first: swap with it, put it beside it (when both can be there), or push it out; pushing out a band
-   names the band and says which other classes lose it too. Held over another
+   on another lesson asks first and lists every collision at that place (a teacher, a class, shared students, a room), at most 8 and then "and n more".
+   It offers to swap with the lesson, to put the dropped one beside it (when nothing collides), or **Put it here anyway**, which leaves both lessons
+   there and shows the collisions as critical mistakes until fixed. It never pushes the other lesson out: to clear a place, lift that lesson out. A place
+   where the classes are free but a teacher or room collides is still dropped at once, with its first problem said. Held over another
    day's tab for half a second, a dragged lesson goes to that day. **Lift out** (or Ctrl or Cmd+X) takes a lesson off the
-   board, and a pushed-out lesson goes the same way: both wait in **Not placed**, a tab of the panel beside the board, until they
+   board: it waits in **Not placed**, a tab of the panel beside the board, until they
    are dragged or pasted (Ctrl or Cmd+V, where the pointer is) back onto their row, deleted, or undone. **Delete this
    lesson** asks first and says why when it should not go (step 5 asks for the lesson, or the rule it breaks); the tray's **Step 5 asks for these** lists the lessons
    step 5 plans that the timetable lacks, to drag onto a free place. Nothing is published, printed or downloaded while a
    lesson waits in Not placed: step 9 says how many and sends you back here. The panel beside the board (under it on a
-   narrow window) has three tabs: **Not placed**, **Warnings** and **Changes**; it is as tall as the board and scrolls on
+   narrow window) has three tabs: **Not placed**, **Warnings** and **Changes**, and a fourth while the board is about something (below); it is as tall as the board and scrolls on
    its own, and a lesson dragged from the board onto any of its tabs is lifted out. A lesson with a warning is marked on
-   the board (its mark, or "1 warning"), the selected lesson's **Lesson** tab lists its warnings, and **Show me** on a warning
+   the board (its mark, or "1 warning"), the **Lesson** tab lists the lesson's warnings, and **Show me** on a warning
    goes to its lesson (or its class's whole cycle) and flashes it. **Changes** lists the changes made in the app, newest
    first, with **Undo the last timetable change**. The warnings are listed by
    kind and then by class, teacher or group, with the timetable's side and step 5's side. For each one, **Update step
@@ -220,10 +222,15 @@ is not on step 3, and a named subject the class has only in groups.
    settled on step 5. A **critical mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room
    used by more lessons than it takes, or a lesson in a break or outside the day; each shows its kind in words before
    its sentence, and every one is listed. Everything else is a warning and never stops publishing. Two bands, or two
-   groups, of one class at the same time are not a clash. A lesson clicked on the board opens a fourth tab, **Lesson**:
-   its teachers and its room, each chosen from a list with **None** (no teacher is a critical mistake, no room a
+   groups, of one class at the same time are not a clash. A click on the board opens no pop-out. A lesson clicked (or right-clicked) puts everything about it on one tab,
+   **Lesson**; an empty period does the same on a tab named **Empty period**. The tab stays about the last thing pointed at, so its
+   answers are still there after Esc lets go of the lesson. The **Lesson** tab has **Lift out** and **Delete this lesson**, the lesson's warnings,
+   a band's groups as chips (one group at a time), the starter questions with their answers, and its teachers and its room, each chosen from a list with **None** (no teacher is a critical mistake, no room a
    warning), free ones first; a change of teacher is for all that class's or group's lessons of the subject (the tab
-   says how many), a change of room for that lesson or, ticked, all the group's lessons; a band has a block per group.
+   says how many), a change of room for that lesson or, ticked, all the group's lessons. **Who else could teach it?** lists only teachers who
+   are free at every lesson of the group, the subject's department first; when no one near is free it says so, then how many others are.
+   **Who could I trade this class with?** tries teachers of the subject, then its department, and reads **Direct swap**, **Direct swap, bends a rule**
+   or **Not a direct swap** with the reason.
    On the Teachers or Rooms rows a lesson dropped on another teacher's or room's row is handed to them, after a
    question. A teacher or room busy then is given only when you say so, and both lessons are marked. **Show me** on a
    teacher in two places opens the Teachers rows on that day with that teacher's lessons marked. On a warning about a

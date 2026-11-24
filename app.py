@@ -996,7 +996,7 @@ def draft_slots():
 @app.get("/api/draft/place")
 @need("committee")
 def draft_place():
-    """one place a lesson may be dropped on, judged with a push out and a place beside (nothing is changed)"""
+    """one place a lesson may be dropped on, judged with a place beside, and the collisions there listed (nothing is changed)"""
     if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
     try: d, p = int(request.args.get("d")), int(request.args.get("p"))
     except (TypeError, ValueError): return {"error": "Say which place."}, 400

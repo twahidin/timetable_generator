@@ -500,7 +500,7 @@ def slots(lesson_id):
     return dict(id=lid, slots=fixes.slots(m, spec, days, lid, fx["pool"], extras="who", ctx=c), delete=fixes.can_delete(m, spec, days, lid, pool=fx["pool"], ctx=c))
 
 def place(lesson_id, d, p):
-    """one place the lesson may be dropped on, judged with a push out and a place beside where other lessons of its classes are: fixes.place -> dict(d, p, state, why, swap, also, push, beside)"""
+    """one place the lesson may be dropped on, judged with a push out and a place beside where other lessons of its classes are: fixes.place -> dict(d, p, state, why, swap, also, push, beside, clashes)"""
     m, rec, fx = _now()
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError(NOT_FOUND_LESSON)

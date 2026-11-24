@@ -9,7 +9,6 @@ QUESTIONS = ("here", "swaps", "moves", "teachers", "trades", "rooms", "fill", "f
 TRADES = 40             # trades judged for one lesson before it stops and says so
 BUDGET = 0.35           # seconds the trades of one lesson may take before it stops and says so (one is always checked)
 MOST = 8                # options an answer holds before it counts the rest in more
-BUSY = 4                # busy teachers added after the free ones
 USED = 4                # rooms in use added after the free ones
 NOT_FOUND = "There is no lesson with that id on the timetable."
 POINT = "Point at a lesson for this."
@@ -150,7 +149,12 @@ def _held(m, pool, key):
 
 def teachers(m, spec, days, pool, sub):
     """who could take the lesson's row (sub["group"], default the first) in place of sub["teacher"] (else its first teacher; none: added) -> answer.
-    The free teachers in fixes.choices' order, judged through check until MOST options are made (more: the free teachers not reached), then up to BUSY busy ones"""
+    Only the free teachers (fixes.choices' free: on no other lesson at any lesson of the row's key), in fixes.choices' order (step 5's teachers of the key,
+    teachers on the subject or its step 3 card, the subject's department, anyone), judged through check until MOST options are made (more: the free teachers
+    not reached); among the options made, one whose change breaks a rule (state "no") comes after all the others (a stable sort: "prefer" keeps its place,
+    the cut at MOST and more are unchanged). A busy teacher is never an option. When no teacher of the
+    first three kinds is free the sentence says so: "No one in {department} is free to take {what}." (the step 3 card's department; with none on the card
+    "No one who teaches {subject} is free to take {what}."), then how many outside the department are (with none: how many other teachers are)"""
     sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
     if not rows: return dict(text=NOT_FOUND, title=f"Lesson {i}", lines=[], options=[], more=0, stopped=False)
     ch = fixes.choices(m, spec, days, i, sub["group"], pool); row = next(x for x in rows if x["group"] == ch["group"]); key = fixes._row_key(row); ks = ch["key"]
@@ -163,17 +167,22 @@ def teachers(m, spec, days, pool, sub):
         said = " ".join(([f"{name} is in {' and '.join(depts)}."] if depts else []) + ([f"Allowance {cap:g} periods."] if cap is not None else []))
         extra = [said] if said else []   # the periods before and after are the disturbs' own line
         if ch["n_lessons"] > 1: extra.append(f"It changes all {ch['n_lessons']} lessons of {fixes.what(row)}.")
-        if not t["free"]: extra.append(f"{name} is teaching {t['doing']}.")
         o = check(*P, [dict(kind="teacher", key=ks, teachers=[name if x == had[0] else x for x in row["teachers"]] if had else [name])], ctx, extra)
         return None if o is None else dict(o, who=who)
-    free = [t for t in ch["teachers"] if t["free"] and t["name"] not in row["teachers"]]; busy = [t for t in ch["teachers"] if not t["free"] and t["name"] not in row["teachers"]][:BUSY]
+    free = [t for t in ch["teachers"] if t["free"] and t["name"] not in row["teachers"]]; near = [t for t in free if t["rank"] <= 2]
     out, reached = [], 0
     for t in free:
         if len(out) >= MOST: break
         reached += 1
         if o := one(t): out.append(o)
-    out += [o for o in map(one, busy) if o]
-    text = f"{_plural(len(free), 'teacher is', 'teachers are')} free to take {fixes.what(row)}." if free else f"No other teacher is free to take {fixes.what(row)}."
+    out.sort(key=lambda o: o["state"] == "no")   # stable: a teacher whose change breaks a rule after the others shown, the order kept otherwise
+    what = fixes.what(row)
+    if not free: text = f"No other teacher is free to take {what}."
+    elif near: text = f"{_plural(len(free), 'teacher is', 'teachers are')} free to take {what}."
+    else:
+        e = verify.planned_rows(spec).get(key); subject = (e["subject"] if e else row["subject"]).strip(); dept = fixes._on_card(spec, subject)[1]
+        text = (f"No one in {dept} is free to take {what}. " + _plural(len(free), f"teacher outside {dept} is", f"teachers outside {dept} are") + " free." if dept else
+                f"No one who teaches {subject} is free to take {what}. " + _plural(len(free), "other teacher is", "other teachers are") + " free.")
     return _answer(*P, sub, text, out, len(free) - reached)
 
 def rooms(m, spec, days, pool, sub):
@@ -202,7 +211,9 @@ def trades(m, spec, days, pool, sub, other=None):
     another subject of its step 3 card, then teachers whose departments include the subject's, with B a key of Y of the subject or the card; other: that teacher
     alone, with every key of theirs. Each is first tested on the busy index (_clash: a teacher clash is a "no" without a judgement), else judged by fixes.judge
     alone; ok and prefer are options (apply yes), then the no's (apply none), at most MOST, and only those shown go through check. It stops (stopped) before a
-    judgement past TRADES, or once BUDGET seconds have gone with at least one checked; the sentence then says how many were checked, judged or tested"""
+    judgement past TRADES, or once BUDGET seconds have gone with at least one checked; the sentence then says how many were checked, judged or tested.
+    The sentence counts direct swaps (judged ok or prefer): "{n} direct swaps are possible for {X}." (and how many more would land with a problem), "No direct
+    swap is possible for {X}. {k} would land with a problem.", or "No trade of this lesson can be made." when there is none to judge"""
     t0 = time.perf_counter(); sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
     if not rows: return dict(text=NOT_FOUND, title=f"Lesson {i}", lines=[], options=[], more=0, stopped=False)
     if other is not None and other not in m["teacher_ix"]: raise ValueError(f"There is no teacher called {other}.")
@@ -240,8 +251,8 @@ def trades(m, spec, days, pool, sub, other=None):
         k = lambda rs, t: len({r["id"] for r in rs if t in r["teachers"]}); na, nb = k(ra, x_), k(rb, f["y"])
         return check(*P, [f], ctx, [f"It changes {na} {'lesson' if na == 1 else 'lessons'} of {name_a} and {nb} of {verify._name(kb)}."], j)
     out = [o for o in (shown(*g) for g in (good + bad)[:MOST]) if o is not None]; n = judged + tested
-    text = f"{_plural(len(good), 'trade is', 'trades are')} possible for {x_}." + (f" {len(bad)} more would land with a problem." if bad else "") if good else \
-        f"No trade of this lesson is clean. {len(bad)} would land with a problem." if bad else "No trade of this lesson can be made."
+    text = f"{_plural(len(good), 'direct swap is', 'direct swaps are')} possible for {x_}." + (f" {len(bad)} more would land with a problem." if bad else "") if good else \
+        f"No direct swap is possible for {x_}. {len(bad)} would land with a problem." if bad else "No trade of this lesson can be made."
     tail = "" if not stopped else " Only the first possible trade was checked." if n == 1 else f" Only the first {n} possible trades were checked."
     return dict(_answer(*P, sub, text + tail, out, len(good) + len(bad) - len(out)), stopped=stopped)
 

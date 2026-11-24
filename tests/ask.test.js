@@ -79,6 +79,14 @@ t("verdict: the three states", () => {
   assert.deepStrictEqual(Ask.verdict({ state: "no" }), { text: "Lands with a problem", cls: "no" });
 });
 
+t("verdict: a trade is a direct swap or not", () => {
+  const tr = st => ({ state: st, fixes: [{ kind: "trade", a: "k1", b: "k2", x: "Mr Tan", y: "Ms Lee" }] });
+  assert.deepStrictEqual(Ask.verdict(tr("ok")), { text: "Direct swap", cls: "ok" });
+  assert.deepStrictEqual(Ask.verdict(tr("prefer")), { text: "Direct swap, bends a rule", cls: "prefer" });
+  assert.deepStrictEqual(Ask.verdict(tr("no")), { text: "Not a direct swap", cls: "no" });
+  assert.deepStrictEqual(Ask.verdict({ state: "ok", fixes: [{ kind: "teacher" }] }), { text: "Clean", cls: "ok" });
+});
+
 t("send: one fix, two fixes, anyway and none", () => {
   const fix = { kind: "move", id: 7, d: 1, p: 2 }, o = { fixes: [fix], text: "x", disturbs: [], state: "ok", why: "", apply: "yes" };
   assert.deepStrictEqual(Ask.send(o, "s1"), { url: "/api/draft/fix", body: { kind: "move", id: 7, d: 1, p: 2, stamp: "s1" } });
@@ -105,6 +113,29 @@ t("target: the lesson Show on the board goes to", () => {
   assert.strictEqual(Ask.target(o({ kind: "add", key: "k", d: 0, p: 0, n: 1, room: "" })), null);
   assert.strictEqual(Ask.target(o({ kind: "trade", a: 1, b: 2, x: 3, y: 4 })), null);
   assert.strictEqual(Ask.target({ fixes: [] }), null);
+});
+
+t("tabLabel: a lesson's page and an empty period's", () => {
+  assert.strictEqual(Ask.tabLabel({ kind: "lesson", id: 3 }), "Lesson");
+  assert.strictEqual(Ask.tabLabel({ kind: "place", by: "class", name: "1A", d: 0, p: 2 }), "Empty period");
+});
+t("parts: what the page holds", () => {
+  const rows = [{ group: "G1", subject: "Science" }, { group: "G2", subject: "Science" }];
+  const on = { id: 3, d: 0, p: 2, n: 1, rows }, tray = { id: 4, d: null, p: null, n: 1, rows };
+  assert.deepStrictEqual(Ask.parts({ kind: "lesson", id: 3, group: null }, on), { lift: true, del: true, lists: true, group: "G1" });
+  assert.deepStrictEqual(Ask.parts({ kind: "lesson", id: 3, group: "G2" }, on), { lift: true, del: true, lists: true, group: "G2" });
+  assert.deepStrictEqual(Ask.parts({ kind: "lesson", id: 4, group: null }, tray), { lift: false, del: true, lists: true, group: "G1" });
+  const none = { lift: false, del: false, lists: false, group: null };
+  assert.deepStrictEqual(Ask.parts({ kind: "lesson", id: 9, group: null }, null), none);   // deleted meanwhile
+  assert.deepStrictEqual(Ask.parts({ kind: "place", by: "class", name: "1A", d: 0, p: 2 }, null), none);
+  assert.deepStrictEqual(Ask.parts({ kind: "lesson", id: "a:k" }, { id: "a:k", d: null, p: null, rows: [], entry: {} }), none);
+});
+t("where: the line under a lesson's name", () => {
+  assert.strictEqual(Ask.where({ d: 0, p: 20, band: "" }, "Mon", "2.20", ""), "Mon period 20 (2.20)");
+  assert.strictEqual(Ask.where({ d: 0, p: 20, band: "B", rows: [1, 2, 3, 4, 5] }, "Mon", "", ""), "Mon period 20 · 5 groups");
+  assert.strictEqual(Ask.where({ d: 0, p: 3, band: "B", rows: [1] }, "Mon", "", ""), "Mon period 3 · 1 group");
+  assert.strictEqual(Ask.where({ d: null, p: null, band: "" }, "", "", "was Tue period 4"), "Not placed (was Tue period 4)");
+  assert.strictEqual(Ask.where({ d: null, p: null, band: "" }, "", "", ""), "Not placed");
 });
 
 console.log(`${n} cases passed`);
