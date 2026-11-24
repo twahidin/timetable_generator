@@ -74,6 +74,12 @@ Each was made where the design or the plan was silent or wrong. What it costs if
 18. Builders signed commits with the model that wrote the code. The first two commits (2881d9e, f2a93e8) were
     written by an Opus builder and carry a Fable line on my instruction, before I corrected the rule.
 
+Smaller ones, for completeness: the test suite restores a snapshot of one real publish instead of publishing for
+every test (speed; the equality test still publishes for real). A group's teacher and room on the screen are its
+teachers and rooms joined by commas. Whether a band is Exempt lives in the screen's picks, not in a separate map.
+The time comparison in the files job could miss a change in the same minute, hence ruling 7. Three things the
+whole-branch reviewer set aside as older than this work are listed at the end and were left alone.
+
 ## Known limits
 
 - There is no way to hold student changes back from the live timetable. Groups for a coming semester are not to be
