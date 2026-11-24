@@ -654,7 +654,6 @@ table.sv-grid td.clash small{display:none}
 .sv-key i{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid var(--line)}
 .sv-key i.new{background:#dbeafe;border-color:var(--accent)}.sv-key i.gone{background:#f1f3f6}.sv-key i.clash{background:var(--warn-bg);border-color:var(--warn)}
 .sv-foot{flex:none;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
-td.sv-btns{white-space:nowrap}
 @media(max-width:899px){.sv-body{display:block;overflow:auto}.sv-bands,.sv-week{overflow:visible}.sv-week{margin-top:14px;overflow-x:auto}.card.sv-card{padding:12px}}
 /* the Students step's status line: the list against the published timetable */
 .sv-status p{margin:0 0 6px}.sv-status .issue{cursor:default}.sv-status .row{margin-top:6px}
