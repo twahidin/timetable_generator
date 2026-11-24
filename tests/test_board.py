@@ -664,6 +664,36 @@ def test_a_setup_with_rows_not_filled_in_still_takes_a_timetable():
     finally:
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_a_group_with_an_emptied_teacher_box_still_takes_a_timetable():
+    """step 5's Table view keeps a teacher box that was emptied as an empty place in the row's list (["Mdm Lee", null]); the workbook leaves empty
+    cells out. An upload used to fail on such a row of a band ("Could not check the timetable against the setup: '<' not supported between instances
+    of 'str' and 'NoneType'"), and so did everything else on step 8"""
+    import copy
+    from ttgen import reader, spec as spec_mod
+    f = spec_mod.filled_lessons
+    assert [x["teachers"] for x in f([{"subject": SUBJ, "teachers": v} for v in (["A", None], [None, "A"], [None], ["", "A", "  "], None, "A", ["A", "B"])])] \
+        == [["A"], ["A"], [], ["A"], [], [], ["A", "B"]]
+    given = [{"subject": SUBJ, "teachers": ["A", None]}]; f(given); assert given[0]["teachers"] == ["A", None]   # the setup it was given is not changed
+    d = copy.deepcopy(SPEC); reader.derive(d)
+    i = next(i for i, x in enumerate(d["lessons"]) if x.get("block") and x.get("teachers") and x.get("periods")); g = d["lessons"][i]; T = g["teachers"][0]
+    rows = [dict(id=1, day=DAYS[0], p=0, n=1, level=g["level"], block=g["block"], classes=g["classes"], subject=g["subject"], group=g["code"], teachers=list(g["teachers"]))]
+    key = f"dep:G:{g['code']}:teachers"
+    upload = lambda rows: c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(rows)), "timetable.xlsx"), replace="1"), content_type="multipart/form-data")
+    try:
+        for v in ([T, None], [None, T], [T, ""], [None, None, T]):
+            spec = copy.deepcopy(SPEC); spec["lessons"][i]["teachers"] = v + list(g["teachers"][1:])
+            assert c.put("/api/setup", json=dict(spec=spec, why="an emptied teacher box")).status_code == 200
+            r = upload(rows); assert r.status_code == 200, r.get_json()
+            j = draft.info(); assert j["lessons"] == 1 and not any(w["key"] == key for w in j["warnings"]), v   # its teachers are step 5's: no warning says otherwise
+            assert board()["cards"] and c.get("/api/compare?a=draft&b=draft").status_code == 200
+            assert c.get("/api/setup").get_json()["spec"]["lessons"][i]["teachers"][:len(v)] == v   # step 5 keeps the row as it was typed
+        spec = copy.deepcopy(SPEC); spec["lessons"][i]["teachers"] = [None]   # every box emptied: the group has no teacher, and the timetable names one
+        assert c.put("/api/setup", json=dict(spec=spec, why="no teacher")).status_code == 200
+        r = upload(rows); assert r.status_code == 200, r.get_json()
+        w = next(w for w in draft.info()["warnings"] if w["key"] == key); assert "None" not in w["text"], w["text"]
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     import re
     fresh()
