@@ -58,7 +58,7 @@ Telegram card.
 - **Absent teachers** are told of relief somebody else planned, with a button that opens the app to set work and one to
   cancel (one line saying why, then a second press; not for an exam or event duty's backup, which the exams committee
   or the event's teacher in charge stops), and get one reminder. They are told who covers each lesson once that relief
-  teacher acknowledges (one in the evening or the night at 06:45 the next morning), and are reminded to set work at 18:00 the evening before and 07:00 on the day while a lesson has
+  teacher acknowledges (when that is in the evening or at night, they are told at 06:45 the next morning), and are reminded to set work at 18:00 the evening before and 07:00 on the day while a lesson has
   none. `/relief` asks for relief on Telegram with the
   app's own questions, work and files included; a lesson takes as many messages as wanted (a text, then a file) until
   **Next**; What's in then says "asked on Telegram".

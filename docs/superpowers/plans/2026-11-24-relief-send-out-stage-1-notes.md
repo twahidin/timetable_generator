@@ -224,7 +224,7 @@ from the morning time to before the cut-off of a school day.
 | The blocked-bot alert (new) | each of the team but the person | when a message to them is refused because they blocked the bot; one a person a day | the first team window after it was found; given up when it ends |
 | Cancelled, the team's copy (unchanged words) | the team | at once | waits for the next morning time, if still true |
 | Cancelled to the planner, the teacher who is away, the officer | as before | at once | any hour |
-| Not yet acknowledged, all clear | the team | as before, from an hour before the first period; the report also lists what is approved and not sent out, and no all clear goes while one is left | as before |
+| Not yet acknowledged, all clear | the team | as before, from an hour before the first period; the report also lists what is approved and not sent out, and no all clear goes while one is left; one whose lesson has started is named once under "Started, never sent out" | as before |
 | Relief planned for you, the reminder to acknowledge | the teacher who is away | as before | any hour |
 | Please set work (new) | the teacher who is away; never for a backup | 18:00 the calendar day before (made until 22:00 of that evening only) and 07:00 on the day, while a lesson of that day needs cover, is still to come and has no work; not within 30 minutes of the request; each once | any hour, on purpose |
 | The reporting officer's | the officer | at once | any hour |
@@ -833,3 +833,10 @@ holidays." then gains "or days with no relief duty".
   token and key shapes 0.
 - After the last review, corrected in words here and in `docs/DEPLOY.md` (ruling F9, no code changed): step 7 of the first morning;
   a relief on an absence asked for while rolled back; the report's two new known limits; open questions 11 and 12.
+- The lead's answers of 24 November (1 yes, 2 hold, 11 yes), built on branch `relief-send-out-answers` from main d9aebf3: reviewed
+  by a fresh reviewer, with no Critical or Important finding (it followed a held "Who covers you" from the evening to 06:45: made
+  again once, never lost; a relief that started and was never sent out is named once). Every suite on that code, one at a time, run
+  by the controller: all 31 `tests/*.py` and all 25 `tests/*.test.js` pass (`test_relief_telegram` 448, `test_relief_team` 82,
+  `smoke` 103). Two readings of the answers were the controller's own and may be changed: "away" means away the whole day; the
+  evening limit for "Who covers you" is the evening work time (18:00), so an acknowledgement at 18:30 is told the next morning.
+  Not checked: no real Telegram bot, as before.

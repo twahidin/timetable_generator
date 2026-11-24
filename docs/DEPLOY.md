@@ -237,7 +237,7 @@ unread.
   and the "not yet acknowledged" report, still reach the team after the cut-off for a lesson of today until it starts.
   The team's copy of "Cancelled" and the blocked-bot alert wait for the next morning time. A member of the team who is
   away the whole day today (an absence that is not cancelled and not an exam's or event's backup) gets no morning
-  message; one away for some periods does. When everyone on the team is away the whole day, all of them get it. Their
+  message; one away for some periods does. When everyone on the team who is on Telegram is away the whole day, all of them get it. Their
   own absence is counted and named in it as any other, and every other message of the team still reaches them.
 - **The "not yet acknowledged" report** also lists, under "Approved, not sent out ({n}):", each relief of today that is
   approved and not sent out and whose lesson has not started: nobody has told that teacher yet. A morning with only such
