@@ -70,6 +70,111 @@ var TeacherView = (function () {
     return true;
   }
 
-  return { columns: columns, setSecond: setSecond, tidy: tidy };
+  /* ---- renaming a teacher: the new name follows to groups, form teachers and Teacher rules ----
+     Names are matched exactly (===); only the "already a teacher" check ignores case and spacing (P.key). */
+
+  var NOTE_LISTS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules"];
+
+  /* where a teacher's name is used: row numbers (from 0) of groups, classes and Teacher rules, the numbers (from 1)
+     of typed rules that say it, how many notes say it, and whether two teacher rows have exactly this name */
+  function uses(spec, name) {
+    var out = { lessons: [], classes: [], rules: [], typed: [], notes: 0, twice: false };
+    if (typeof name !== "string" || name.trim() === "" || !isRow(spec)) return out;
+    list(spec.lessons).forEach(function (l, i) { if (isRow(l) && list(l.teachers).indexOf(name) >= 0) out.lessons.push(i); });
+    list(spec.classes).forEach(function (c, i) { if (isRow(c) && list(c.parents).indexOf(name) >= 0) out.classes.push(i); });
+    var typed = 0;
+    list(spec.rules).forEach(function (r, i) {
+      if (!isRow(r)) return;
+      if (r.scope === "Teacher" && r.target === name) out.rules.push(i);
+      if (r.rule === "In words") { typed++; if (typeof r.text === "string" && r.text.indexOf(name) >= 0) out.typed.push(typed); }
+    });
+    NOTE_LISTS.forEach(function (k) {
+      list(spec[k]).forEach(function (row) { if (isRow(row) && typeof row.note === "string" && row.note.indexOf(name) >= 0) out.notes++; });
+    });
+    out.twice = list(spec.teachers).filter(function (t) { return isRow(t) && t.name === name; }).length > 1;
+    return out;
+  }
+
+  /* puts every row's earlier_names right: only text, no repeats, no name a teacher has now, no name two rows claim
+     (it stays on the last of them); the key goes when nothing is left. True when anything changed. */
+  function settle(spec) {
+    var teachers = list(spec && spec.teachers), current = Object.create(null), seen = Object.create(null), changed = false;
+    teachers.forEach(function (t) { if (isRow(t) && typeof t.name === "string") current[t.name] = true; });
+    var clean = teachers.map(function (t) {
+      if (!isRow(t) || !("earlier_names" in t)) return null;
+      var mine = Object.create(null);
+      return list(t.earlier_names).filter(function (n) {
+        if (typeof n !== "string" || n === "" || current[n] || mine[n]) return false;
+        mine[n] = true;
+        return true;
+      });
+    });
+    for (var i = teachers.length - 1; i >= 0; i--) {
+      if (!clean[i]) continue;
+      clean[i] = clean[i].filter(function (n) { if (seen[n]) return false; seen[n] = true; return true; });
+    }
+    teachers.forEach(function (t, i) {
+      if (!clean[i]) return;
+      if (clean[i].length === 0) { delete t.earlier_names; changed = true; return; }
+      if (JSON.stringify(t.earlier_names) !== JSON.stringify(clean[i])) { t.earlier_names = clean[i]; changed = true; }
+    });
+    return changed;
+  }
+
+  /* gives teacher row ti the name `to` and carries it to their groups, the classes they are form teacher of and their
+     Teacher rules (not when two rows have the old name). Changes spec in place.
+     null: not a rename; { error }: the name is another teacher's; else { was, now, groups, classes, rules, typed, notes, twice } */
+  function rename(spec, ti, to) {
+    var teachers = list(spec && spec.teachers), t = teachers[ti];
+    if (!isRow(t) || typeof t.name !== "string" || t.name.trim() === "" || to == null) return null;
+    var now = String(to).replace(/\s+/g, " ").trim(), was = t.name;
+    if (now === "" || now === was) return null;
+    for (var j = 0; j < teachers.length; j++) {
+      if (j !== ti && isRow(teachers[j]) && P.key(teachers[j].name) === P.key(now)) return { error: teachers[j].name + " is already a teacher." };
+    }
+    var u = uses(spec, was), r = { was: was, now: now, groups: 0, classes: [], rules: 0, typed: u.typed, notes: u.notes, twice: u.twice };
+    if (!u.twice) {
+      u.lessons.forEach(function (i) {
+        var ts = spec.lessons[i].teachers;
+        r.groups++;
+        for (var k = 0; k < ts.length; k++) if (ts[k] === was) ts[k] = now;
+      });
+      u.classes.forEach(function (i) {
+        var c = spec.classes[i], ps = c.parents;
+        r.classes.push(c.class);
+        for (var k = 0; k < ps.length; k++) if (ps[k] === was) ps[k] = now;
+      });
+      u.rules.forEach(function (i) { spec.rules[i].target = now; r.rules++; });
+    }
+    var earlier = list(t.earlier_names).filter(function (n) { return n !== was; });
+    earlier.push(was);
+    t.earlier_names = earlier;
+    t.name = now;
+    settle(spec);
+    return r;
+  }
+
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  function andList(a) { return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; }
+
+  /* the toast for a result of rename that is not null and has no error */
+  function renameText(r) {
+    var out = r.was + " is now " + r.now, parts = [];
+    if (r.groups) parts.push("on " + plural(r.groups, "group", "groups"));
+    if (r.classes.length) parts.push("form teacher of " + andList(r.classes));
+    if (r.rules) parts.push(plural(r.rules, "rule", "rules"));
+    if (parts.length) out += ": " + parts.join(", ") + ". Undo, at the top, brings it back.";
+    else if (r.twice) out += ". Two teachers were called " + r.was + ", so their groups were not changed: pick the right teacher on each.";
+    else out += ".";
+    if (r.typed.length) {
+      var one = r.typed.length === 1;
+      out += " Typed " + (one ? "rule " : "rules ") + andList(r.typed.map(function (n) { return "T" + n; })) +
+        (one ? " still says " : " still say ") + r.was + ": check " + (one ? "it" : "them") + ".";
+    }
+    if (r.notes) out += " " + plural(r.notes, "note", "notes") + (r.notes === 1 ? " still says " : " still say ") + r.was + ": check " + (r.notes === 1 ? "it" : "them") + ".";
+    return out;
+  }
+
+  return { columns: columns, setSecond: setSecond, tidy: tidy, uses: uses, rename: rename, renameText: renameText, settle: settle };
 })();
 if (typeof module !== "undefined") module.exports = TeacherView;
