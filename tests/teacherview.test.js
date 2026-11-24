@@ -153,4 +153,14 @@ t("the toast says what followed", () => {
   assert.strictEqual(T({ ...base, groups: 2, typed: [3], notes: 1 }), "New Teacher 3 is now Mdm Lee: on 2 groups. Undo, at the top, brings it back. Typed rule T3 still says New Teacher 3: check it. 1 note still says New Teacher 3: check it.");
   assert.strictEqual(T({ ...base, typed: [3, 5], notes: 2 }), "New Teacher 3 is now Mdm Lee. Typed rules T3 and T5 still say New Teacher 3: check them. 2 notes still say New Teacher 3: check them.");
 });
+t("a head is told what stands in the way of a rename", () => {
+  const s = rspec(), no = () => false, before = JSON.stringify(s);
+  assert.strictEqual(TeacherView.blocked(s, "Lim Hui Min", no, no), "");
+  assert.strictEqual(TeacherView.blocked(s, "New Teacher 3", no, no), "Only the committee can rename New Teacher 3: they are a form teacher of 2A and named in 1 rule.");
+  assert.strictEqual(TeacherView.blocked(s, "New Teacher 3", x => x.subject === "Maths", () => true), "Only the committee can rename New Teacher 3: they are a form teacher of 2A, named in 1 rule and on 2 groups of other departments.");
+  assert.strictEqual(TeacherView.blocked(s, "Arjun Nair", no, () => true), "Only the committee can rename Arjun Nair: they are a form teacher of 2A and 2B and on 1 lesson the form teachers take.");
+  s.rules.push({ scope: "Teacher", target: "Lim Hui Min", rule: "Not available" }, { scope: "Teacher", target: "Lim Hui Min", rule: "Max periods a day" });
+  assert.strictEqual(TeacherView.blocked(s, "Lim Hui Min", () => true, no), "Only the committee can rename Lim Hui Min: they are named in 2 rules and on 1 group of other departments.");
+  s.rules.length -= 2; assert.strictEqual(JSON.stringify(s), before);
+});
 console.log(n + " cases passed");

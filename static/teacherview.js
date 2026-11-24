@@ -179,6 +179,22 @@ var TeacherView = (function () {
     return out;
   }
 
-  return { columns: columns, setSecond: setSecond, tidy: tidy, uses: uses, rename: rename, renameText: renameText, settle: settle };
+  /* why a head may not rename this teacher: "" when nothing stands in the way. other(row) and staffed(row) are the page's
+     tests of a lesson row (another department's group; a lesson the form teachers take). Changes nothing. */
+  function blocked(spec, name, other, staffed) {
+    var u = uses(spec, name), parts = [], others = 0, taken = 0;
+    if (u.classes.length) parts.push("a form teacher of " + andList(u.classes.map(function (i) { return text(spec.classes[i].class); })));
+    if (u.rules.length) parts.push("named in " + plural(u.rules.length, "rule", "rules"));
+    u.lessons.forEach(function (i) {
+      var row = spec.lessons[i];
+      if (other(row)) others++;
+      else if (staffed(row)) taken++;
+    });
+    if (others) parts.push("on " + plural(others, "group", "groups") + " of other departments");
+    if (taken) parts.push("on " + plural(taken, "lesson", "lessons") + " the form teachers take");
+    return parts.length ? "Only the committee can rename " + name + ": they are " + andList(parts) + "." : "";
+  }
+
+  return { columns: columns, setSecond: setSecond, tidy: tidy, uses: uses, rename: rename, renameText: renameText, settle: settle, blocked: blocked };
 })();
 if (typeof module !== "undefined") module.exports = TeacherView;
