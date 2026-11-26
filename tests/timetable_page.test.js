@@ -67,7 +67,7 @@ const EVROW = { id: "ev1", name: TRIP, kind: "event", start: "2026-10-05", end: 
 const STUROW = { id: "ev2", name: "Sec 3 <i>Trip</i>", kind: "event", start: "2026-10-06", end: "2026-10-07", classes: ["3B"], where: "Science Centre & museum",
   days: [{ date: "2026-10-06", start: "07:40", end: "13:00" }, { date: "2026-10-07", start: "07:40", end: "10:40" }] };
 
-function boot(answers, app) {
+function boot(answers, app, tweak) {
   const reg = new Map(), fetched = [];
   const el = (id, tag) => {
     const cls = new Set();
@@ -102,7 +102,8 @@ function boot(answers, app) {
   };
   ctx.dlg = reg.get("dlg");
   vm.createContext(ctx);
-  vm.runInContext(`const DATA = ${JSON.stringify(data(app))};`, ctx);
+  const d = data(app); if (tweak) tweak(d);   /* tweak: the data as the server cuts it for this view */
+  vm.runInContext(`const DATA = ${JSON.stringify(d)};`, ctx);
   vm.runInContext(SCRIPT, ctx);
   const tick = () => new Promise(r => setImmediate(r)).then(() => new Promise(r => setImmediate(r))).then(() => new Promise(r => setImmediate(r)));
   const pick = async iso => { reg.get("onDate").listeners.change[0]({ target: { value: iso } }); await tick(); };
@@ -249,7 +250,8 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
 
   await t("a teacher's own page (staff mode): My timetable opens first and lists only them; the classes are all there", async () => {
     const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong", files: [["Class PDFs", "/files/book/classes"]] });
-    const P = boot({ "/api/published/exams": LIST }, STAFF);
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], "", ""]); d.rooms = []; d.students = []; };   /* html_data's staff view */
+    const P = boot({ "/api/published/exams": LIST }, STAFF, cut);
     await P.tick();
     const tabs = P.el("tabs").innerHTML;
     assert(tabs.includes('data-tab="teachers">My timetable</button>') && !tabs.includes(">Teachers<"), tabs);
@@ -257,12 +259,26 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(P.run("location.hash"), "#teachers/Mr%20Ben%20Ong");
     assert(P.view().includes("Mr Ben Ong") && count(P.view(), 'class="row') === 10, P.view());
     assert.strictEqual(keys(P.el("list").innerHTML), "Mr Ben Ong");
+    assert(!P.el("list").innerHTML.includes('class="grp"'), "no empty department heading: " + P.el("list").innerHTML);
+    assert(!P.view().includes("allowance") && P.view().includes("periods a cycle"), "no empty allowance stat");
+    const box = id => { P.run(`lessonDialog(${id})`); return P.el("dlgB").innerHTML; };
+    let b = box(3);
+    assert(b.includes('<a data-go="teachers" data-key="Mr Ben Ong">Mr Ben Ong</a>') && b.includes('<a data-go="classes" data-key="4A">4A</a>') && !b.includes('data-go="rooms"') && b.includes("LT2"), b);
+    b = box(2);
+    assert(!b.includes('data-go="teachers"') && b.includes("Ms Grace Yeo") && !b.includes('data-go="rooms"') && !b.includes('data-go="lessons"') && b.includes("3-02"), "another teacher, the room and all lessons are plain text: " + b);
     P.run('show("teachers", "Ms Grace Yeo")');
     assert.strictEqual(P.run("S.key"), "Mr Ben Ong", "another teacher's timetable is not shown");
     P.run('show("classes", null)');
     assert.strictEqual(keys(P.el("list").innerHTML), "3A,3B,4A");
     assert.strictEqual(P.run('INDEX_OK.filter(e => e.t === "teachers").map(e => e.k).join(",")'), "Mr Ben Ong", "the search finds only them");
-    const X = boot({ "/api/published/exams": LIST }, Object.assign({}, STAFF, { tabs: ["classes", "exams"], me: null }));
+    const F = boot({ "/api/published/exams": LIST }, APP);
+    F.run('show("teachers", "Mr Ben Ong")'); assert(F.view().includes("allowance"), "a teacher's page keeps the allowance stat");
+    F.run("lessonDialog(2)"); b = F.el("dlgB").innerHTML;
+    assert(b.includes('data-go="teachers" data-key="Ms Grace Yeo"') && b.includes('data-go="rooms" data-key="3-02"') && b.includes('data-go="lessons"'), "the full page keeps every link: " + b);
+    const ST = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "student", tabs: ["classes", "students", "exams"] }), cut);
+    ST.run("lessonDialog(2)"); b = ST.el("dlgB").innerHTML;
+    assert(!b.includes('data-go="teachers"') && !b.includes('data-go="rooms"') && !b.includes('data-go="lessons"') && b.includes('data-go="classes" data-key="3A"'), "a student's page: only the classes link: " + b);
+    const X = boot({ "/api/published/exams": LIST }, Object.assign({}, STAFF, { tabs: ["classes", "exams"], me: null }), cut);
     await X.tick();
     assert(!X.el("tabs").innerHTML.includes('data-tab="teachers"') && X.run("S.tab") === "classes", X.el("tabs").innerHTML);
   });

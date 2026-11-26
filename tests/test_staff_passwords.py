@@ -444,7 +444,7 @@ def a_teacher_sees_their_own_and_the_classes():
     staff_off(admin()); publish_real(); c = signed_in(ALICE)
     d = page_data(c); a = d["app"]
     assert a["mode"] == "staff" and a["tabs"] == ["classes", "teachers", "exams"] and a["me"] == ALICE, a
-    assert a["files"] == [["Class PDFs", "/files/book/classes"]] and a["home"] == "/home", a
+    assert a["files"] == [["Class PDFs", "/files/book/classes"]] and a["home"] == "/home" and a["placeholder"] == "Search a class", a
     assert d["students"] == [] and d["rooms"] == [] and d["teachers"], (len(d["students"]), len(d["rooms"]))
     assert all(t[2] == "" and t[3] == "" for t in d["teachers"]), d["teachers"][:3]
     assert {t[0] for t in d["teachers"]} >= {ALICE, BEN} and d["checks"]["problems"] == []

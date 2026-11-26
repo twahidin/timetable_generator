@@ -230,7 +230,7 @@ function teacherView(t) {
   const days = Object.values(per), mine = CLS.filter(c => c.parents.includes(t)).map(c => c.name);
   const base = [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · ");
   return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: mine.length ? `${base || "Teacher"} · ${PNAME} of ${mine.join(", ")}` : base,
-    stats: [[total, "periods a cycle"], [info.allowance || "-", "allowance"], [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
+    stats: [[total, "periods a cycle"], ...(MODE === "staff" && !info.allowance ? [] : [[info.allowance || "-", "allowance"]]), [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
 }
 function roomView(r) {
   const info = rIx.get(r) || { name: r, kind: "", cap: 1 }, rows = L.filter(x => x.room === r || singles(x.room).includes(r)), cells = [], used = new Set(), ent = new Map();   // a lesson in a combined venue is in each of its rooms
@@ -345,7 +345,7 @@ const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, 
 const LVIEWS = [["grids", "Class grids"], ["page", "One page"], ["table", "Table"]];
 function listItems(tab) {
   if (tab === "classes") return CLS.filter(c => busyClasses.has(c.name)).map(c => ({ key: c.name, label: c.name, small: c.home, group: c.level }));
-  if (tab === "teachers") return TCH.filter(MINE).sort((a, b) => String(a.dept || "~").localeCompare(String(b.dept || "~")) || a.name.localeCompare(b.name)).map(t => ({ key: t.name, label: t.name, small: t.short !== t.name ? t.short : "", group: t.dept || "Other" }));
+  if (tab === "teachers") return TCH.filter(MINE).sort((a, b) => String(a.dept || "~").localeCompare(String(b.dept || "~")) || a.name.localeCompare(b.name)).map(t => ({ key: t.name, label: t.name, small: t.short !== t.name ? t.short : "", group: t.dept || (MODE === "staff" ? "" : "Other") }));
   if (tab === "rooms") return ROOMS.filter(r => busyRooms.has(r.name)).map((r, i) => [r, i]).sort((a, b) => String(a[0].kind).localeCompare(String(b[0].kind)) || a[1] - b[1]).map(([r]) => r).map(r => ({ key: r.name, label: r.name, small: "", group: r.kind || "Other" }));
   if (tab === "students") return STU.map(s => ({ key: s.id, label: s.name, small: s.id, group: s.cls }));
   return [];
@@ -359,7 +359,7 @@ function renderList() {
   const shown = items.filter(i => (!chip || i.group === chip || (S.tab === "students" && (cIx.get(i.group) || {}).level === chip)) && (!q || (i.label + " " + i.small + " " + i.group).toLowerCase().includes(q)));
   let h = "", last = null;
   if (S.tab === "students") h += `<a data-build="1" class="${S.key === "__build" ? "on" : ""}"><span>${MODE === "student" ? "Build my timetable" : "Build a timetable from groups"}</span></a>`;
-  for (const i of shown) { if (i.group !== last) { h += `<div class="grp">${esc(i.group)}</div>`; last = i.group; } h += `<a data-key="${esc(i.key)}" class="${i.key === S.key ? "on" : ""}"><span>${esc(i.label)}</span><small>${esc(i.small)}</small></a>`; }
+  for (const i of shown) { if (i.group !== last) { if (i.group !== "") h += `<div class="grp">${esc(i.group)}</div>`; last = i.group; } h += `<a data-key="${esc(i.key)}" class="${i.key === S.key ? "on" : ""}"><span>${esc(i.label)}</span><small>${esc(i.small)}</small></a>`; }   /* staff mode: no department sent, so no heading */
   $("#list").innerHTML = h || `<div class="empty">Nothing matches.</div>`;
 }
 function setHash(h) { if (location.hash !== h) history.replaceState(null, "", h); }
@@ -610,10 +610,11 @@ function myExams() {
 // ------------------------------------------------------------------ lesson details, search, events
 function lessonDialog(id) {
   const xs = lessonRows.get(id); if (!xs) return; const x0 = xs[0];
+  const has = k => TABS.some(t => t[0] === k), go = (tab, k, ok = true) => ok && has(tab) ? `<a data-go="${tab}" data-key="${esc(k)}">${esc(k)}</a>` : esc(k);   /* a name is a link only to a tab this page has; staff mode links only the viewer's own name */
   $("#dlgT").innerHTML = `<b style="font-size:16px">${esc(x0.block || short(x0.subject))}</b><div style="color:var(--sub);font-size:13px">${esc(when(x0))} · ${x0.n} periods${x0.ext ? " · after school" : ""}</div>`;
-  $("#dlgB").innerHTML = `<table>${xs.map(x => `<tr><td><b>${esc(x.subject)}</b><br><small style="color:var(--muted)">${esc(x.group)}</small></td><td>${x.classes.map(c => `<a data-go="classes" data-key="${esc(c)}">${esc(c)}</a>`).join(", ")}</td>
-    <td>${x.teachers.map(t => `<a data-go="teachers" data-key="${esc(t)}">${esc(t)}</a>`).join("<br>")}</td><td>${x.room ? `<a data-go="rooms" data-key="${esc(x.room)}">${esc(x.room)}</a>` : "-"}${x.rain ? `<br><small>rain: ${esc(x.rain)}</small>` : ""}</td>
-    <td>${x.group !== ENTIRE ? `<a data-go="lessons" data-group="${esc(x.group)}">all lessons</a>` : ""}</td></tr>`).join("")}</table>`;
+  $("#dlgB").innerHTML = `<table>${xs.map(x => `<tr><td><b>${esc(x.subject)}</b><br><small style="color:var(--muted)">${esc(x.group)}</small></td><td>${x.classes.map(c => go("classes", c)).join(", ")}</td>
+    <td>${x.teachers.map(t => go("teachers", t, MODE !== "staff" || t === APP.me)).join("<br>")}</td><td>${x.room ? go("rooms", x.room) : "-"}${x.rain ? `<br><small>rain: ${esc(x.rain)}</small>` : ""}</td>
+    <td>${x.group !== ENTIRE && has("lessons") ? `<a data-go="lessons" data-group="${esc(x.group)}">all lessons</a>` : ""}</td></tr>`).join("")}</table>`;
   $("#dlg").showModal();
 }
 const INDEX = [

@@ -1573,7 +1573,7 @@ def timetable():
     if key not in pub["views"]:
         view = {"student": "student", "staff": "staff"}.get(r, "full")
         app_cfg = dict(mode=r, tabs=tabs, pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
-                       placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
+                       placeholder="Search a class" if r in ("student", "staff") else None, home=home, homeLabel=label)
         if r == "staff": app_cfg["me"] = me
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
     return Response(pub["views"][key], mimetype="text/html")
