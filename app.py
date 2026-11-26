@@ -2923,9 +2923,11 @@ def _exams_today():
 def _published_reader():
     """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for everyone
     who sees the published timetable as staff (the committee, the heads' and teachers' codes, a person signed in by name);
+    "staff" (the classes and their own duties, no rooms or roster) for a plain teacher once staff codes are off (_narrow);
     "student" (classes, rooms and times only) for the shared student code"""
     if not has("timetable"): return None
-    return "student" if shared() == "student" else "full"
+    if shared() == "student": return "student"
+    return "staff" if _narrow() else "full"
 
 def _exams_student():
     """the student a personal code is signed in as, whose own exam timetable /api/me/exams shows; None for anyone else"""
@@ -3343,7 +3345,9 @@ def exams_day():
     except ValueError: return {"error": BAD_DATE}, 400
     cal = _exam_cal(pub)
     if not cal.get("terms"): return {"error": NO_DAY_CAL}, 409
-    return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, _published_reader() == "full"), published_at=stamp))
+    reader = _published_reader()
+    return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, reader == "full",
+                                                only=who()["name"] if reader == "staff" and who() else None), published_at=stamp))
 
 @app.get("/api/published/exams")
 @need("timetable")

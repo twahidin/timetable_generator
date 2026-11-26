@@ -3088,6 +3088,20 @@ def student_code_sees_name_where_time_only():
     assert out["banner"] == "Sec 3 Learning Journey: Mon 5 Oct.", out["banner"]
 
 @t
+def a_plain_teacher_gets_only_their_own_duties():
+    own = PB.day(_PUB, F.CAL, [A1], D5, False, only="Mr Ben Ong")["exams"]
+    full = PB.day(_PUB, F.CAL, [A1], D5, True)["exams"]
+    assert own["teachers"] == {"Mr Ben Ong": full["teachers"]["Mr Ben Ong"]} and own["rooms"] == {}, own
+    assert own["teachers"]["Mr Ben Ong"][0]["room"] == "3-01" and own["teachers"]["Mr Ben Ong"][0]["role"] == "Invigilate"
+    assert own["classes"] == full["classes"]
+    none = PB.day(_PUB, F.CAL, [A1], D5, False)["exams"]
+    assert none["teachers"] == {} and none["rooms"] == {}
+    assert PB.day(_PUB, F.CAL, [A1], D5, True, only="Mr Ben Ong")["exams"] == full
+    ev = PB.day(_PUB, F.CAL, [E1], "2026-10-05", False, only="Mr Hafiz Rahman")["exams"]
+    assert list(ev["teachers"]) == ["Mr Hafiz Rahman"] and ev["rooms"] == {}, ev
+    assert PB.day(_PUB, F.CAL, [A1], D5, False, only="Ms Nobody Here")["exams"]["teachers"] == {}
+
+@t
 def event_and_exam_on_one_date():
     e = PB.day(_PUB, F.CAL, [A1, E1], "2026-10-05", True)["exams"]
     assert [(x["start"], x["label"]) for x in e["classes"]["3A"]] == [
