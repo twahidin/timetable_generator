@@ -209,24 +209,27 @@
 
   const segBtn = (what, v, on, label) => `<button type="button" data-pl="${what}" data-v="${esc(v)}" class="${on ? "on" : ""}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
 
-  function paintDay() {
+  function paintDay() {   /* Pick dates is the calendar (relief-dates.js), which draws itself again on each change */
     const t = RF.today(), box = $("#plDay", P.pane);
     let under;
     if (P.day === "today") under = `<div class="small muted under">${esc(day(t))}</div>`;
     else if (P.day === "tomorrow") under = `<div class="small muted under">${esc(day(RF.addDays(t, 1)))}</div>`;
-    else {
-      const full = P.picked.length >= 10;
-      under = `<div class="line"><input type="date" id="plDate" min="${esc(t)}" ${full ? "disabled" : ""} aria-label="A date to add"><button type="button" class="small" data-pl="adddate" ${full ? "disabled" : ""}>Add this date</button>
-        <span class="small muted">${full ? "That is 10 dates, the most at one time." : "Up to 10 dates."}</span></div>
-        <div class="chiprow">${P.picked.length ? P.picked.map(d => `<span class="chip dchip">${esc(day(d))}<button type="button" data-pl="undate" data-v="${esc(d)}" title="Take this date off" aria-label="Take ${esc(day(d))} off">✕</button></span>`).join("") : `<span class="small muted">No dates yet.</span>`}</div>`;
-    }
+    else under = `<div class="rd-box"></div>`;
     box.innerHTML = `<div class="seg" role="group" aria-label="Which day">${segBtn("day", "today", P.day === "today", "Today")}${segBtn("day", "tomorrow", P.day === "tomorrow", "Tomorrow")}${segBtn("day", "pick", P.day === "pick", "Pick dates")}</div>${under}`;
+    if (P.day === "pick") window.ReliefDates.mount($(".rd-box", box), { key: "plan", picked: P.picked, max: 20, onChange: list => { P.picked = list; changed(); reread(); } });
+  }
+
+  /* the published page's teacher view, both weeks, in a new tab; not for staff added only in the accounts (no timetable) */
+  function theirTimetable(name) {
+    const x = (P.people || []).find(q => q.name === name);
+    if (x && x.staff_only) return "";
+    return `<a class="ghost filebtn small" href="/timetable#teachers/${enc(name)}" target="_blank" rel="noopener">Their timetable ↗</a>`;
   }
 
   function paintWho() {
     const box = $("#plWho", P.pane);
     if (!P.people) { box.innerHTML = P.perr ? `${say(P.perr)} <button type="button" class="small" data-pl="people">Try again</button>` : `<span class="small muted">Loading…</span>`; return; }
-    RF.person(box, { people: P.people, value: P.teacher, exclude: [R.me.name], label: "Find the absent teacher", onPick: pickTeacher });
+    RF.person(box, { people: P.people, value: P.teacher, exclude: [R.me.name], label: "Find the absent teacher", onPick: pickTeacher, after: theirTimetable });
   }
 
   function pickTeacher(name) {
@@ -322,14 +325,6 @@
     paintWho();
   }
 
-  function addDate() {
-    const el = $("#plDate", P.pane), v = el && el.value;
-    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) { if (el) el.focus(); return; }
-    if (!P.picked.includes(v) && P.picked.length < 10) P.picked.push(v);
-    P.picked.sort(); changed(); paintDay(); reread();
-    const again = $("#plDate", P.pane); if (again && !again.disabled) again.focus();
-  }
-
   async function send() {
     if (P.busy || P.loading || planBlock()) return;
     const list = listEl(), teacher = P.teacher;
@@ -343,6 +338,7 @@
     const res = await R.api("/api/relief/absences", R.json("POST", body));
     if (!res.ok) { P.busy = false; P.msg = { text: res.error, bad: true, status: res.status }; paintSend(); return; }
     const failed = await R.attach(res.data, list);
+    window.ReliefDates.forget("plan");   /* Pick dates opens on the first school day's month again */
     Object.assign(P, { day: "today", picked: [], teacher: "", away: "whole", from: null, to: null, reason: "", text: "", remarks: "",
                        readFor: "", lessons: [], lerr: null, busy: false, dirty: false });
     P.chosen.clear();
@@ -366,7 +362,7 @@
     else if (r.acknowledged) chip = `<span class="chip st-ok">✓ acknowledged${cover.length && cover.every(hasWork) ? ", work set" : ""}</span>`;
     else chip = `<span class="chip st-amber">not acknowledged yet</span>`;
     return `<tr class="${r.cancelled ? "off" : ""}">
-      <td><b>${esc((r.dates || []).map(day).join(", "))}</b><div class="small muted">${esc(R.span(r))}</div></td>
+      <td><b>${esc(RF.dayRuns(r.dates))}</b><div class="small muted">${esc(R.span(r))}</div></td>
       <td>${esc(r.teacher)}<div class="small muted">${esc(R.reason(r))}</div></td>
       <td>${cover.length ? esc(`${k} chosen · ${cover.length - k} open`) : `<span class="muted">none to cover</span>`}${changedNow ? `<div class="small pl-changed">A lesson has changed since this was planned</div>` : ""}</td>
       <td>${chip}</td>
@@ -444,9 +440,7 @@
     if (!b || b.disabled) return;
     const a = b.dataset.pl, v = b.dataset.v;
     switch (a) {
-      case "day": if (v !== P.day) { P.day = v; changed(); paintDay(); reread(); if (v === "pick") { const d = $("#plDate", P.pane); if (d) d.focus(); } } return;
-      case "adddate": addDate(); return;
-      case "undate": P.picked = P.picked.filter(d => d !== v); changed(); paintDay(); reread(); return;
+      case "day": if (v !== P.day) { P.day = v; changed(); paintDay(); reread(); if (v === "pick") window.ReliefDates.focusFirst($("#plDay .rd-box", P.pane)); } return;
       case "away": if (v !== P.away) { P.away = v; changed(); paintAway(); reread(); } return;
       case "reason": P.reason = v; changed(); paintReason(); if (v === "Other") { const w = $("#plWhy", P.pane); if (w) w.focus(); } return;
       case "people": loadPeople(); return;
@@ -489,7 +483,6 @@
   }
 
   function onKey(e) {
-    if (e.target.id === "plDate" && e.key === "Enter") { e.preventDefault(); addDate(); }
     if (e.key === "Escape" && F.open && e.target.closest && e.target.closest(".pl-list")) { e.preventDefault(); closeFree(); }
   }
 

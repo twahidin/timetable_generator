@@ -1,0 +1,164 @@
+<h2>Pick dates: the calendar</h2>
+<p class="subtitle">These work. Click a day to tick it, or press on a day and drag to another. Press on a ticked day and drag to take days off. Grey days (past, weekends, holidays) can't be ticked, and a drag goes past them. Dates and holidays are made up; today is Thu 26 Nov.</p>
+
+<style>
+  .rc-page { background:#f3f5f8; color:#1d1d1f; border-radius:14px; padding:18px 20px; margin:14px 0 26px; border:1px solid #d9dee6; }
+  .rc-page h3 { margin:0 0 4px; color:#1d1d1f; }
+  .rc-why { font-size:13px; color:#5b6472; margin:0 0 14px; }
+  .rc-label { font-size:14px; font-weight:600; color:#5b6472; margin:0 0 6px; }
+  .rc-seg { display:inline-flex; border:1px solid #d4d9e1; border-radius:10px; overflow:hidden; background:#fff; margin-bottom:12px; }
+  .rc-seg span { padding:7px 16px; font-size:15px; border-right:1px solid #d4d9e1; }
+  .rc-seg span:last-child { border-right:0; }
+  .rc-seg .on { background:#2c4f74; color:#fff; }
+  .rc-cal { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start; user-select:none; -webkit-user-select:none; }
+  .rc-month { background:#fff; border:1px solid #d4d9e1; border-radius:12px; padding:10px 12px 12px; width:292px; touch-action:none; }
+  .rc-mhead { display:flex; align-items:center; justify-content:space-between; font-weight:600; font-size:15px; margin-bottom:6px; height:28px; }
+  .rc-arrow { border:1px solid #d4d9e1; background:#fff; border-radius:8px; width:30px; height:28px; cursor:pointer; font-size:15px; color:#2c4f74; }
+  .rc-arrow[disabled] { opacity:.3; cursor:default; }
+  .rc-arrow.ghost { visibility:hidden; }
+  .rc-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:3px; }
+  .rc-dow { font-size:11px; color:#8a93a1; text-align:center; padding:2px 0 4px; font-weight:600; }
+  .rc-d { height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; cursor:pointer; background:#fff; border:1px solid transparent; color:#1d1d1f; }
+  .rc-d:hover { border-color:#9db4cf; }
+  .rc-d.off { background:#f0f1f4; color:#b3b9c3; cursor:not-allowed; }
+  .rc-d.off:hover { border-color:transparent; }
+  .rc-d.hol { background:repeating-linear-gradient(135deg,#f0f1f4 0 5px,#e6e8ed 5px 10px); }
+  .rc-d.today { border-color:#2c4f74; font-weight:700; }
+  .rc-d.pick { background:#2c4f74; color:#fff; }
+  .rc-d.add { background:#cfe0f3; color:#1d1d1f; }
+  .rc-d.rem { background:#f6d9d6; color:#8c2b20; text-decoration:line-through; }
+  .rc-blank { height:34px; }
+  .rc-sum { margin-top:12px; font-size:14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; min-height:30px; }
+  .rc-sum b { font-weight:600; }
+  .rc-clear { border:1px solid #d4d9e1; background:#fff; border-radius:8px; padding:4px 10px; font-size:13px; cursor:pointer; }
+  .rc-muted { color:#7a8391; font-size:13px; }
+  .rc-full { color:#8c5a00; font-size:13px; }
+  .rc-key { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:#5b6472; margin-top:10px; }
+  .rc-key i { display:inline-block; width:14px; height:14px; border-radius:4px; vertical-align:-2px; margin-right:5px; border:1px solid #d4d9e1; }
+</style>
+
+<div class="rc-page">
+  <h3>A · Two months, always side by side</h3>
+  <p class="rc-why">This month and next are always shown. The arrows move both on by one month. A drag can run straight from one month into the next. On a phone, the second month sits under the first. <b>My pick:</b> nothing moves around while you drag.</p>
+  <div class="rc-label">Which day?</div>
+  <div class="rc-seg"><span>Today</span><span>Tomorrow</span><span class="on">Pick dates</span></div>
+  <div class="rc-cal" id="calA"></div>
+  <div class="rc-sum" id="sumA"></div>
+</div>
+
+<div class="rc-page">
+  <h3>B · One month; the next one opens when you drag to the end</h3>
+  <p class="rc-why">One month is shown. Drag into its last week and the next month opens beside it, so you can keep going. It stays open while any of its days are ticked. Smaller, but the page changes while you're dragging.</p>
+  <div class="rc-label">Which day?</div>
+  <div class="rc-seg"><span>Today</span><span>Tomorrow</span><span class="on">Pick dates</span></div>
+  <div class="rc-cal" id="calB"></div>
+  <div class="rc-sum" id="sumB"></div>
+</div>
+
+<div class="rc-key">
+  <span><i style="background:#2c4f74"></i>ticked</span>
+  <span><i style="background:#cfe0f3"></i>being added by the drag</span>
+  <span><i style="background:#f6d9d6"></i>being taken off by the drag</span>
+  <span><i style="background:#f0f1f4"></i>weekend or past</span>
+  <span><i style="background:repeating-linear-gradient(135deg,#f0f1f4 0 3px,#e6e8ed 3px 6px)"></i>holiday (point at it for its name)</span>
+</div>
+
+<script>
+(function () {
+  const TODAY = new Date(2026, 10, 26), MAX = 20;
+  const HOL = { "2026-12-04": "Made-up holiday", "2026-12-25": "Christmas Day", "2027-01-01": "New Year's Day" };
+  const MON = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const pad = n => String(n).padStart(2, "0");
+  const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const parse = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+  const say = s => { const d = parse(s); return `${DOW[(d.getDay() + 6) % 7]} ${d.getDate()} ${MON[d.getMonth()].slice(0, 3)}`; };
+  const offWhy = d => d < TODAY ? "In the past" : d.getDay() === 0 || d.getDay() === 6 ? "Weekend" : HOL[iso(d)] || "";
+  const school = d => !offWhy(d);
+  function between(a, b) {           /* school days from a to b, either order, in date order */
+    let x = parse(a < b ? a : b); const end = parse(a < b ? b : a), out = [];
+    while (x <= end) { if (school(x)) out.push(iso(x)); x = new Date(x.getFullYear(), x.getMonth(), x.getDate() + 1); }
+    return out;
+  }
+  function nextSchool(s) { let x = parse(s); for (let i = 0; i < 40; i++) { x = new Date(x.getFullYear(), x.getMonth(), x.getDate() + 1); if (school(x)) return iso(x); } return ""; }
+  function runs(list) {
+    const out = []; let st = null, prev = null;
+    list.forEach(s => { if (prev && nextSchool(prev) === s) { prev = s; return; } if (st) out.push([st, prev]); st = prev = s; });
+    if (st) out.push([st, prev]);
+    return out.map(([a, b]) => a === b ? say(a) : `${say(a)} – ${say(b)}`);
+  }
+
+  function make(calId, sumId, mode) {
+    const cal = document.getElementById(calId), sum = document.getElementById(sumId);
+    const S = { y: 2026, m: 10, picked: new Set(), drag: null, wide: false, note: "" };
+    const ym = (y, m) => new Date(y, m, 1);
+    function months() {
+      const a = ym(S.y, S.m), b = ym(S.y, S.m + 1);
+      if (mode === "two") return [a, b];
+      const keepNext = [...S.picked].some(s => { const d = parse(s); return d.getFullYear() === b.getFullYear() && d.getMonth() === b.getMonth(); });
+      return S.wide || keepNext ? [a, b] : [a];
+    }
+    function preview() {
+      if (!S.drag) return { add: new Set(), rem: new Set() };
+      const r = between(S.drag.a, S.drag.c);
+      if (!S.drag.adding) return { add: new Set(), rem: new Set(r.filter(s => S.picked.has(s))) };
+      const room = MAX - S.picked.size, add = [];
+      const order = S.drag.a <= S.drag.c ? r : r.slice().reverse();
+      for (const s of order) { if (S.picked.has(s)) continue; if (add.length >= room) break; add.push(s); }
+      return { add: new Set(add), rem: new Set() };
+    }
+    function draw() {
+      const ms = months(), pv = preview(), first = ym(TODAY.getFullYear(), TODAY.getMonth());
+      cal.innerHTML = ms.map((m0, i) => {
+        const y = m0.getFullYear(), m = m0.getMonth(), lead = (m0.getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
+        let cells = DOW.map(d => `<div class="rc-dow">${d}</div>`).join("");
+        for (let k = 0; k < lead; k++) cells += `<div class="rc-blank"></div>`;
+        for (let d = 1; d <= days; d++) {
+          const dt = new Date(y, m, d), s = iso(dt), why = offWhy(dt);
+          const c = ["rc-d", why ? "off" : "", HOL[s] && dt >= TODAY ? "hol" : "", s === iso(TODAY) ? "today" : "",
+            pv.rem.has(s) ? "rem" : S.picked.has(s) ? "pick" : pv.add.has(s) ? "add" : ""].filter(Boolean).join(" ");
+          cells += `<div class="${c}" data-d="${s}" title="${why || say(s)}">${d}</div>`;
+        }
+        const left = i === 0 ? `<button class="rc-arrow" data-go="-1" ${m0 <= first ? "disabled" : ""} aria-label="Earlier month">‹</button>` : `<button class="rc-arrow ghost">‹</button>`;
+        const right = i === ms.length - 1 ? `<button class="rc-arrow" data-go="1" aria-label="Later month">›</button>` : `<button class="rc-arrow ghost">›</button>`;
+        return `<div class="rc-month"><div class="rc-mhead">${left}<span>${MON[m]} ${y}</span>${right}</div><div class="rc-grid">${cells}</div></div>`;
+      }).join("");
+      const list = [...S.picked].sort();
+      sum.innerHTML = list.length
+        ? `<b>${list.length} school day${list.length === 1 ? "" : "s"}:</b> <span>${runs(list).join(", ")}</span> <button class="rc-clear" data-clear>Clear all</button>${list.length >= MAX ? `<span class="rc-full">That is 20 school days, the most at one time.</span>` : ""}`
+        : `<span class="rc-muted">No dates yet. Up to 20 school days.</span>`;
+    }
+    const dayAt = (x, y) => { const el = document.elementFromPoint(x, y); return el && el.closest && el.closest(`#${calId} .rc-d[data-d]`); };
+    cal.addEventListener("pointerdown", e => {
+      const b = e.target.closest(".rc-arrow[data-go]");
+      if (b) { if (!b.disabled) { S.m += Number(b.dataset.go); if (S.m > 11) { S.m -= 12; S.y++; } if (S.m < 0) { S.m += 12; S.y--; } S.wide = false; draw(); } return; }
+      const c = e.target.closest(".rc-d[data-d]");
+      if (!c || c.classList.contains("off")) return;
+      e.preventDefault();
+      S.drag = { a: c.dataset.d, c: c.dataset.d, adding: !S.picked.has(c.dataset.d) };
+      draw();
+    });
+    document.addEventListener("pointermove", e => {
+      if (!S.drag) return;
+      const c = dayAt(e.clientX, e.clientY);
+      if (!c || c.dataset.d === S.drag.c) return;
+      S.drag.c = c.dataset.d;
+      if (mode === "one") {     /* into the last week of the first month shown: open the next one beside it */
+        const d = parse(S.drag.c), last = new Date(S.y, S.m + 1, 0).getDate();
+        if (d.getMonth() === S.m && d.getDate() > last - 7) S.wide = true;
+      }
+      draw();
+    });
+    document.addEventListener("pointerup", () => {
+      if (!S.drag) return;
+      const pv = preview();
+      pv.add.forEach(s => S.picked.add(s)); pv.rem.forEach(s => S.picked.delete(s));
+      S.drag = null; S.wide = false; draw();
+    });
+    sum.addEventListener("click", e => { if (e.target.closest("[data-clear]")) { S.picked.clear(); draw(); } });
+    draw();
+  }
+  make("calA", "sumA", "two");
+  make("calB", "sumB", "one");
+})();
+</script>

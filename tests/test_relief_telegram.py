@@ -6565,8 +6565,8 @@ def an_overlap_is_refused_with_the_apps_sentence():
         to_list(); real = AP.listing
         with stand_in(AP, "listing", lambda pub, data=None: [p for p in real(pub, data) if p["name"] != ROSA]): assert answered(tapping(EVE, "Send")) == ("Choose your reporting officer.", True) and mine() == [] and asking_of(EVE)
     with school(EVE):                                                                      # a day that has passed by then: the day's button, and Send
-        at("23:50", 13); say(EVE, "/relief"); u = tapping(EVE, "Today, Tue 13 Oct"); at("00:01", 14); was = talks(); assert answered(u) == ("Choose up to 10 school days, today or later.", True) and talks() == was
-        at("23:50", 13); to_list(day="Today, Tue 13 Oct"); at("00:05", 14); was = talks(); assert answered(tapping(EVE, "Send")) == ("Choose up to 10 school days, today or later.", True) and talks() == was and mine() == []
+        at("23:50", 13); say(EVE, "/relief"); u = tapping(EVE, "Today, Tue 13 Oct"); at("00:01", 14); was = talks(); assert answered(u) == ("Choose up to 20 school days, today or later.", True) and talks() == was
+        at("23:50", 13); to_list(day="Today, Tue 13 Oct"); at("00:05", 14); was = talks(); assert answered(tapping(EVE, "Send")) == ("Choose up to 20 school days, today or later.", True) and talks() == was and mine() == []
     with school(EVE):                                                                      # added meanwhile: in the absence, with no work
         to_list(); more = json.loads(json.dumps(SCHOOL)); more["model"]["lessons"].append(lesson(TUE, 10, 1, ["4A"], "Biology", [EVE]))
         with no_pub(more): assert sends()[0][0].startswith("✅ Sent to the relief team: 3 lessons, no work set yet.")

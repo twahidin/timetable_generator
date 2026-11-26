@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from exams.days import bounds, hhmm
 from relief.calendar import school_day, week_of
 
+NO_DAYS = "There are no school days coming up in the calendar."
 NO_CALENDAR = "Set the school calendar in Relief settings first: relief needs it to know which timetable day a date is."
 
 

@@ -46,6 +46,10 @@ t("only the very word is taken for it, and nothing of it is written into the pag
     assert.ok(html.includes("for themselves · app") && !html.includes("<b>"), String(via));
   }
 });
+t("a long absence's dates read as one run in the row", async () => {
+  const html = await shown([record({ dates: ["2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"] })]);
+  assert.ok(html.includes("Tue 13 Oct \u2013 Fri 16 Oct"), html);
+});
 
 (async () => {
   for (const [name, f] of all) {
