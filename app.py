@@ -206,6 +206,8 @@ def page(title, body):
 # ------------------------------------------------------------------------------------------------ signing in
 CODE_LABEL = "Your personal code (on the slip from the school)"
 CODE_LABEL_SHARED = "Your code (the one the school gave you)"   # while a shared code still opens the site
+TO_STUDENT = "Students: sign in with your code"
+TO_STAFF = "Staff: sign in with your username"
 TO_USERNAME = "Committee and management: sign in with your username"
 WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
@@ -239,6 +241,11 @@ def school_name():
 def _warnings():
     return "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
 
+def _staff_codes_off():
+    """staff codes are off (accounts that cannot be read count as on, as the sign-in does)"""
+    try: return people.staff_codes_off(people.load())
+    except Exception: return False
+
 def _code_label():
     """the code box's words: the plain ones people already know while any shared code is set and not turned off (a teacher
     with the shared teacher code is not told they need a personal one); "personal code" once every shared code is off.
@@ -248,13 +255,13 @@ def _code_label():
     except Exception: off = {}
     return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in people.SHARED) else CODE_LABEL
 
-def _code_page(msg=""):
+def _code_page(msg="", student=False):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="/login"><label for="code">{esc(_code_label())}</label>
+<div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(CODE_LABEL if student else _code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
 <button type="submit">Open</button></form>{err}
-<p class="way"><a href="/login/password">{esc(TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
+<p class="way"><a href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
 
 def _form_page(title, form, msg="", hint="", back=("/login", "Sign in with a code"), tail=None):
     """a small page with one form; tail: the HTML at its foot (the setup warnings unless given)"""
@@ -269,7 +276,8 @@ def _field(name, label, kind="password", auto="off", focus=False):
 def _password_page(msg=""):
     form = f"""<form method="post" action="/login/password">{_field("username", "Username", "text", "username", True)}
 {_field("password", "Password", auto="current-password")}<button type="submit">Sign in</button></form>""" if accounts_on() and people.readable() else ""
-    return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.")
+    kw = {"back": ("/student", TO_STUDENT)} if _staff_codes_off() else {}
+    return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.", **kw)
 
 def _change_page(p, msg="", form=True):
     first = "<p>Choose your own password before you go on.</p>" if p.get("must_change") else ""
@@ -326,10 +334,19 @@ def _start(**keys):
 
 @app.get("/login")
 def login_page():
-    return _code_page()   # ?as= (the old cards) is accepted and ignored
+    return _password_page() if _staff_codes_off() else _code_page()   # ?as= (the old cards) is accepted and ignored
 
 @app.post("/login")
-def login():
+def login(): return _sign_in_with_code(_code_page)
+
+@app.get("/student")
+def student_page(): return _code_page(student=True)
+
+@app.post("/student")
+def student(): return _sign_in_with_code(lambda msg: _code_page(msg, student=True))
+
+def _sign_in_with_code(_code_page):
+    """the code POST shared by /login and /student; _code_page draws the page an error shows on"""
     addr = request.remote_addr or "?"
     if limiter.blocked(addr):
         _record_locked(("addr", addr), "code"); return _code_page(TOO_MANY_CODES), 429
@@ -1508,7 +1525,7 @@ def code_slips():
     if not pub: abort(404)
     if not access.personal_codes_on(): return NO_PERSONAL, 409
     buf = io.BytesIO()
-    code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/"), buf)
+    code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/") + "/student", buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="timetable code slips.pdf", mimetype="application/pdf")
 

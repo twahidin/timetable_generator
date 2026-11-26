@@ -106,7 +106,7 @@ HOOK = "/telegram/hook"   # Telegram posts here without a session: its own secre
 def walked():
     """every rule of the app the walk covers: all but the static files, the sign-in pages and Telegram's hook, which have no guard"""
     for rule in A.app.url_map.iter_rules():
-        if rule.endpoint == "static" or rule.rule.startswith("/login") or rule.rule in ("/logout", "/healthz", "/account/password"): continue
+        if rule.endpoint == "static" or rule.rule.startswith("/login") or rule.rule in ("/student", "/logout", "/healthz", "/account/password"): continue
         if rule.rule == HOOK: continue
         yield rule
 

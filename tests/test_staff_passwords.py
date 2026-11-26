@@ -336,6 +336,56 @@ def the_history_says_how_many_and_never_a_password():
     e = [e for e in H.read(kinds=["account"], limit=50) if e.get("what") == "slips"][0]
     assert e["text"] == "Printed sign-in slips for 1 staff: 0 new accounts; 1 had chosen a password", e
 
+TO_STUDENT = "Students: sign in with your code"
+TO_STAFF = "Staff: sign in with your username"
+STUDENT_LABEL = "Your personal code (on the slip from the school)"
+
+@t
+def while_staff_codes_are_on_the_front_page_is_as_today():
+    h = A.app.test_client().get("/login").data.decode()
+    assert 'name="code"' in h and 'href="/login/password"' in h and 'name="username"' not in h and "/student" not in h
+
+@t
+def when_staff_codes_are_off_the_front_page_is_the_username_page():
+    staff_off(admin())
+    h = A.app.test_client().get("/login").data.decode()
+    assert 'name="username"' in h and 'name="password"' in h and 'name="code"' not in h
+    assert 'href="/student"' in h and TO_STUDENT in h, h
+
+@t
+def the_student_page():
+    c = A.app.test_client(); h = c.get("/student").data.decode()
+    assert 'name="code"' in h and STUDENT_LABEL in h and 'action="/student"' in h
+    assert f'href="/login/password">{TO_STAFF}' in h, h
+    sc = access.personal_code("S001"); SECRETS.append(sc)
+    r = c.post("/student", data=dict(code=sc)); assert went(r, "/me"), r.status_code
+    r = A.app.test_client().post("/student", data=dict(code=secret())); h = r.data.decode()
+    assert r.status_code == 401 and WRONG in h and 'action="/student"' in h
+    r = A.app.test_client().post("/student", data=dict(code=CODES["STUDENT_CODE"])); assert went(r, "/timetable"), r.status_code
+    staff_off(admin()); h = A.app.test_client().get("/student").data.decode()
+    assert f'href="/login">{TO_STAFF}' in h, h
+    n = strikes()
+    r = A.app.test_client().post("/student", data=dict(code=staff_code(ALICE))); h = r.data.decode()
+    assert r.status_code == 401 and STAFF_USE_PASSWORD in h and 'action="/student"' in h and strikes() == n + 1
+    assert last()["reason"] == "staff code after staff codes were turned off"
+
+@t
+def student_slips_print_the_student_page():
+    c = admin(); seen = []
+    import ttgen.export as X
+    real = X.code_slips_pdf
+    def spy(m, codes, url, out): seen.append(url); out.write(b"%PDF-1.4")   # the route's own work; the real drawing needs a full model
+    X.code_slips_pdf = spy
+    try: r = c.get("/api/code-slips.pdf")
+    finally: X.code_slips_pdf = real
+    assert r.status_code == 200 and seen and seen[0].endswith("/student"), (r.status_code, seen)
+
+@t
+def post_login_still_takes_codes_when_off():
+    staff_off(admin())
+    sc = access.personal_code("S001"); SECRETS.append(sc)
+    c, r = code_in(sc); assert went(r, "/me"), r.status_code
+
 @t
 def nothing_typed_reaches_the_history():
     text = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(H.DIR, "*.jsonl")))
