@@ -166,7 +166,7 @@
 
     function card(r) {
       const [chip, tone] = status(r), mine = r.teacher === R.me.name, editable = open(r), busy = M.busy.has(r.id) || (M.up.get(r.id) || 0) > 0;
-      const head = [mine ? "" : `<b>${esc(r.teacher)}</b>`, `<b>${esc((r.dates || []).map(day).join(", "))}</b>`, esc(span(r)), esc(reason(r))].filter(Boolean);
+      const head = [mine ? "" : `<b>${esc(r.teacher)}</b>`, `<b>${esc(RF.dayRuns(r.dates))}</b>`, esc(span(r)), esc(reason(r))].filter(Boolean);
       const sub = [r.how === "planned" ? `Planned by ${who(r.by)}` : `Asked by ${who(r.by)}`, plural((r.lessons || []).length, "lesson")];
       if (r.remarks) sub.push(`Remarks: ${r.remarks}`);
       const many = new Set((r.lessons || []).map(x => x.date)).size > 1;

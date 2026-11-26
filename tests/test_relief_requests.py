@@ -1257,5 +1257,26 @@ def people_say_who_is_staff_only():
     finally:
         AP.update(lambda d: d["people"].pop(NEWBIE, None))
 
+# ---- Calendar, Task 2: One runs rule for a line of dates ----
+
+@t
+def words_days_joins_runs_of_three_or_more():
+    from relief import words
+    d = lambda *x: words.days(dict(dates=[f"2026-10-{n:02d}" for n in x]))
+    assert d(13, 14) == "Tue 13 Oct, Wed 14 Oct", d(13, 14)
+    assert d(12, 13, 14) == "Mon 12 Oct \u2013 Wed 14 Oct"
+    assert d(15, 16, 19, 20) == "Thu 15 Oct \u2013 Tue 20 Oct"
+    assert d(21, 22, 26, 27) == "Wed 21 Oct, Thu 22 Oct, Mon 26 Oct, Tue 27 Oct"
+    assert d(20, 16, 12, 13, 14, 15, 13) == "Mon 12 Oct \u2013 Fri 16 Oct, Tue 20 Oct"
+    assert words.days(dict(dates=[])) == "" and words.days(dict()) == ""
+
+@t
+def calendar_names_a_holiday_without_a_name_holiday():
+    from relief import calendar as RC
+    cal = dict(terms=[dict(name="Term 4", start="2026-10-12", end="2026-10-30", starts_as="Odd")],
+               holidays=[dict(start="2026-10-14", end="2026-10-14")])
+    got, off = RC.school_days(cal, day_names(2), datetime.date(2026, 10, 12))
+    assert off == {datetime.date(2026, 10, 14): "Holiday"}, off
+
 
 print(f"{COUNT} relief request tests passed")

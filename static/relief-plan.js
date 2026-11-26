@@ -366,7 +366,7 @@
     else if (r.acknowledged) chip = `<span class="chip st-ok">✓ acknowledged${cover.length && cover.every(hasWork) ? ", work set" : ""}</span>`;
     else chip = `<span class="chip st-amber">not acknowledged yet</span>`;
     return `<tr class="${r.cancelled ? "off" : ""}">
-      <td><b>${esc((r.dates || []).map(day).join(", "))}</b><div class="small muted">${esc(R.span(r))}</div></td>
+      <td><b>${esc(RF.dayRuns(r.dates))}</b><div class="small muted">${esc(R.span(r))}</div></td>
       <td>${esc(r.teacher)}<div class="small muted">${esc(R.reason(r))}</div></td>
       <td>${cover.length ? esc(`${k} chosen · ${cover.length - k} open`) : `<span class="muted">none to cover</span>`}${changedNow ? `<div class="small pl-changed">A lesson has changed since this was planned</div>` : ""}</td>
       <td>${chip}</td>

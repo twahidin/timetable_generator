@@ -38,8 +38,19 @@ def day(iso):
 
 
 def days(record):
-    """'Tue 13 Oct, Wed 14 Oct': the dates of an absence"""
-    return ", ".join(day(d) for d in record.get("dates") or [])
+    """'Tue 13 Oct, Wed 14 Oct': the dates of an absence; three or more school days in a row read 'Mon 30 Nov \u2013 Fri 11 Dec'
+    (a date continues a run when it is the next weekday: Friday carries on to Monday)"""
+    dates = sorted({datetime.date.fromisoformat(str(d)[:10]) for d in record.get("dates") or []})
+    runs = []
+    for d in dates:
+        nxt = d - datetime.timedelta(days=3 if d.weekday() == 0 else 1)
+        if runs and runs[-1][-1] == nxt: runs[-1].append(d)
+        else: runs.append([d])
+    out = []
+    for r in runs:
+        if len(r) >= 3: out.append(f"{day(r[0].isoformat())} \u2013 {day(r[-1].isoformat())}")
+        else: out.extend(day(d.isoformat()) for d in r)
+    return ", ".join(out)
 
 
 def away(record):

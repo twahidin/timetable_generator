@@ -39,6 +39,17 @@ window.ReliefForm = (function () {
     return d ? `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}` : String(iso ?? "");
   }
 
+  /* "Mon 30 Nov – Fri 11 Dec, Tue 15 Dec": the dates sorted, three or more school days in a row as one run (Friday carries on to
+     Monday), the rest one by one. label names each date (default day). The same rule as relief/words.py days(). */
+  function dayRuns(dates, label) {
+    const say = label || day, seen = [...new Set((dates || []).filter(d => utc(d)).map(d => isoOf(utc(d))))].sort(), runs = [];
+    for (const iso of seen) {
+      const w = utc(iso).getUTCDay(), prev = runs.length ? runs[runs.length - 1] : null;
+      if (prev && prev[prev.length - 1] === addDays(iso, w === 1 ? -3 : -1)) prev.push(iso); else runs.push([iso]);
+    }
+    return runs.map(r => (r.length >= 3 ? `${say(r[0])} \u2013 ${say(r[r.length - 1])}` : r.map(say).join(", "))).join(", ");
+  }
+
   function addDays(iso, n) {
     const d = utc(iso);
     if (!d) return "";
@@ -272,5 +283,5 @@ window.ReliefForm = (function () {
     });
   }
 
-  return { lessons, read, files, needed, redraw, reset, person, esc, day, addDays, today, setToday, periods, periodSelects, time, title, when, size, checkFile, fit, fitAll, KINDS };
+  return { lessons, read, files, needed, redraw, reset, person, esc, day, dayRuns, addDays, today, setToday, periods, periodSelects, time, title, when, size, checkFile, fit, fitAll, KINDS };
 })();
