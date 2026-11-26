@@ -4602,7 +4602,7 @@ document.addEventListener("pointerdown", e => {   // where the pointer was press
 }, true);
 document.addEventListener("drop", e => {   // a drop: the question it asks goes beside where the lesson was let go
   const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target)) return;
-  const r = box.getBoundingClientRect(), pane = e.target.closest && e.target.closest(".bdpane"); BD.popXY = { x: e.clientX - r.left, y: e.clientY - r.top, pane: pane ? Number(pane.dataset.pane) : null };
+  const r = box.getBoundingClientRect(), pane = e.target.closest && e.target.closest(".bdpane"); BD.popXY = { x: e.clientX - r.left, y: e.clientY - r.top + box.scrollTop, pane: pane ? Number(pane.dataset.pane) : null };
 }, true);
 /* the side panel's width: dragged with the grip between the board and the panel, kept in this browser (localStorage), back to its usual width on a double-click */
 const BDSIDE = "tt.bdside";
