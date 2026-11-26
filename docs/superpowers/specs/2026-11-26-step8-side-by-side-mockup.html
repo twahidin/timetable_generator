@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mock-up: step 8, three classes and the lesson panel in four panels</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2433;--muted:#5d6678;--line:#e3e7ee;--navy:#1f4e78;--accent:#2563eb;--chip:#e9effa;--bdlab:42px;--bdw:20px;--bdh:30px}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,select{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:#b8c4d4}
+button[disabled]{opacity:.5;cursor:default}
+.muted{color:var(--muted)}.small{font-size:12px}
+.top{background:var(--navy);color:#fff;padding:10px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.top b{font-size:16px}
+.steps{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+.steps span{font-size:12px;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.14)}
+.steps span.on{background:#fff;color:var(--navy);font-weight:600}
+.mock{margin:12px 18px 0;background:#fff7dd;border:1px solid #ecd58a;border-radius:10px;padding:8px 14px;font-size:13.5px}
+.mock summary{cursor:pointer;font-weight:600}
+.mock ol{margin:6px 0 2px;padding-left:22px}.mock li{margin:3px 0}
+.tt{position:relative;margin:12px 18px 18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:0 1px 2px rgba(30,50,90,.06),0 10px 30px rgba(30,50,90,.08)}
+.bdtitle{display:flex;gap:10px;align-items:center}.bdtitle h2{margin:0;font-size:19px}
+.bdtitle .fullbtn{margin-left:auto;background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}
+.seg{display:inline-flex;gap:4px;align-items:center}
+.seg button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.gap{width:10px}
+.chipc{display:inline-flex;align-items:center;gap:2px;background:var(--chip);border-radius:999px;padding:2px 4px 2px 12px;font-weight:600}
+.chipc button{border:0;background:none;padding:2px 7px;border-radius:999px;font-size:13px}
+.chipc button:hover{background:#d5deee}
+.new{font-size:10px;font-weight:700;letter-spacing:.04em;background:#2563eb;color:#fff;border-radius:4px;padding:1px 5px;vertical-align:1px}
+.bdcount button.crit{background:#fbdcdc;border-color:#e46a6a;color:#8a1c1c}
+.row.bdcount{flex-wrap:nowrap}.bdcount>button{flex:0 0 auto;white-space:nowrap}
+.bdcount .bdundo{margin-left:auto;display:flex;flex:1 1 0;justify-content:flex-end;gap:8px;align-items:center;min-width:0}
+.bdcount .bdundo button{flex:0 0 auto;white-space:nowrap}
+.bdcount .bdundo span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.keys{font-size:12.5px;color:var(--muted);gap:4px 14px}
+.bdkey{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid rgba(0,0,0,.08)}
+.bdkey.ok{background:#bfe8cc}.bdkey.prefer{background:#f6dca4}.bdkey.no{background:#f3b9c2}.bdkey.ask{background:#bcd3f4}.bdkey.na{background:#d6dbe2}
+.bdkey.kt{background:#fff;border:2px solid #7c3aed}.bdkey.kr{background:#fff;border:2px dotted #0f8f8f}.bdkey.kb{background:#fff;border:2px dashed #c62828}
+.bdsel{display:flex;gap:8px;align-items:center;background:var(--chip);border-radius:8px;padding:0 10px;margin:6px 0;height:30px;overflow:hidden;font-size:13px}
+.bdsel span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.quad{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;margin-top:8px;height:max(600px,82vh)}
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#fff}
+.panehead{flex:0 0 auto;display:flex;gap:10px;align-items:center;padding:4px 8px;background:#f4f6fa;border-bottom:1px solid var(--line)}
+.panehead select{font-weight:700;font-size:14px;border:1px solid var(--line);border-radius:6px;padding:2px 4px;background:#fff}
+.panehead span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pane .empty{margin:auto;padding:20px;text-align:center}
+.bdwrap{flex:1 1 auto;min-width:0;min-height:0;overflow:auto;background:#fff}
+.bdin{position:relative;min-width:calc(var(--bdlab) + 26 * var(--bdw))}
+.bdhead,.bdrow{display:grid;grid-template-columns:var(--bdlab) repeat(26,minmax(var(--bdw),1fr));font-size:11px}
+.bdhead{position:sticky;top:0;z-index:4;background:var(--chip)}
+.bdcorner{position:sticky;left:0;background:var(--chip);z-index:5}
+.bdph{text-align:center;font-weight:600;padding:2px 0;border-left:1px solid var(--line)}
+.bdph{overflow:visible;white-space:nowrap}.bdph small{display:block;font-weight:400;color:var(--muted);font-size:9px;height:11px;text-align:left;padding-left:1px}
+.bdph.brk{background:#dfe3ea}
+.bdgrp{position:sticky;left:0;background:#f4f6fa;border-top:2px solid #c9d2df;font-weight:600;font-size:11px;padding:1px 6px;display:flex;gap:10px;align-items:baseline;color:var(--muted)}
+.bdgrp span{font-weight:400;font-size:12px;color:var(--muted)}
+.bdrow{border-top:1px solid var(--line);grid-template-rows:6px}
+.bdrow.wk{border-top:2px solid #c9d2df}
+.bdlab{grid-column:1;grid-row:1/-1;position:sticky;left:0;z-index:3;background:#fff;padding:2px 5px;font-weight:600;border-right:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center}
+.bdcell{display:block;border-left:1px solid var(--line);background:#fff}
+.bdcell.brk{background:#eceef2}
+.bdcell.ok{background:#d6f1e0;cursor:pointer}.bdcell.prefer{background:#fff0c2;cursor:pointer}.bdcell.no{background:#fbdcdc;cursor:pointer}.bdcell.na{background:#eceef2}
+.bdcell.ask{background:#dcebfa;cursor:pointer}
+.bdcell.own{box-shadow:inset 0 0 0 2px var(--accent)}
+.bdcell.over{box-shadow:inset 0 0 0 3px var(--navy)}
+.bdmark{display:block;height:6px;border-left:1px solid var(--line);background:#fff}
+.bdmark.ok{background:#4cb87a}.bdmark.prefer{background:#f2b632}.bdmark.no{background:#e46a6a}.bdmark.na{background:#d3d7df}.bdmark.ask{background:#7fb2e5}.bdmark.own{background:var(--accent)}
+.bdrow.other .bdcell{cursor:not-allowed}
+.bdcard{position:relative;display:flex;flex-direction:column;align-items:flex-start;text-align:left;min-width:0;margin:1px;padding:1px 3px;border-radius:4px;border:0;font-size:10.5px;line-height:1.2;overflow:hidden;cursor:grab;z-index:1}
+.bdcard b,.bdcard span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bdcard span{color:#3b4458}
+.compact .bdcard{flex-direction:row;gap:5px;align-items:center}
+.compact .bdcard b{flex:0 0 auto}.compact .bdcard span{flex:1 1 0;min-width:0}
+.compact .bdbadge{top:auto;bottom:0;right:0;max-width:60%;font-size:8.5px}
+.bdcard.sel{outline:2px solid var(--accent);outline-offset:-1px;z-index:2}
+.bdcard.crit{box-shadow:inset 0 0 0 2px #c62828}
+.bdcard.dimmed{opacity:.62}
+.bdcard.relt{outline:2px solid #7c3aed;outline-offset:-2px}
+.bdcard.relr{outline:2px dotted #0f8f8f;outline-offset:-2px}
+.bdcard.blocker{outline:3px dashed #c62828;outline-offset:-3px;opacity:1;z-index:2}
+.bdcard.flash{animation:fl 1s ease 2}
+@keyframes fl{50%{transform:scale(1.06);box-shadow:0 0 0 4px rgba(37,99,235,.45)}}
+.bdbadge{position:absolute;top:1px;right:1px;z-index:1;font-size:9px;line-height:1.3;font-style:normal;font-weight:600;padding:0 3px;border-radius:3px;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;background:#c62828}
+.bdstabs{display:flex;gap:4px;align-items:center;padding:5px 6px;border-bottom:1px solid var(--line)}
+.bdstab{flex:1 1 auto;min-width:0;padding:3px 6px;font-size:12px}
+.bdstab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bdsbody{overflow:auto;padding:8px 10px;font-size:13px;flex:1 1 auto;min-height:0}
+.bdsbody h3{margin:0 0 2px;font-size:15px}
+.bdsbody h4{margin:12px 0 3px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.bdsbody ul{margin:2px 0;padding-left:18px}.bdsbody li{margin:2px 0}
+.bdsbody .acts{display:flex;gap:6px;margin:8px 0}
+.critbox{background:#fdecec;border:1px solid #f1b5b5;border-radius:8px;padding:6px 9px;color:#8a1c1c;margin:8px 0}
+.critbox b{display:block}
+.okbox{background:#e7f6ee;border:1px solid #a9dcc0;border-radius:8px;padding:6px 9px;color:#145a36;margin:8px 0}
+.tag{display:inline-block;font-size:11px;border-radius:999px;padding:0 7px;background:var(--chip);margin-left:4px}
+.tag.out{background:#eceef2;color:var(--muted)}
+.bdpop{position:absolute;z-index:30;width:350px;max-width:calc(100% - 16px);display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff;border:1px solid #c9d4e3;border-radius:12px;box-shadow:0 12px 32px rgba(20,40,70,.22);padding:12px 14px;font-size:13.5px}
+.bdpop[hidden]{display:none}
+.bdpop>span{flex:1 0 100%}
+.bdpop>span:first-child{font-weight:600;font-size:14px}
+.bdpop .bdcl{font-size:12.5px}.bdpop .bdcl b{display:inline-block;min-width:62px;color:#b4233b}
+.bdpop .swapline{background:#eef6ff;border-radius:8px;padding:6px 8px;font-size:12.5px}
+.bdpop .swapline.bad{background:#fff4e0}
+.bdpop [data-swap]{background:#2563eb;border-color:#2563eb;color:#fff}
+.bdpop [data-cancel]{margin-left:auto}
+/* full screen: the board takes the whole window, the rows share its height */
+body.full{overflow:hidden}
+body.full .top,body.full .mock,body.full .viewrow{display:none}
+body.full .tt{position:fixed;inset:0;margin:0;border-radius:0;border:0;display:flex;flex-direction:column;padding:8px 10px}
+body.full .quad{flex:1 1 auto;min-height:0;height:auto}
+body.full .row{margin:3px 0}
+
+</style>
+</head>
+<body>
+<div class="top"><b>School timetable</b><span class="small">Setup for the committee</span>
+  <div class="steps"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span class="on">8 Upload and edit</span><span>9 Publish</span></div>
+</div>
+<details class="mock" open><summary>Mock-up of step 8 in four panels: three classes, each with both weeks, and the lesson panel. A made-up school with made-up names. Nothing here is saved.</summary>
+  <ol>
+    <li><b>Click 1B's Maths with the red mark</b> (Odd Tue). The fourth panel says what "in two places" is about, and the other lesson is outlined in 1A's panel.</li>
+    <li><b>With a lesson chosen, move the pointer along its class's rows.</b> Green is clean, red lands with a problem, blue has another lesson (it asks: swap, or put it there anyway), grey is not lesson time. A lesson in another class that blocks a place gets a red dashed outline.</li>
+    <li><b>Click a place, or drag the lesson there.</b> Click another lesson of the same class to swap the two. <b>Undo</b> puts it back.</li>
+    <li><b>Full screen</b> fills the window with the four panels. Esc goes back.</li>
+    <li>The list at the top of a panel changes its class.</li>
+  </ol>
+</details>
+
+<div class="tt" id="tt">
+  <div class="bdtitle"><h2>The timetable</h2><span class="muted small" id="fullNote"></span><button class="fullbtn" id="fullBtn">Full screen</button></div>
+  <div class="row viewrow"><span>Show:</span><span class="seg">
+    <button disabled title="As on step 8 today (not in this mock-up)">One day, all classes</button>
+    <button disabled title="As on step 8 today (not in this mock-up)">One class</button>
+    <button class="on">Four panels <span class="new">NEW</span></button></span>
+  </div>
+  <div class="row bdcount" id="counters"></div>
+  <div class="row keys">
+    <span><i class="bdkey ok"></i>Clean</span><span><i class="bdkey prefer"></i>Bends a Prefer</span><span><i class="bdkey no"></i>Lands with a problem</span><span><i class="bdkey ask"></i>Another lesson is there (asks)</span><span><i class="bdkey na"></i>Not lesson time</span>
+    <span><i class="bdkey kt"></i>Same teacher</span><span><i class="bdkey kr"></i>Same room</span><span><i class="bdkey kb"></i>Blocks the place under the pointer</span>
+  </div>
+  <div class="bdsel" id="line" aria-live="polite"></div>
+  <div class="quad" id="board"></div>
+  <div class="bdpop" id="pop" role="dialog" hidden></div>
+</div>
+
+<script id="model">
+/* the made-up school: four Sec 1 classes, a two-week cycle of ten days, 26 periods of 20 minutes, two breaks, a short Friday */
+var WEEKS = ["Odd", "Even"], DN = ["Mon", "Tue", "Wed", "Thu", "Fri"], DAYS = [];
+WEEKS.forEach(function (w, wi) { DN.forEach(function (n, i) { DAYS.push({ i: wi * 5 + i, week: wi, name: n, label: w + " " + n }); }); });
+var NP = 26, BREAKS = [7, 8, 16, 17], STARTS = [0, 3, 9, 12, 18, 21];
+function dayEnd(d) { return d % 5 === 4 ? 21 : NP; }
+function isOpen(d, p) { return p >= 0 && p < dayEnd(d) && BREAKS.indexOf(p) < 0; }
+function pad(n) { return (n < 10 ? "0" : "") + n; }
+function time(p) { var m = 450 + 20 * p; return pad(Math.floor(m / 60)) + ":" + pad(m % 60); }
+var CLASSES = ["1A", "1B", "1C", "1D"];
+var HOME = { "1A": "Rm 1-1", "1B": "Rm 1-2", "1C": "Rm 1-3", "1D": "Rm 1-4" };
+var FORM = { "1A": "Ms Rao", "1B": "Mr Lim", "1C": "Mdm Siti", "1D": "Mr Dev" };
+var PAL = { English: ["dbeafe", "3b82f6"], Maths: ["fde2e2", "e25555"], Science: ["d9f2e3", "2e9e62"], "MT band": ["f3e3fa", "a24fc4"], History: ["fff0c9", "d49a12"],
+  Geography: ["dff3f5", "1f9aa8"], PE: ["e6f0d8", "6f9a2b"], Art: ["fde6d6", "e07b39"], Music: ["e5e4fb", "6a62d6"], "D&T": ["e8e3da", "8a7350"], CCE: ["eceff3", "6b7688"], Literature: ["fbe1ee", "d1508f"] };
+var PLAN = [   // subject, lessons a week, the teacher of each class, the room of each class (none: the class's own room)
+  ["English", 4, ["Ms Rao", "Ms Rao", "Mr Dev", "Mr Dev"], null],
+  ["Maths", 4, ["Mr Lim", "Mr Lim", "Ms Chua", "Ms Chua"], null],
+  ["Science", 4, ["Mdm Siti", "Mr Goh", "Mdm Siti", "Mr Goh"], ["Lab 1", "Lab 2", "Lab 1", "Lab 2"]],
+  ["History", 2, ["Mr Wong"], null], ["Geography", 2, ["Ms Ong"], null],
+  ["PE", 2, ["Mr Yeo", "Mr Yeo", "Ms Tay", "Ms Tay"], ["Hall", "Hall", "Field", "Field"]],
+  ["Literature", 1, ["Ms Rao", "Ms Rao", "Mr Dev", "Mr Dev"], null],
+  ["Art", 1, ["Ms Koh"], ["Art Room"]], ["Music", 1, ["Mr Sim"], ["Music Room"]], ["D&T", 1, ["Mr Ang"], ["D&T Lab"]]
+];
+function rng(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function overlap(x, d, p, n) { return x.d === d && x.p < p + n && p < x.p + x.n; }
+function what(x) { return x.classes.length > 1 ? x.subject : x.classes[0] + " " + x.subject; }
+function where(d, p) { return DAYS[d].label + " period " + p; }
+
+function build(seed) {
+  var rnd = rng(seed), L = [], id = 1, fail = 0;
+  function free(c, t, room, d, p) {
+    for (var q = p; q < p + 3; q++) if (!isOpen(d, q)) return false;
+    return !L.some(function (x) { return overlap(x, d, p, 3) && (x.classes.indexOf(c) >= 0 || x.teachers.indexOf(t) >= 0 || (room && x.room === room)); });
+  }
+  [0, 1].forEach(function (w) {
+    [0, 2, 3].forEach(function (k) { L.push({ id: id++, subject: "MT band", classes: CLASSES.slice(), teachers: ["Ms Liu", "Mr Raj", "Mdm Aini", "Mr Chen"], room: "", d: w * 5 + k, p: 9, n: 3 }); });
+    CLASSES.forEach(function (c) { L.push({ id: id++, subject: "CCE", classes: [c], teachers: [FORM[c]], room: HOME[c], d: w * 5 + 4, p: 18, n: 3 }); });
+    var tasks = [], load = {};
+    PLAN.forEach(function (pl) { CLASSES.forEach(function (c, ci) { for (var i = 0; i < pl[1]; i++) { var t = pl[2][ci % pl[2].length]; load[t] = (load[t] || 0) + 1; tasks.push({ s: pl[0], c: c, t: t, r: pl[3] ? pl[3][ci % pl[3].length] : HOME[c], k: rnd() }); } }); });
+    tasks.sort(function (a, b) { return load[b.t] - load[a.t] || a.k - b.k; });
+    tasks.forEach(function (t) {
+      var cand = [];
+      for (var d = w * 5; d < w * 5 + 5; d++) STARTS.forEach(function (p) {
+        if (!free(t.c, t.t, t.r, d, p)) return;
+        cand.push({ d: d, p: p, same: L.some(function (x) { return x.d === d && x.subject === t.s && x.classes.indexOf(t.c) >= 0; }) ? 1 : 0,
+          day: L.filter(function (x) { return x.d === d && x.classes.indexOf(t.c) >= 0; }).length, k: rnd() });
+      });
+      cand.sort(function (a, b) { return a.same - b.same || a.day - b.day || a.k - b.k; });
+      if (!cand.length) { fail++; return; }
+      L.push({ id: id++, subject: t.s, classes: [t.c], teachers: [t.t], room: t.r, d: cand[0].d, p: cand[0].p, n: 3 });
+    });
+  });
+  return { lessons: L, fail: fail };
+}
+
+var LESSONS = [];
+/* everything in the way of lesson L at a place: one line a collision, led by its kind */
+function collisions(L, d, p) {
+  var out = [];
+  LESSONS.forEach(function (x) {
+    if (x.id === L.id || !overlap(x, d, p, L.n)) return;
+    var cs = L.classes.filter(function (c) { return x.classes.indexOf(c) >= 0; });
+    if (cs.length) out.push({ kind: "Class", text: (cs.length > 2 ? "The classes have " : cs.join(" and ") + (cs.length > 1 ? " have " : " has ")) + x.subject + " then.", x: x });
+    if (cs.length) return;   // a lesson of the same class is said once, as the class's
+    L.teachers.filter(function (t) { return x.teachers.indexOf(t) >= 0; }).forEach(function (t) { out.push({ kind: "Teacher", text: t + " is teaching " + what(x) + " then.", x: x }); });
+    if (L.room && x.room === L.room) out.push({ kind: "Room", text: L.room + " is in use then (" + what(x) + ").", x: x });
+  });
+  return out;
+}
+function prefer(L, d, p) {
+  if (L.subject === "PE" && p === 18) return "Bends a Prefer: no PE straight after lunch.";
+  if (L.subject === "Maths" && p >= 19) return "Bends a Prefer: Maths before 2 pm.";
+  return "";
+}
+function judge(L, d, p) {
+  if (d === L.d && p === L.p) return { state: "own" };
+  for (var q = p; q < p + L.n; q++) if (!isOpen(d, q)) return { state: "na", why: q >= dayEnd(d) ? "the day has ended by then." : "a break is in the way." };
+  var col = collisions(L, d, p);
+  if (col.some(function (c) { return c.kind === "Class"; })) return { state: "ask", col: col };
+  if (col.length) return { state: "no", col: col, why: col[0].text };
+  var pf = prefer(L, d, p);
+  return pf ? { state: "prefer", why: pf } : { state: "ok" };
+}
+/* the critical mistakes of a lesson where it is now: break, teacher, class, room */
+function marks(L) {
+  var out = [], col = collisions(L, L.d, L.p);
+  for (var q = L.p; q < L.p + L.n; q++) if (!isOpen(L.d, q)) { out.push("break"); break; }
+  ["Teacher", "Class", "Room"].forEach(function (k) { if (col.some(function (c) { return c.kind === k; })) out.push(k.toLowerCase()); });
+  return out;
+}
+var MARK = { "break": "Not lesson time", teacher: "Teacher in two places", "class": "Class in two places", room: "Room in two places" };
+function twoPlaces(L) { return marks(L).some(function (m) { return m !== "break"; }); }
+
+/* one teacher clash to start with: a 1B Maths lesson of Mr Lim's put where he teaches 1A Maths, the 1B lesson that was there going to its place */
+function plant() {
+  var A = LESSONS.filter(function (x) { return x.subject === "Maths" && x.classes[0] === "1A" && x.d < 5; });
+  for (var i = 0; i < A.length; i++) {
+    var a = A[i], y = LESSONS.filter(function (x) { return x.classes.length === 1 && x.classes[0] === "1B" && x.d === a.d && x.p === a.p && x.subject !== "CCE" && x.teachers.indexOf("Mr Lim") < 0; })[0];
+    if (!y) continue;
+    var M = LESSONS.filter(function (x) { return x.subject === "Maths" && x.classes[0] === "1B" && x.d < 5 && x.d !== a.d; });
+    for (var j = 0; j < M.length; j++) {
+      var m = M[j], md = m.d, mp = m.p;
+      m.d = y.d; m.p = y.p; y.d = md; y.p = mp;
+      var bad = LESSONS.filter(function (x) { return marks(x).length; });
+      if (bad.length === 2 && bad.indexOf(a) >= 0 && bad.indexOf(m) >= 0) return m.id;
+      y.d = m.d; y.p = m.p; m.d = md; m.p = mp;
+    }
+  }
+  return null;
+}
+function start() {
+  for (var seed = 1; seed < 400; seed++) {
+    var b = build(seed);
+    if (b.fail) continue;
+    LESSONS = b.lessons;
+    var planted = plant();
+    if (planted !== null) return { seed: seed, planted: planted };
+  }
+  return null;
+}
+var STARTED = start();
+if (typeof module !== "undefined") module.exports = { STARTED: STARTED, lessons: function () { return LESSONS; }, marks: marks, judge: judge, collisions: collisions, DAYS: DAYS, CLASSES: CLASSES };
+</script>
+
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); }, $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
+  var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  var S = { panes: ["1A", "1B", "1C"], sel: null, full: false, ask: null, hist: [], tab: "lesson", side: true, step: -1, line: "", hover: "" };
+  var byId = function (id) { return LESSONS.filter(function (x) { return x.id === id; })[0] || null; };
+  var sel = function () { return S.sel === null ? null : byId(S.sel); };
+  var short = function (t) { return t.replace(/^(Mr|Ms|Mdm|Mrs) /, ""); };
+  var shown = function () { return S.panes.filter(Boolean); };
+  var span = function (L) { return where(L.d, L.p) + (L.n > 1 ? " to " + (L.p + L.n - 1) : "") + " (" + time(L.p) + " to " + time(L.p + L.n) + ")"; };
+
+  /* ---------- drawing ---------- */
+  function counters() {
+    var two = LESSONS.filter(twoPlaces).length, brk = LESSONS.filter(function (x) { return marks(x).indexOf("break") >= 0; }).length, last = S.hist[S.hist.length - 1];
+    $("#counters").innerHTML = '<button data-count="two" class="' + (two ? "crit" : "") + '" title="Click to step through them">In two places <b>' + two + "</b></button>"
+      + '<button data-count="brk" class="' + (brk ? "crit" : "") + '">Not lesson time <b>' + brk + "</b></button>"
+      + '<span class="bdundo">' + (last ? "<span class=\"muted small\">" + esc(last.text) + "</span>" : "") + "<button data-undo" + (last ? "" : " disabled") + ">Undo the last timetable change</button></span>";
+  }
+  function rowHTML(c, d, label, wk) {
+    var cards = LESSONS.filter(function (x) { return x.d === d.i && x.classes.indexOf(c) >= 0; }).sort(function (a, b) { return a.p - b.p || a.id - b.id; }), ends = [], h = "";
+    cards.forEach(function (x) {
+      var lane = 0; while (lane < ends.length && ends[lane] > x.p) lane++;
+      ends[lane] = x.p + x.n;
+      var mk = marks(x), pal = PAL[x.subject] || ["eef2f8", "8894a8"], band = x.classes.length > 1;
+      var l2 = band ? "with " + x.classes.filter(function (k) { return k !== c; }).join(" ") : x.teachers.map(short).join(", ") + (x.room ? " · " + x.room : "");
+      var tip = [what(x), span(x), band ? "A band: " + x.classes.join(", ") + " together. It moves in all of them." : x.teachers.join(", "), x.room].concat(collisions(x, x.d, x.p).map(function (k) { return k.kind + ": " + k.text; })).filter(Boolean).join("\n");
+      h += '<button class="bdcard' + (mk.length ? " crit" : "") + '" data-card="' + x.id + '" draggable="true" title="' + esc(tip) + '" style="grid-column:' + (x.p + 2) + "/" + (x.p + x.n + 2) + ";grid-row:" + (lane + 2) + ";background:#" + pal[0] + ";border-left:3px solid #" + pal[1] + '">'
+        + (mk.length ? '<em class="bdbadge">' + MARK[mk[0]] + "</em>" : "") + "<b>" + esc(x.subject) + "</b><span>" + esc(l2) + "</span></button>";
+    });
+    var lanes = Math.max(1, ends.length), cells = "";
+    for (var p = 0; p < NP; p++) {
+      cells += '<i class="bdmark" data-p="' + p + '" style="grid-column:' + (p + 2) + ';grid-row:1"></i><i class="bdcell' + (isOpen(d.i, p) ? "" : " brk") + '" data-p="' + p + '" style="grid-column:' + (p + 2) + ";grid-row:2/span " + lanes + '"></i>';
+    }
+    return '<div class="bdrow' + (wk ? " wk" : "") + '" data-cls="' + c + '" data-d="' + d.i + '" data-lanes="' + lanes + '" style="grid-template-rows:6px repeat(' + lanes + ',var(--bdh))"><span class="bdlab">' + esc(label) + "</span>" + cells + h + "</div>";
+  }
+  function board() {   // three panels, a class each with both weeks, and the lesson panel as the fourth
+    var head = '<div class="bdhead"><span class="bdcorner"></span>';
+    for (var p = 0; p < NP; p++) head += '<div class="bdph' + (BREAKS.indexOf(p) >= 0 ? " brk" : "") + '" title="Period ' + p + ", " + time(p) + '">' + p + "<small>" + (p % 3 === 0 ? time(p) : "") + "</small></div>";
+    head += "</div>";
+    var h = "";
+    S.panes.forEach(function (c, i) {
+      var others = shown().filter(function (x) { return x !== c; });
+      var opts = (c ? "" : '<option value="">Choose a class…</option>') + CLASSES.filter(function (k) { return others.indexOf(k) < 0; }).map(function (k) { return "<option" + (k === c ? " selected" : "") + ">" + k + "</option>"; }).join("")
+        + (c && shown().length > 1 ? '<option value="">No class here</option>' : "");
+      h += '<div class="pane"><div class="panehead"><select data-pane="' + i + '" title="The class in this panel">' + opts + "</select>" + (c ? "<span>form teacher " + FORM[c] + " · " + HOME[c] + "</span>" : "") + "</div>";
+      if (c) {
+        h += '<div class="bdwrap"><div class="bdin">' + head;
+        WEEKS.forEach(function (w, wi) { h += '<div class="bdgrp">' + w + " week</div>"; DAYS.filter(function (d) { return d.week === wi; }).forEach(function (d) { h += rowHTML(c, d, d.name, false); }); });
+        h += "</div></div>";
+      } else h += '<p class="muted empty">Choose a class at the top to show it here.</p>';
+      h += "</div>";
+    });
+    $("#board").innerHTML = h + '<div class="pane bdside" id="side"></div>';
+    fit(); paint();
+  }
+  /* each panel's rows share the panel's height */
+  function fit() {
+    $$(".pane .bdin").forEach(function (bd) {
+      var rows = $$(".bdrow", bd), lanes = rows.reduce(function (n, r) { return n + (+r.dataset.lanes); }, 0);
+      var fixed = $(".bdhead", bd).offsetHeight + $$(".bdgrp", bd).reduce(function (n, g) { return n + g.offsetHeight; }, 0) + rows.length * 7 + 2;
+      var bdh = Math.max(18, Math.min(60, Math.floor((bd.parentNode.clientHeight - fixed) / lanes)));
+      bd.style.setProperty("--bdh", bdh + "px");
+      bd.classList.toggle("compact", bdh < 28);
+    });
+  }
+  function line(t) { S.line = t; $("#line").innerHTML = "<span>" + esc(t || (sel() ? "Point at a place on the lesson's own rows, then click or drop." : "Click a lesson to see where it can go and what it is tied to.")) + "</span>"; }
+  /* the colours and outlines for the lesson chosen: nothing is drawn again, so a drag is never cut off */
+  function paint() {
+    var L = sel(), cache = {};
+    $$(".bdcard").forEach(function (el) {
+      var x = byId(+el.dataset.card), me = !!L && x.id === L.id, other = !!L && !me;
+      var rt = other && x.teachers.some(function (t) { return L.teachers.indexOf(t) >= 0; }), rr = other && !!L.room && x.room === L.room;
+      var mine = !!L && L.classes.indexOf(el.parentNode.dataset.cls) >= 0;
+      el.classList.toggle("sel", me); el.classList.toggle("relt", rt); el.classList.toggle("relr", rr && !rt && !mine);   // the class's own room is on most of its own lessons: outlined only in the other classes
+      el.classList.toggle("dimmed", other && !rt && !rr && !mine); el.classList.remove("blocker");
+    });
+    $$(".bdrow").forEach(function (row) {
+      var c = row.dataset.cls, d = +row.dataset.d, mine = !!L && L.classes.indexOf(c) >= 0;
+      row.classList.toggle("other", !!L && !mine);
+      $$(".bdcell,.bdmark", row).forEach(function (el) {
+        var p = +el.dataset.p, cell = el.classList.contains("bdcell"), st = "";
+        if (mine) { var k = d * 100 + p; st = (cache[k] || (cache[k] = judge(L, d, p))).state; }
+        el.className = (cell ? "bdcell" + (isOpen(d, p) ? "" : " brk") : "bdmark") + (st ? " " + st : "");
+      });
+    });
+    side();
+  }
+  function side() {
+    var L = sel(), el = $("#side"), tabs = [["np", "Not placed"], ["warn", "Warnings"], ["chg", "Changes"], ["lesson", "Lesson"]], body = "";
+    if (!el) return;
+    if (S.tab === "lesson") {
+      if (!L) body = '<p class="muted">Click a lesson. Its page opens here: where it is, what is wrong with it, and what it is tied to in the classes shown.</p>';
+      else {
+        var col = collisions(L, L.d, L.p), mk = marks(L), n = { ok: 0, prefer: 0, ask: 0 };
+        DAYS.forEach(function (d) { for (var p = 0; p < NP; p++) { var s = judge(L, d.i, p).state; if (n[s] !== undefined) n[s]++; } });
+        var tied = {};
+        LESSONS.forEach(function (x) { if (x.id !== L.id && x.teachers.some(function (t) { return L.teachers.indexOf(t) >= 0; })) x.classes.forEach(function (c) { tied[c] = (tied[c] || 0) + 1; }); });
+        var band = L.classes.length > 1;
+        body = "<h3>" + esc(what(L)) + "</h3><div>" + esc(span(L)) + "</div><div>" + esc(band ? "A band: " + L.classes.join(", ") + " together" : L.teachers.join(", ")) + (L.room ? " · " + esc(L.room) : "") + "</div>"
+          + '<div class="acts"><button disabled title="As on step 8 today">Lift out</button><button disabled title="As on step 8 today">Delete this lesson</button></div>'
+          + (mk.length ? '<div class="critbox">' + col.map(function (k) { return "<b>" + k.kind + " in two places</b>" + esc(k.text) + (shown().some(function (c) { return k.x.classes.indexOf(c) >= 0; }) ? ' <button data-go="' + k.x.id + '" class="small">Show me</button>' : " (its class is not shown)"); }).join("") + (mk.indexOf("break") >= 0 ? "<b>Not lesson time</b>It runs into a break or past the end of the day." : "") + "</div>"
+            : '<div class="okbox">Nothing is wrong with this lesson where it is.</div>')
+          + "<h4>Where it can go (both weeks)</h4><ul><li>" + n.ok + " clean places</li><li>" + n.prefer + " that bend a Prefer</li><li>" + n.ask + " where another lesson of the class is: a swap is asked</li></ul>"
+          + (band ? "<h4>Tied to</h4><p>This lesson is one band. It moves in " + L.classes.join(", ") + " at the same time, so a place must be free in all of them.</p>"
+            : "<h4>Tied to: " + esc(L.teachers.join(", ")) + "</h4><ul>" + (Object.keys(tied).sort().map(function (c) {
+              var on = shown().indexOf(c) >= 0;
+              return "<li>" + c + ": " + tied[c] + " lessons" + (on ? '<span class="tag">shown, outlined</span>' : '<span class="tag out">not shown</span>' + (shown().length < 3 ? ' <button class="small" data-add="' + c + '">Show ' + c + "</button>" : "")) + "</li>";
+            }).join("") || "<li>No other lessons.</li>") + "</ul>" + (L.room ? '<p class="muted small">Lessons of the other classes in ' + esc(L.room) + " have a dotted outline.</p>" : ""));
+      }
+    } else if (S.tab === "chg") {
+      body = S.hist.length ? "<ul>" + S.hist.slice().reverse().map(function (h) { return "<li>" + esc(h.text) + "</li>"; }).join("") + "</ul>" : '<p class="muted">No changes yet.</p>';
+    } else body = '<p class="muted">As on step 8 today. Not part of this mock-up.</p>';
+    el.innerHTML = '<div class="bdstabs">' + tabs.map(function (t) { return '<button class="bdstab' + (S.tab === t[0] ? " on" : "") + '" data-tab="' + t[0] + '">' + t[1] + "</button>"; }).join("")
+      + "</div><div class=\"bdsbody\">" + body + "</div>";
+  }
+  function draw() { counters(); board(); line(S.line); }
+
+  /* ---------- acting ---------- */
+  function snap() { return LESSONS.map(function (x) { return [x.id, x.d, x.p]; }); }
+  function did(text, before) { S.hist.push({ text: text, snap: before }); }
+  function choose(id) { S.sel = id; S.ask = null; $("#pop").hidden = true; if (id !== null) S.tab = "lesson"; line(""); paint(); }
+  function pAt(row, x) { var c = $$(".bdcell", row), a = c[0].getBoundingClientRect(), b = c[NP - 1].getBoundingClientRect(); return Math.max(0, Math.min(NP - 1, Math.floor((x - a.left) / ((b.right - a.left) / NP)))); }
+  function tell(L, row, p) {
+    var d = +row.dataset.d;
+    if (L.classes.indexOf(row.dataset.cls) < 0) return { text: "This lesson is " + L.classes.join(", ") + "'s. It can only go on " + (L.classes.length > 1 ? "their" : L.classes[0] + "'s") + " rows.", j: null };
+    var j = judge(L, d, p), at = where(d, p) + " (" + time(p) + ")";
+    var hidden = (j.col || []).filter(function (k) { return !shown().some(function (c) { return k.x.classes.indexOf(c) >= 0; }); }).length ? " Its class is not shown." : "";
+    var text = j.state === "own" ? "This is where the lesson is now."
+      : j.state === "na" ? "Not lesson time: " + j.why
+      : j.state === "ask" ? "Another lesson is at " + at + ". Click or drop to see what can be done."
+      : j.state === "no" ? "Move to " + at + ". It lands with a problem: " + j.why + hidden
+      : j.state === "prefer" ? "Move to " + at + ". " + j.why : "Move to " + at + ". Clean.";
+    return { text: text, j: j };
+  }
+  function attempt(L, row, p, ev) {
+    var d = +row.dataset.d, t = tell(L, row, p), j = t.j;
+    if (!j || j.state === "own" || j.state === "na") { line(t.text); return; }
+    if (j.state === "ask") { S.ask = { id: L.id, d: d, p: p, j: j }; popDraw(ev); return; }
+    var before = snap(), from = where(L.d, L.p);
+    L.d = d; L.p = p;
+    did(what(L) + ": " + from + " → " + where(d, p), before);
+    S.line = j.state === "no" ? "Moved. It landed with a problem: " + j.why : "Moved to " + where(d, p) + "."; draw();
+  }
+  function swapOf(a) {   // the one lesson a swap would be with, and what the swap would leave
+    var L = byId(a.id), hits = a.j.col.filter(function (k) { return k.kind === "Class"; }).map(function (k) { return k.x; }).filter(function (x, i, all) { return all.indexOf(x) === i; });
+    if (hits.length !== 1) return { x: null, why: "No swap: more than one lesson is there." };
+    var x = hits[0];
+    if (x.n !== L.n || x.d !== a.d || x.p !== a.p) return { x: null, why: "No swap: the two lessons do not line up." };
+    if (x.classes.join() !== L.classes.join()) return { x: null, why: "No swap: " + what(x) + " is for other classes too." };
+    var ld = L.d, lp = L.p; L.d = x.d; L.p = x.p; x.d = ld; x.p = lp;
+    var bad = collisions(L, L.d, L.p).concat(collisions(x, x.d, x.p));
+    x.d = L.d; x.p = L.p; L.d = ld; L.p = lp;
+    return { x: x, bad: bad };
+  }
+  function popDraw(ev) {
+    var a = S.ask, L = byId(a.id), sw = swapOf(a), pop = $("#pop"), col = a.j.col.slice(0, 8);
+    pop.innerHTML = "<span>Another lesson is at " + esc(where(a.d, a.p)) + ".</span>" + col.map(function (k) { return '<span class="bdcl"><b>' + k.kind + "</b>" + esc(k.text) + "</span>"; }).join("")
+      + (sw.x ? '<span class="swapline' + (sw.bad.length ? " bad" : "") + '">' + (sw.bad.length ? "A swap would land with a problem: " + esc(sw.bad[0].text) : "A swap is clean: nothing collides for either lesson.") + "</span>" : '<span class="swapline bad">' + esc(sw.why) + "</span>")
+      + (sw.x ? "<button data-swap>Swap with " + esc(sw.x.subject) + "</button>" : "") + "<button data-anyway>Put it here anyway</button><button data-cancel>Cancel</button>";
+    pop.hidden = false;
+    var box = $("#tt").getBoundingClientRect(), x = (ev ? ev.clientX : box.left + 200) - box.left + 10, y = (ev ? ev.clientY : box.top + 200) - box.top + 12;
+    pop.style.left = Math.max(8, Math.min(x, box.width - pop.offsetWidth - 8)) + "px";
+    pop.style.top = Math.max(8, Math.min(y, box.height - pop.offsetHeight - 8)) + "px";
+    line("Another lesson is there. Choose what to do.");
+  }
+  function undo() { var h = S.hist.pop(); if (!h) return; h.snap.forEach(function (s) { var x = byId(s[0]); x.d = s[1]; x.p = s[2]; }); S.ask = null; $("#pop").hidden = true; S.line = "Undone: " + h.text; draw(); }
+  function show(id) {   // go to a lesson: its week comes into view, it is chosen and flashes
+    var x = byId(id); if (!x) return;
+    S.sel = id; S.tab = "lesson"; S.line = ""; draw();
+    var el = $('.bdcard[data-card="' + id + '"]'); if (el) { el.scrollIntoView({ block: "nearest", inline: "nearest" }); el.classList.add("flash"); }
+  }
+  function setFull(on) {
+    S.full = on; document.body.classList.toggle("full", on);
+    $("#fullBtn").textContent = on ? "Exit full screen (Esc)" : "Full screen";
+    $("#fullNote").textContent = "";
+    if (on && document.documentElement.requestFullscreen) { try { document.documentElement.requestFullscreen().then(refit, function () {}); } catch (e) {} }
+    else if (!on && document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen(); } catch (e) {} }
+    refit();
+  }
+  function refit() { fit(); }
+
+  /* ---------- events ---------- */
+  document.addEventListener("click", function (e) {
+    var t = e.target, b = t.closest("button");
+    if (t.closest("#pop")) {
+      var a = S.ask; if (!a || !b) return; var L = byId(a.id), before = snap();
+      if (b.hasAttribute("data-swap")) { var sw = swapOf(a), x = sw.x, f = where(L.d, L.p), g = where(x.d, x.p), ld = L.d, lp = L.p; L.d = x.d; L.p = x.p; x.d = ld; x.p = lp; did("Swapped " + what(L) + " (" + f + ") with " + what(x) + " (" + g + ")", before); S.line = "Swapped."; }
+      else if (b.hasAttribute("data-anyway")) { var from = where(L.d, L.p); L.d = a.d; L.p = a.p; did(what(L) + ": " + from + " → " + where(a.d, a.p) + " (put there anyway)", before); S.line = "Put there anyway. Both lessons are marked until one is moved."; }
+      else S.line = "";
+      S.ask = null; $("#pop").hidden = true; draw(); return;
+    }
+    if (b && b.id === "fullBtn") return setFull(!S.full);
+    if (b && b.dataset.add) { var free = S.panes.indexOf(""); if (free >= 0) S.panes[free] = b.dataset.add; return draw(); }
+    if (b && b.dataset.go) return show(+b.dataset.go);
+    if (b && b.dataset.tab) { S.tab = b.dataset.tab; return side(); }
+    if (b && b.hasAttribute("data-undo")) return undo();
+    if (b && b.dataset.count) {
+      var hits = LESSONS.filter(b.dataset.count === "two" ? twoPlaces : function (x) { return marks(x).indexOf("break") >= 0; });
+      if (!hits.length) return line("None: nothing to step through.");
+      S.step = (S.step + 1) % hits.length; var h = hits[S.step], on = shown().filter(function (c) { return h.classes.indexOf(c) >= 0; });
+      if (!on.length) return line(what(h) + " on " + where(h.d, h.p) + " is marked, and " + h.classes[0] + " is not shown. Choose " + h.classes[0] + " in a panel to see it.");
+      return show(h.id);
+    }
+    var row = t.closest(".bdrow"); if (!row) return;
+    var card = t.closest(".bdcard"), L = sel();
+    if (card) {
+      var x = byId(+card.dataset.card);
+      if (!L) return choose(x.id);
+      if (x.id === L.id) return choose(null);
+      if (L.classes.indexOf(row.dataset.cls) < 0) return choose(x.id);   // a lesson of another class: that one is chosen instead
+      return attempt(L, row, x.p, e);
+    }
+    if (L) attempt(L, row, pAt(row, e.clientX), e);
+  });
+  document.addEventListener("change", function (e) { var t = e.target; if (t.dataset && t.dataset.pane !== undefined) { S.panes[+t.dataset.pane] = t.value; if (S.sel !== null && !shown().some(function (c) { return sel().classes.indexOf(c) >= 0; })) S.sel = null; draw(); } });
+  function over(row, p) {   // the place under the pointer: its line, the cells it would take, and what blocks it
+    var L = sel(), key = row ? row.dataset.cls + "|" + row.dataset.d + "|" + p : "";
+    if (key === S.hover) return; S.hover = key;
+    $$(".bdcell.over").forEach(function (c) { c.classList.remove("over"); }); $$(".bdcard.blocker").forEach(function (c) { c.classList.remove("blocker"); });
+    if (!L || !row || S.ask) return;
+    var t = tell(L, row, p); line(t.text);
+    if (!t.j) return;
+    for (var q = p; q < p + L.n && q < NP; q++) { var c = row.querySelector('.bdcell[data-p="' + q + '"]'); if (c) c.classList.add("over"); }
+    (t.j.col || []).forEach(function (k) { $$('.bdcard[data-card="' + k.x.id + '"]').forEach(function (el) { el.classList.add("blocker"); }); });
+  }
+  var placeOf = function (e) { var row = e.target.closest ? e.target.closest(".bdrow") : null; if (!row) return null; var card = e.target.closest(".bdcard"), L = sel(); return { row: row, p: card && L && +card.dataset.card !== L.id ? byId(+card.dataset.card).p : pAt(row, e.clientX) }; };
+  $("#board").addEventListener("mousemove", function (e) { var at = placeOf(e); if (at) over(at.row, at.p); });
+  $("#board").addEventListener("mouseleave", function () { over(null, 0); if (sel() && !S.ask) line(""); });
+  $("#board").addEventListener("dragstart", function (e) {
+    var card = e.target.closest(".bdcard"); if (!card) return;
+    e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", card.dataset.card); } catch (x) {}
+    var id = +card.dataset.card; setTimeout(function () { if (S.sel !== id) choose(id); }, 0);
+  });
+  $("#board").addEventListener("dragover", function (e) {
+    var L = sel(), at = placeOf(e); if (!L || !at) return;
+    over(at.row, at.p);
+    if (L.classes.indexOf(at.row.dataset.cls) >= 0) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+  });
+  $("#board").addEventListener("drop", function (e) { var L = sel(), at = placeOf(e); if (!L || !at) return; e.preventDefault(); S.hover = ""; attempt(L, at.row, at.p, e); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { if (S.ask) { S.ask = null; $("#pop").hidden = true; line(""); } else if (S.sel !== null) choose(null); else if (S.full) setFull(false); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
+  });
+  document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement && S.full) setFull(false); else refit(); });
+  window.addEventListener("resize", refit);
+  if (!STARTED) { $("#board").innerHTML = '<p class="muted" style="padding:12px">The sample timetable could not be made.</p>'; return; }
+  draw();
+})();
+</script>
+</body>
+</html>

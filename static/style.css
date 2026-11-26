@@ -503,6 +503,14 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard{position:relative}
 .bdcard.crit{box-shadow:inset 0 0 0 2px #c62828}
 .bdcard.cfade{opacity:.25}
+.bdcard.tiet{outline:2px solid #7c3aed;outline-offset:-2px}   /* the four panels: a lesson of the chosen lesson's teacher */
+.bdcard.tier{outline:2px dotted #0f8f8f;outline-offset:-2px}   /* of its room, in another class's panel */
+.bdcard.tief:not(.fade):not(.cfade):not(.blk){opacity:.62}   /* the rest of another class's panel: Find's and a counter's 25% stay */
+.bdcard.blk{outline:3px dashed #c62828;outline-offset:-3px;opacity:1;z-index:2}   /* in the way at the red place under the pointer */
+.bdcard.blk.swap,.bdcard.blk.swap.swapprefer{outline-color:#c62828}   /* a card that is both in the way and a swap keeps the blocker's red */
+.bdties{gap:14px;margin:0 0 6px;font-size:12px;color:#3b4458}
+.bdkey.kt,.bdkey.kr,.bdkey.kb{background:#fff;border:0;margin-right:5px}
+.bdkey.kt{outline:2px solid #7c3aed;outline-offset:-2px}.bdkey.kr{outline:2px dotted #0f8f8f;outline-offset:-2px}.bdkey.kb{outline:2px dashed #c62828;outline-offset:-2px}
 .bdbadge{position:absolute;top:1px;right:1px;z-index:1;font-size:9px;line-height:1.3;font-style:normal;font-weight:600;padding:0 3px;border-radius:3px;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff}
 .bdbadge.crit{background:#c62828}.bdbadge.warn{background:#f2b632;color:#3b2a00}
 .bdwhy{color:#8a1c1c}
@@ -538,6 +546,8 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdlnote{margin:0 0 4px}
 .bdlall{display:flex;gap:4px;align-items:center}
 /* the page (the Lesson or Empty period tab): what it is about, Lift out and Delete this lesson (or the delete question), a band's groups as chips, the starters (wrapping buttons), then each question asked and its options */
+.akabout .aktie{border-top:1px solid var(--line);padding:4px 0 6px;margin:0 0 6px}.akabout .aktie h4{margin:6px 0 2px;font-size:13px}
+.akabout .aktie ul{margin:0 0 4px;padding-left:18px}.akabout .aktie p{margin:0 0 2px}.akabout .aktie li button{margin-left:4px;font-size:12px;padding:1px 8px}
 .akabout .aktitle{margin:0 0 4px}.akabout .bdlws{margin:0 0 6px}.akabout .bdlw{display:block;margin:0 0 2px}
 .akdo{margin:0 0 6px;gap:6px}
 .akdo [data-bddel],.akdel [data-bddelgo]{color:#b4233b;border-color:#f0c4cc}
@@ -558,6 +568,22 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 @media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
 @media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto!important;flex-basis:auto!important;height:320px;min-height:0}.bdgrip{display:none}}
 .bdcard.tray .bdwas{white-space:normal}
+/* the four panels: three classes' whole cycles and the side panel, two by two; a class panel scrolls on its own, its rows share its height (bdFit sets --bdh) */
+.bdquad{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:stretch;height:max(600px,82vh)}
+.bdpane{--bdlab:42px;--bdw:20px;--bdstrip:4px;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:#fff}
+.bdpanehd{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:3px 8px;background:#f4f6fa;border-bottom:1px solid var(--line)}
+.bdpanehd select{font-weight:700;font-size:13px;line-height:16px;padding:1px 6px;max-width:100%}   /* the head line about 27px with its border to the rows */
+.bdmain .bdpane .bdwrap{flex:1 1 0;min-height:0;max-height:none;overflow:auto;margin-top:0;border:0;border-radius:0}
+.bdpane .bdnone{margin:auto;padding:20px;text-align:center}
+.bdpane .bdgrp{font-size:10px;line-height:13px;padding:0 6px}   /* a week heading about 14px with its border */
+.bdpane .bdmark{height:var(--bdstrip)}   /* the fit strip, 4px in a class panel */
+.bdpane .bdcard{font-size:10.5px;line-height:1.2;padding:1px 3px}
+.bdpane .bdph{white-space:nowrap;overflow:visible}.bdpane .bdph small{text-align:left;padding-left:1px;font-size:9px}   /* a start time under every third period runs over the next two */
+.bdpane.thin .bdcard{flex-direction:row;align-items:center;gap:4px}   /* a low row: the subject whole, then the other lines on the same line, cut short */
+.bdpane.thin .bdcard b{flex:0 0 auto;max-width:none}.bdpane.thin .bdcard span{flex:0 1 auto;min-width:0}
+.bdpane.thin .bdbadge{max-width:50%}
+.bdquad #bdSide{width:auto;flex:none;min-height:0;align-self:stretch}   /* the fourth panel fills its quarter */
+@media (max-width:899px){.bdquad{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-auto-rows:420px;height:auto}.bdquad .bdpane,.bdquad #bdSide{height:420px}}
 /* step 8's upload: two numbered boxes, each opened by a click or a dropped file */
 .upboxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
 .upbox{display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;border:2px dashed #b9c6da;border-radius:12px;padding:14px 16px;cursor:pointer;background:rgba(255,255,255,.6);transition:background .15s,border-color .15s}
@@ -661,3 +687,14 @@ table.sv-grid td.clash small{display:none}
 /* the Students step's status line: the list against the published timetable */
 .sv-status p{margin:0 0 6px}.sv-status .issue{cursor:default}.sv-status .row{margin-top:6px}
 .sv-differ{margin:4px 0 8px;padding-left:20px;font-size:13px}.sv-differ li{margin:2px 0}
+/* full screen: the timetable card fixed over the whole window (above the page's header, 5, and its pop-ups, 20; below its overlays, 25 and 26, and the toast, 30) */
+.bdfullb{margin-left:auto;flex:0 0 auto}
+.bdtitle .bdfind{flex:0 1 auto;min-width:0}
+#bdBox.bdfull{position:fixed;inset:0;z-index:22;margin:0;border-radius:0;box-sizing:border-box;width:auto;max-width:none;height:auto;display:flex;flex-direction:column;overflow:auto;overscroll-behavior:contain;background:var(--panel);-webkit-backdrop-filter:none;backdrop-filter:none}
+#bdBox.bdfull>*{flex:0 0 auto}
+#bdBox.bdfull .bdhow,#bdBox.bdfull #bdFoot{display:none}
+#bdBox.bdfull>.bdmain{flex:1 1 0;min-height:320px}   /* the board takes the rest of the height; a window too short for that scrolls the card */
+#bdBox.bdfull>.bdmain:not(.bdquad){align-items:stretch}
+#bdBox.bdfull .bdmain:not(.bdquad) .bdwrap{max-height:none}   /* it scrolls inside itself, at today's row height */
+#bdBox.bdfull>.bdquad{height:auto;min-height:480px}
+@media (max-width:899px){#bdBox.bdfull>.bdmain{flex:0 0 auto;min-height:0}#bdBox.bdfull .bdmain:not(.bdquad) .bdwrap{max-height:72vh}}
