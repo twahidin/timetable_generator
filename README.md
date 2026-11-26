@@ -200,7 +200,9 @@ is not on step 3, and a named subject the class has only in groups.
    on its row, or clicked and then a place clicked, and **Undo the last timetable change** (at the end of the counters, or
    Ctrl or Cmd+Z) puts it back. Each place is coloured: green is clean, amber bends a Prefer, red lands with a problem (a
    clash or a broken rule), blue has another lesson there and asks, grey cannot take it (a break, outside the day).
-   A lesson dropped where it clashes lands there and is marked on its card, and the counters above the board (Not placed,
+   A lesson dropped where it clashes lands there and is marked on its card with the first thing that is in two places
+   (**Teacher in two places**: one of its teachers has another lesson then; **Class in two places**: the class has another
+   lesson then; **Room in two places**: the room holds more lessons then than it takes), and the counters above the board (Not placed,
    No teacher, In two places, In a break, No room) count what is wrong; a click on one steps through its lessons. A drop
    on another lesson asks first and lists every collision at that place (a teacher, a class, shared students, a room), at most 8 and then "and n more".
    It offers to swap with the lesson, to put the dropped one beside it (when nothing collides), or **Put it here anyway**, which leaves both lessons
@@ -255,6 +257,27 @@ is not on step 3, and a named subject the class has only in groups.
    There is no other editor: everything is done on the board and in its panel. At the foot of the timetable card,
    under the upload's notes, **Go to step 9** goes on. Steps 8 and 9 do not show the setup's "Things to fix" column, so the
    timetable has the page's width.
+
+   **Four panels and full screen.** On the one-day board (Classes rows) and on a class's whole cycle, **Four panels** shows three
+   classes at once, each with its whole cycle (every week), and the side panel as the fourth panel. A list at the top of a class
+   panel changes its class or empties it ("No class here"); **All classes** goes back to the one-day board. The classes shown are
+   remembered in this browser. Each class panel is edited as one class's cycle is (drag, click then click, the drop box, Undo), but
+   a lesson goes only on its own class's rows: dropped on another class's panel it is refused ("This lesson is 1A's. It can only
+   go on 1A's rows."). A band shows in each of its classes' panels and is one lesson. The rows share each panel's height, a lesson
+   is one line on a small window, and a panel scrolls when its rows do not fit; under 900 pixels wide the panels are one column. A counter's
+   step or **Show me** keeps the panels when the lesson's class is shown, else puts the class into an empty panel, else goes to the
+   one-day board. **Full screen** (at the right of the timetable card's title, in every view; **Exit full screen** leaves) makes the card
+   fill the browser window and hides the green box and the notes under the board; with the four panels only three lines stay above
+   them. **Esc** first closes a question and lets go of the chosen lesson or empty period; pressed with nothing chosen it leaves
+   full screen, which is not remembered when step 8 is left.
+
+   **What a lesson is tied to.** In the four panels, with a lesson chosen, the same teacher's lessons get a purple outline, lessons in
+   the same room (a combined venue counts with its rooms) a dotted teal one in the other classes' panels, and the rest of those
+   panels fade a little; a key under the counters names them. With the pointer resting on a red place of the lesson's own rows, the
+   lessons in the way there get a red dashed outline in whichever panels show them (a place red because of a rule outlines nothing).
+   The **Lesson** tab gains **Where it can go** (how many clean places, how many that bend a Prefer, how many with another lesson of
+   the class) and **Tied to** (for each teacher, the other classes they teach and how many lessons; in the four panels a class shown
+   reads "shown" and another has a **Show 2A** button that puts it in an empty panel; a band says it moves in all its classes at once).
 
    **Saved versions and Compare.** Step 8 keeps one draft and, beside it, named versions of it that can be opened again. **Compare** (the
    page `/compare`, for the committee) sets two of them side by side: the draft, a saved version or the published timetable. Lessons are matched
