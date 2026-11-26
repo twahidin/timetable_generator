@@ -380,8 +380,8 @@ def every_refusal_says_its_sentence_and_writes_nothing():
     k = lk(APUB, 5)
     new = lambda by="asked", pub=APUB, who=EVE, may=False, **kw: (lambda: AB.new(data(**kw), pub, who, by, may_choose=may))
     refuses("Mr Nobody is not on the published timetable or the staff list.", new(teacher="Mr Nobody"))
-    bad = "Choose up to 10 school days, today or later."
-    refuses(bad, new(dates=[])); refuses(bad, new(dates=[f"2026-10-{d:02d}" for d in range(13, 24)]))
+    bad = "Choose up to 20 school days, today or later."
+    refuses(bad, new(dates=[])); refuses(bad, new(dates=[(D(2026, 10, 13) + datetime.timedelta(days=i)).isoformat() for i in range(21)]))
     refuses(bad, new(dates=["nope"])); refuses(bad, new(dates=["2026-10-09"])); refuses(bad, new(dates="2026-10-13"))
     refuses("Sat 17 Oct is not a school day in the calendar.", new(dates=["2026-10-17"]))
     for per in ([3], [4, 2], [-1, 2], [0, 12], ["a", 2], [1.5, 2], "x"):
@@ -637,11 +637,11 @@ def asking_through_the_api():
         assert list(two["by_date"]) == ["2026-10-13", "2026-10-27"] and len(two["lessons"]) == 4, two
         no(eve.get("/api/relief/lessons?dates=2026-10-17"), 400, "Sat 17 Oct is not a school day in the calendar.")
         for bad in ("", "nope", "2026-10-09"):
-            no(eve.get("/api/relief/lessons?dates=" + bad), 400, "Choose up to 10 school days, today or later.")
+            no(eve.get("/api/relief/lessons?dates=" + bad), 400, "Choose up to 20 school days, today or later.")
         for per in ("from=5", "to=6", "from=x&to=6", "from=6&to=5", "from=0&to=12", "from=-1&to=2"):
             no(eve.get("/api/relief/lessons?dates=2026-10-13&" + per), 400, "Choose the periods again.")
         people = ok(eve.get("/api/relief/people"))
-        assert {"name": GRACE, "depts": ["Mathematics"]} in people and all(set(p) == {"name", "depts"} for p in people), people
+        assert {"name": GRACE, "depts": ["Mathematics"], "staff_only": False} in people and all(set(p) == {"name", "depts", "staff_only"} for p in people), people
         before = files_in(ADIR)
         no(ask(eve, lessons=[dict(key=K5, relief=SAM)]), 400, CHOOSE_ONLY)
         no(eve.post("/api/relief/absences", data="nope", content_type="application/json"), 400, AB.WRONG)
@@ -896,7 +896,7 @@ def an_unexpected_body_is_answered_plainly_and_logged():
 @t
 def nothing_published_and_signed_out_answers():
     x = "abcdef123456"
-    routes = [("GET", "/api/relief/lessons?dates=2026-10-13"), ("GET", f"/api/relief/free?absent={q(EVE)}&key={q(K5)}"), ("GET", "/api/relief/people"),
+    routes = [("GET", "/api/relief/lessons?dates=2026-10-13"), ("GET", "/api/relief/school-days"), ("GET", f"/api/relief/free?absent={q(EVE)}&key={q(K5)}"), ("GET", "/api/relief/people"),
               ("POST", "/api/relief/absences"), ("GET", "/api/relief/absences/mine"), ("GET", "/api/relief/absences/planned"),
               ("GET", "/api/relief/absences"), ("POST", "/api/relief/absences/seen"), ("GET", f"/api/relief/absences/{x}"),
               ("POST", f"/api/relief/absences/{x}/acknowledge"), ("PUT", lesson_url(x, K5, "work")), ("POST", lesson_url(x, K5, "not-needed")),
@@ -1187,5 +1187,75 @@ def every_relief_save_is_one_history_entry_without_the_reason():
     assert all(e["kind"] == "relief" and e["link"] == "/relief" and e["absence"] == i and e["via"] == "code" and e["as"] == e["who"] for e in got), got
     seen = json.dumps(got)
     assert "A private matter" not in seen and "Other" not in seen and "Covered by" not in seen and "Better now" not in seen, "never the reason, nor a why"
+
+# ---- Calendar, Task 1: the server ----
+from relief.calendar import school_days  # noqa: E402
+import relief.asking as ASK  # noqa: E402
+
+@t
+def school_days_from_a_monday_in_term():
+    got, off = school_days(CAL, DAYS, D(2026, 10, 12))
+    assert len(got) == 29 and got[0] == D(2026, 10, 12) and got[-1] == D(2026, 11, 20) and D(2026, 10, 23) not in got, got
+    assert off == {D(2026, 10, 23): "Deepavali"}, off
+
+@t
+def school_days_across_a_break_and_a_missing_weekday():
+    cal = dict(terms=[CAL["terms"][0], dict(name="Term 1", start="2027-01-04", end="2027-01-15", starts_as="Odd")], holidays=[])
+    got, off = school_days(cal, ["Mon", "Tue", "Wed", "Thu"], D(2026, 11, 16))
+    want = [D(2026, 11, d) for d in range(16, 20)] + [D(2027, 1, d) for d in (4, 5, 6, 7, 11, 12, 13, 14)]
+    assert got == want and len(got) == 12, got
+    assert off[D(2026, 11, 20)] == "Not a school day" and off[D(2026, 11, 23)] == "Not in a term" and off[D(2027, 1, 8)] == "Not a school day", off
+    assert all(d.weekday() < 5 for d in off) and max(off) == D(2027, 1, 15), off
+
+@t
+def school_days_with_no_term_or_after_the_last():
+    assert school_days(dict(terms=[], holidays=[]), DAYS, D(2026, 10, 12)) == ([], {})
+    assert school_days(CAL, DAYS, D(2026, 11, 21)) == ([], {})
+    assert LS.NO_DAYS == ASK.NO_DAYS
+
+@t
+def the_school_days_route():
+    url = "/api/relief/school-days"
+    with published(APUB):
+        eve = staff(EVE)
+        got = ok(eve.get(url))
+        assert got["today"] == "2026-10-12" and len(got["days"]) == 29 and got["days"][0] == "2026-10-12", got
+        assert got["off"] == {"2026-10-23": "Deepavali"}, got
+        was = open(RS.PATH).read()
+        try:
+            store.write_json(RS.PATH, dict(calendar=dict(terms=[], holidays=[]), limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=FAT))
+            no(eve.get(url), 400, LS.NO_CALENDAR)
+        finally:
+            open(RS.PATH, "w").write(was)
+        old = LS.today
+        LS.today = lambda: D(2026, 11, 23)
+        try: no(eve.get(url), 400, LS.NO_DAYS)
+        finally: LS.today = old
+
+@t
+def twenty_school_days_are_allowed_and_twenty_one_are_not():
+    days, d = [], D(2026, 10, 13)
+    while len(days) < 21:
+        if d.weekday() < 5 and d != D(2026, 10, 23): days.append(d.isoformat())
+        d += datetime.timedelta(days=1)
+    with published(APUB):
+        eve = staff(EVE)
+        got = ok(eve.get("/api/relief/lessons?dates=" + ",".join(days[:20])))
+        assert len(got["by_date"]) == 20, got["by_date"].keys()
+        no(eve.get("/api/relief/lessons?dates=" + ",".join(days)), 400, "Choose up to 20 school days, today or later.")
+
+@t
+def people_say_who_is_staff_only():
+    NEWBIE = "Ms Staffonly Tan"
+    AP.update(lambda d: d["people"].update({NEWBIE: dict(group="executive", added=True)}))
+    try:
+        with published(APUB):
+            people = ok(staff(EVE).get("/api/relief/people"))
+            assert all(set(p) == {"name", "depts", "staff_only"} for p in people), people
+            by = {p["name"]: p for p in people}
+            assert by[GRACE]["staff_only"] is False and by[NEWBIE]["staff_only"] is True, by
+    finally:
+        AP.update(lambda d: d["people"].pop(NEWBIE, None))
+
 
 print(f"{COUNT} relief request tests passed")

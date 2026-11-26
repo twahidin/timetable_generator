@@ -58,6 +58,7 @@ import store
 from accounts import people as _accounts
 from exams.days import bounds, hhmm
 from relief import absences as _absences
+from relief import calendar as _calendar
 from relief import cover as _cover
 from relief import files as _files
 from relief import fill as _fill
@@ -453,10 +454,24 @@ def free():
 @bp.get("/api/relief/people")
 @need("relief")
 def people():
-    """everyone relief knows, for the reporting officer and absent teacher pickers: [{name, depts}]"""
+    """everyone relief knows, for the reporting officer and absent teacher pickers: [{name, depts, staff_only}]"""
     pub, me, err = _gate()
     if err: return err
-    return jsonify([dict(name=p["name"], depts=p["depts"]) for p in _staff(pub)])
+    return jsonify([dict(name=p["name"], depts=p["depts"], staff_only=bool(p.get("staff_only"))) for p in _staff(pub)])
+
+
+@bp.get("/api/relief/school-days")
+@need("relief")
+def school_days():
+    """the school days from today to the end of the last term, and why each other weekday is off, for the date calendar:
+    {today, days: [iso], off: {iso: reason}}"""
+    pub, me, err = _gate()
+    if err: return err
+    cal, today = _cal(pub), _lessons.today()
+    if not cal.get("terms"): return {"error": _lessons.NO_CALENDAR}, 400
+    got, off = _calendar.school_days(cal, (pub.get("model") or {}).get("days") or [], today)
+    if not got: return {"error": _lessons.NO_DAYS}, 400
+    return jsonify(today=today.isoformat(), days=[d.isoformat() for d in got], off={d.isoformat(): why for d, why in off.items()})
 
 
 # ---- absences
