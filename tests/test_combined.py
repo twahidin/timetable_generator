@@ -324,6 +324,15 @@ def busy_follows_the_one_rule():
     assert all("room" in fixes.marks(b, rows) for rows in by.values())
 t(busy_follows_the_one_rule)
 
+def a_room_line_of_a_combined_venue_names_the_lessons_in_its_rooms():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0 + 1, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1),
+                    (0, p0 + 1, 1, ["1B"], "Design & Technology", ENTIRE, t2, S2)], sp)
+    b = fixes.Busy(m); one = next(x for x in m["lessons"] if x["classes"] == ["1A"]); i = one["id"]; ids = sorted(x["id"] for x in m["lessons"] if x["id"] != i)
+    got = b.whys([one], 0, p0 + 1, 1, ignore={i}); assert [x["kind"] for x in got] == ["room"] and got[0]["text"] == f"{PAIR} is in use then.", got
+    assert got[0]["ids"] == ids and len(ids) == 2, (got, ids)
+t(a_room_line_of_a_combined_venue_names_the_lessons_in_its_rooms)
+
 def one_lessons_own_rows():
     sp, p0, t1, t2, t3 = lessons_for()
     _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR)], sp)
