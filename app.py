@@ -2549,6 +2549,11 @@ def admin_reset():
 
 NO_SLIPS = "Everyone has chosen their own password: there is no slip to print."
 SLIPS_AT_ONCE = "Print slips for at most 200 people at a time."
+SLIPS_STALE = "Someone ticked has just chosen their own password. Look at the list again before printing."
+SLIPS_FAILED = "The slips could not be made, so nothing was changed."
+
+class _Stale(Refused):
+    """the list the admin looked at is out of date: refused with 409"""
 
 def _slip_plan(pub, d, names):
     """who gets a slip, in the listing's order -> (the people [{name, depts, kind}], the preview's lines); kind is
@@ -2580,7 +2585,7 @@ def _slip_plan(pub, d, names):
     lines += [f"{t['name']} has chosen a password: their slip gives a new temporary one and their old password stops working." for t in todo if t["kind"] == "chosen"]
     if chosen_skipped: lines.append(f"{chosen_skipped} already chose their own password: no slip.")
     lines += [f"{n} is switched off: no slip." for n in off]
-    return todo, ([NO_SLIPS] if not todo else lines)
+    return todo, (lines if todo or (names is not None and lines) else [NO_SLIPS])
 
 @app.post("/api/admin/staff-slips")
 @need("admin")
@@ -2596,14 +2601,19 @@ def admin_staff_slips():
         if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)): raise Refused(UNREAD_CHANGE)
         if not isinstance(preview, bool): raise Refused(UNREAD_CHANGE)
         if names is not None and len(names) > 200: raise Refused(SLIPS_AT_ONCE)
+        if not people.readable(): raise people.Unreadable(people.UNREADABLE)
         todo, lines = _slip_plan(pub, people.load(), names)
-        if preview: return jsonify(lines=lines, count=len(todo))
+        if preview: return jsonify(lines=lines, count=len(todo), chosen=[t["name"] for t in todo if t["kind"] == "chosen"])
         if not todo: raise Refused(NO_SLIPS)
+        sent = b.get("chosen", [])
+        if not (isinstance(sent, list) and all(isinstance(n, str) for n in sent)): raise Refused(UNREAD_CHANGE)
+        school, url = school_name(), request.host_url.rstrip("/")
         once = {t["name"]: passwords.one_time() for t in todo}
         hashed = {n: passwords.hash_pw(v) for n, v in once.items()}
         def change(d):
             got, _ = _slip_plan(pub, d, names)
             if any(t["name"] not in hashed for t in got): raise Refused(UNREAD_CHANGE)
+            if names is not None and any(t["kind"] == "chosen" and t["name"] not in sent for t in got): raise _Stale(SLIPS_STALE)
             taken = {str(r.get("username") or "").lower() for r in d["people"].values() if isinstance(r, dict)}
             rows, changes = [], []
             for t in got:
@@ -2614,17 +2624,21 @@ def admin_staff_slips():
                 r.update(username=u, pw=hashed[t["name"]], must_change=True, n=r["n"] + (1 if t["kind"] == "chosen" else 0))
                 d["people"][t["name"]] = r
                 rows.append(dict(name=t["name"], depts=t["depts"], username=u, password=once[t["name"]], kind=t["kind"]))
-            return rows, changes
-        rows, changes = _update_as(me, change)
+            buf = io.BytesIO()   # made before the file is written: if it fails, nothing is changed
+            account_slips.slips_pdf(school, rows, url, buf)
+            return rows, changes, base64.b64encode(buf.getvalue()).decode("ascii"), account_slips.slips_csv(rows)
+        rows, changes, pdf, csv_text = _update_as(me, change)
+    except _Stale as e: return {"error": str(e)}, 409
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    except Exception as e:
+        print(f"WARNING: sign-in slips could not be made ({type(e).__name__})", file=sys.stderr, flush=True)
+        return {"error": SLIPS_FAILED}, 500
     for r in rows: lockout.clear(r["username"])
     new, chosen = sum(r["kind"] == "none" for r in rows), sum(r["kind"] == "chosen" for r in rows)
     text = f"Printed sign-in slips for {len(rows)} staff: {new} new account{'' if new == 1 else 's'}" + (f"; {chosen} had chosen a password" if chosen else "")
     _account_entry("slips", [r["name"] for r in rows], changes, text, by_=by_)
-    buf = io.BytesIO()
-    account_slips.slips_pdf(school_name(), rows, request.host_url.rstrip("/"), buf)
-    r = jsonify(pdf=base64.b64encode(buf.getvalue()).decode("ascii"), csv=account_slips.slips_csv(rows), count=len(rows))
+    r = jsonify(pdf=pdf, csv=csv_text, count=len(rows))
     r.headers["Cache-Control"] = "no-store"
     return r
 

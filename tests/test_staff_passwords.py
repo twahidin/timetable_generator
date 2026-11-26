@@ -181,9 +181,10 @@ def slip_school(teachers=THREE):
 
 def slips(c, names=None, preview=False): return c.post("/api/admin/staff-slips", json={"names": names, "preview": preview})
 
-def make(c, names=None):
+def make(c, names=None, chosen=()):
     """make the slips -> (the answer, the CSV rows as dicts); every temporary password goes to SECRETS"""
-    r = slips(c, names); assert r.status_code == 200, r.data
+    r = c.post("/api/admin/staff-slips", json={"names": names, "preview": False, "chosen": list(chosen)}); assert r.status_code == 200, r.data
+    assert r.headers["Cache-Control"] == "no-store"
     j = r.get_json(); rows = list(_csv.DictReader(io.StringIO(j["csv"].lstrip("\ufeff"))))
     for x in rows: SECRETS.append(x["Temporary password"])
     return j, rows
@@ -222,7 +223,6 @@ def the_preview_counts_and_changes_nothing():
 @t
 def making_slips_makes_accounts():
     c = ready_four(); ada_before = rec("Ms Ada Lim")
-    r = slips(c); assert r.headers["Cache-Control"] == "no-store"
     j, rows = make(c); assert j["count"] == 3 and len(rows) == 3, j["count"]
     assert base64.b64decode(j["pdf"])[:4] == b"%PDF"
     assert j["csv"].startswith("\ufeff") and j["csv"].lstrip("\ufeff").splitlines()[0] == "Name,Department,Username,Temporary password"
@@ -255,7 +255,8 @@ def ticked_people_with_a_chosen_password_are_named_and_signed_out():
     n0 = rec(CARA)["n"]
     j = slips(c, [CARA], True).get_json()
     assert j["count"] == 1 and f"{CARA} has chosen a password: their slip gives a new temporary one and their old password stops working." in j["lines"], j
-    make(c, [CARA])
+    assert j["chosen"] == [CARA]
+    make(c, [CARA], [CARA])
     assert rec(CARA)["n"] == n0 + 1
     c3, r = pw_in(user, pw); assert NO_MATCH in r.data.decode()
     assert went(c2.get("/home"), "/login")
@@ -283,13 +284,55 @@ def only_an_admin_prints():
     r = slips(c); assert r.status_code == 401 and not rec(ALICE)["pw"]
 
 @t
+def a_damaged_accounts_file_does_not_preview():
+    """a file that turns unreadable only after the admin's rights were read (a damaged file signs everyone out first),
+    so readable() is made to say no to the slips route alone"""
+    c = slip_school(); real = P.readable
+    P.readable = lambda: False if sys._getframe(1).f_code.co_name == "admin_staff_slips" else real()
+    try: r = slips(c, None, True)
+    finally: P.readable = real
+    assert r.status_code == 503 and r.get_json()["error"] == P.UNREADABLE, r.status_code
+
+@t
+def a_failed_pdf_changes_nothing():
+    c = ready_four(); before = open(P.PATH, "rb").read()
+    n = len([e for e in H.read(kinds=["account"], limit=200) if e.get("what") == "slips"])
+    real = SL.slips_pdf
+    def boom(*a, **k): raise RuntimeError("no pdf")
+    SL.slips_pdf = boom
+    try: r = c.post("/api/admin/staff-slips", json={"names": None, "preview": False})
+    finally: SL.slips_pdf = real
+    assert r.status_code == 500 and "nothing was changed" in r.get_json()["error"], r.status_code
+    assert open(P.PATH, "rb").read() == before
+    assert n == len([e for e in H.read(kinds=["account"], limit=200) if e.get("what") == "slips"])
+
+@t
+def someone_who_chose_between_the_preview_and_the_print_stops_it():
+    c = slip_school(TEACHERS); j = slips(c, [ALICE, CARA], True).get_json(); assert j["chosen"] == []
+    user, pw = account(CARA, group="teacher"); before = open(P.PATH, "rb").read()
+    r = c.post("/api/admin/staff-slips", json={"names": [ALICE, CARA], "preview": False, "chosen": j["chosen"]})
+    assert r.status_code == 409 and r.get_json()["error"] == "Someone ticked has just chosen their own password. Look at the list again before printing.", r.status_code
+    assert open(P.PATH, "rb").read() == before
+    c2, r = pw_in(user, pw); assert r.status_code == 302
+
+@t
+def everyone_ticked_switched_off_gives_only_their_lines():
+    c = slip_school(); person(ALICE, off=True)
+    j = slips(c, [ALICE], True).get_json(); assert j["count"] == 0 and j["lines"] == [f"{ALICE} is switched off: no slip."], j
+
+@t
+def two_people_with_one_base_username_get_two_usernames():
+    c = slip_school([dict(name="Ms Alice Tan", dept="Science"), dict(name="Dr Alice Tan", dept="Science")])
+    j, rows = make(c); assert sorted(x["Username"] for x in rows) == ["alicetan", "alicetan2"], rows
+
+@t
 def the_history_says_how_many_and_never_a_password():
     c = ready_four(); make(c)
     es = [e for e in H.read(kinds=["account"], limit=50) if e.get("what") == "slips"]   # the newest first; earlier tests left theirs
     assert es[0]["text"] == "Printed sign-in slips for 3 staff: 2 new accounts", es
     assert set(es[0]["people"]) == {ALICE, BEN, ERIC}
     user, pw = account(CARA, group="teacher"); publish(TEACHERS)
-    make(c, [CARA])
+    make(c, [CARA], [CARA])
     e = [e for e in H.read(kinds=["account"], limit=50) if e.get("what") == "slips"][0]
     assert e["text"] == "Printed sign-in slips for 1 staff: 0 new accounts; 1 had chosen a password", e
 
