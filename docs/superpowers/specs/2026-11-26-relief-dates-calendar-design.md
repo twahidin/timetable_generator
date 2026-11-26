@@ -58,8 +58,8 @@ Mockups (made-up dates): `2026-11-26-relief-dates-calendar-mockups.html` (the le
 
 ## Non-goals
 
-- No change to asking on Telegram (its own "several days" buttons), the Today page, Load, the Weekly summary, the
-  relief sheet download, or the relief settings' calendar editor.
+- No change to how asking on Telegram works (its own "several days" buttons; only its dates line follows the runs
+  rule), the Today page, Load, the Weekly summary, the relief sheet download, or the relief settings' calendar editor.
 - No date range typed as text, no "every Monday" repeats, no new reasons, no change to "Some periods".
 - No timetable button on the relief team's pages (What's in, Today); not asked.
 
