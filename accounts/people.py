@@ -211,7 +211,8 @@ def migrate(pub, relief_raw, exams_raw=None):
         n = str(t.get("name") or "").strip()
         if n and n not in rows: rows[n] = t
     from ttgen import spec
-    until = f"{datetime.date.today().year}-12-31"
+    from accounts import rights as _rights   # here, as the rights module is light: the year by the school's date
+    until = f"{_rights.school_today().year}-12-31"
     done = {"relief": ([], []), "exams": ([], [])}   # (lines, people touched) of each part done here
     ran = []
     def run(d):
