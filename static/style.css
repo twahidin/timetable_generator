@@ -675,3 +675,14 @@ table.sv-grid td.clash small{display:none}
 /* the Students step's status line: the list against the published timetable */
 .sv-status p{margin:0 0 6px}.sv-status .issue{cursor:default}.sv-status .row{margin-top:6px}
 .sv-differ{margin:4px 0 8px;padding-left:20px;font-size:13px}.sv-differ li{margin:2px 0}
+/* full screen: the timetable card fixed over the whole window (above the page's header, 5, and its pop-ups, 20; below its overlays, 25 and 26, and the toast, 30) */
+.bdfullb{margin-left:auto;flex:0 0 auto}
+.bdtitle .bdfind{flex:0 1 auto;min-width:0}
+#bdBox.bdfull{position:fixed;inset:0;z-index:22;margin:0;border-radius:0;box-sizing:border-box;width:auto;max-width:none;height:auto;display:flex;flex-direction:column;overflow:auto;overscroll-behavior:contain;background:var(--panel);-webkit-backdrop-filter:none;backdrop-filter:none}
+#bdBox.bdfull>*{flex:0 0 auto}
+#bdBox.bdfull .bdhow,#bdBox.bdfull #bdFoot{display:none}
+#bdBox.bdfull>.bdmain{flex:1 1 0;min-height:320px}   /* the board takes the rest of the height; a window too short for that scrolls the card */
+#bdBox.bdfull>.bdmain:not(.bdquad){align-items:stretch}
+#bdBox.bdfull .bdmain:not(.bdquad) .bdwrap{max-height:none}   /* it scrolls inside itself, at today's row height */
+#bdBox.bdfull>.bdquad{height:auto;min-height:480px}
+@media (max-width:899px){#bdBox.bdfull>.bdmain{flex:0 0 auto;min-height:0}#bdBox.bdfull .bdmain:not(.bdquad) .bdwrap{max-height:72vh}}

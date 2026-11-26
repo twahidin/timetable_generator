@@ -4369,8 +4369,9 @@ function bdRowHTML(row, b, cycle, hit, warned, fixed) {   // a class's row, or a
 const bdHitSet = b => b.step && b.data ? new Set(Board.hits(b.data, b.step).map(c => c.id)) : null;   // the ids the counter being stepped through counts
 const bdWarned = () => Board.warned((S.draft && S.draft.warnings) || []);
 const bdParts = () => S.draft ? draftHTML(S.draft) : { head: "", warns: "", changes: "", foot: "" };
+const bdTitleHTML = (b, mid) => `<div class="bdtitle"><h2>The timetable</h2>${mid || ""}<button data-bdfull="1" class="bdfullb" aria-pressed="${!!b.full}">${b.full ? "Exit full screen" : "Full screen"}</button></div>`;   // the title line: the Full screen button at the right; mid: what sits between (in full screen with the four panels: All classes and the Find list)
 function bdHTML() {   // the timetable card: the board with its side panel, the notes of the upload and the way to step 9
-  const b = S.board, d = b.data, parts = bdParts(), head = `<div class="bdtitle"><h2>The timetable</h2></div>`;
+  const b = S.board, d = b.data, parts = bdParts(), head = bdTitleHTML(b);
   const tail = `<div id="bdFoot">${parts.foot}</div>`;
   if (b.sel === null) b.step = null;   // a counter's fade lasts while its card is selected
   if (!d) return head + `<div class="bdmain"><p class="muted bdnone">${b.fail ? "The timetable could not be loaded. Open the step again." : "Loading the timetable…"}</p>${bdSideHTML(b, null, parts)}</div>` + tail;
@@ -4384,7 +4385,8 @@ function bdHTML() {   // the timetable card: the board with its side panel, the 
   const controls = rows + `<div class="row bdctl">${four ? `<button data-bdall="1">${BDALL.class}</button><b>Four panels</b>` : cycle ? `<button data-bdall="1">${BDALL[by]}</button><b>${esc(who)}: the whole cycle</b>` : tabs}${fourBtn}${finder}</div>`;
   const hdr = `<div class="bdhead" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr))"><span class="bdcorner"></span>${(d.times || []).slice(0, d.NP).map((t, p) => `<div class="bdph">${p}<small>${esc(t[0] || "")}</small></div>`).join("")}</div>`;
   setTimeout(bdPopDraw, 0);   // the pop-out is placed once the card is on the page
-  const top = head + controls + bdCountersHTML(d) + bdHowHTML() + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>`, pop = `<div class="bdpop" id="bdPop" role="dialog" aria-live="polite" hidden></div>`;
+  const lean = !!(four && b.full);   /* full screen with the four panels: three lines above them (title line, counters, status), no "Rows:" row, control row or key */
+  const top = (lean ? bdTitleHTML(b, `<button data-bdall="1">${BDALL.class}</button>${finder}`) : head + controls) + bdCountersHTML(d) + bdHowHTML() + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>`, pop = `<div class="bdpop" id="bdPop" role="dialog" aria-live="polite" hidden></div>`;
   if (four) return top + `\n    <div class="bdmain bdquad">${bdPanesHTML(b, d, four, weeks, hit, warned)}${bdSideHTML(b, hit, parts)}</div>` + pop + tail;   // the side panel is the fourth
   const body = Board.groups(d, m, weeks).map(g => {
     const fk = bdFoldKey(by, g.name), folded = !cycle && !!b.fold[fk], k = g.rows.length, kind = BDKIND[by];
@@ -4572,7 +4574,7 @@ function bdHowHTML() {   // how to change the timetable: always in the same plac
     <li><b>Colours:</b> ${sw("ok")}green is clean, ${sw("prefer")}amber bends a rule, ${sw("no")}red lands with a problem, ${sw("ask")}blue has another lesson there and asks, ${sw("na")}grey cannot take it.</li>
     <li><b>Ask:</b> click a lesson or an empty period; its questions are on the right.</li>
     <li><b>Whole cycle:</b> click a name at the left.</li>
-    <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc lets go of the lesson.</li></ul></div>`;
+    <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc lets go of the lesson, then leaves full screen.</li></ul></div>`;
 }
 function bdLineDraw() {
   const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); bdPopDraw();
@@ -4587,7 +4589,7 @@ function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the a
   const inPane = pt && bdFour() && pt.pane !== null && pt.pane !== undefined ? `.bdpane[data-pane="${Number(pt.pane)}"] ` : "";   // pressed in a class panel: only the lesson's pieces in that panel are kept clear
   const sel = pt && !panel ? [...box.querySelectorAll(`.bdmain:not(.bdold) ${inPane}.bdcard.sel`)].map(x => x.getBoundingClientRect()).filter(q => q.height) : [];
   if (sel.length) {   // the selected lesson's rows stay free to click
-    pt.top = Math.min(...sel.map(q => q.top)) - r.top; pt.bottom = Math.max(...sel.map(q => q.bottom)) - r.top;
+    pt.top = Math.min(...sel.map(q => q.top)) - r.top + box.scrollTop; pt.bottom = Math.max(...sel.map(q => q.bottom)) - r.top + box.scrollTop;   /* + scrollTop: full screen scrolls the card itself */
     if (pt.side) pt.x = sel[0].left - r.left + 24;   // pressed in the side panel: under the lesson itself, not under the panel
   }
   const at = Board.popAt(pt, pop.offsetWidth, pop.offsetHeight, box.clientWidth, box.scrollHeight);
@@ -4596,7 +4598,7 @@ function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the a
 document.addEventListener("pointerdown", e => {   // where the pointer was pressed in the timetable card (not in the pop-out itself): the pop-out goes beside it
   const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target) || e.target.closest("#bdPop")) return;
   const r = box.getBoundingClientRect(), row = e.target.closest(".bdrow"), q = row ? row.getBoundingClientRect() : null, pane = e.target.closest(".bdpane");
-  BD.popXY = Object.assign({ x: e.clientX - r.left, y: e.clientY - r.top, side: !!e.target.closest("#bdSide"), pane: pane ? Number(pane.dataset.pane) : null }, q ? { top: q.top - r.top, bottom: q.bottom - r.top } : {});   // side: pressed in the side panel (a question from its lists goes beside the pointer); pane: the class panel pressed in, else null
+  BD.popXY = Object.assign({ x: e.clientX - r.left, y: e.clientY - r.top + box.scrollTop, side: !!e.target.closest("#bdSide"), pane: pane ? Number(pane.dataset.pane) : null }, q ? { top: q.top - r.top + box.scrollTop, bottom: q.bottom - r.top + box.scrollTop } : {});   // side: pressed in the side panel (a question from its lists goes beside the pointer); pane: the class panel pressed in, else null
 }, true);
 document.addEventListener("drop", e => {   // a drop: the question it asks goes beside where the lesson was let go
   const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target)) return;
@@ -4907,6 +4909,7 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdday !== undefined) { bd.mode = { kind: "day", d: Number(d.bdday), by: bdBy() }; bd.place = null; bdDraw(); return true; }
   if (d.bdcls !== undefined) { bd.mode = { kind: "cycle", cls: d.bdcls, d: bd.mode.d }; bd.place = null; bdDraw(); return true; }
   if (d.bdname !== undefined) { bd.mode = { kind: "cycle", by: bdBy(), name: d.bdname, d: bd.mode.d }; bd.place = null; bdDraw(); return true; }   // a teacher's or room's whole cycle
+  if (d.bdfull !== undefined) { if (bd.drag !== null) return true; bd.full = !bd.full; bdDraw(); return true; }   // Full screen / Exit full screen: the card fills the window (the chosen lesson, the question and the side panel's tab stay); the first line has returned while a drop waits
   if (d.bdall !== undefined) { bd.mode = { kind: "day", d: bd.mode.d, by: bdBy() }; bd.place = null; bdDraw(); return true; }
   if (d.bdfour !== undefined) {   // Four panels: the stored panels (holding the cycle's class), else the cycle's class alone, else the first classes of the chosen lesson's level or of the first level not folded
     const j = bd.data; if (!j || bd.drag !== null || bdBy() !== "class") return true;
@@ -5231,7 +5234,11 @@ document.addEventListener("change", e => {   // the page's lists: a list's choic
 });
 document.addEventListener("keydown", e => {   // Escape clears the board's selection and withdraws its question; in a field, Escape is the field's
   const b0 = S.board; if (e.key === "Escape" && b0 && b0.drag !== null) bdLostDrag();
-  const b = S.board; if (e.key !== "Escape" || !b || b.wait || (b.sel === null && !b.ask && !b.del && !b.place)) return;   // a waiting drop (a moment) is not cancelled by it
+  const b = S.board; if (e.key !== "Escape" || !b || b.wait) return;   // a waiting drop (a moment) is not cancelled by it
+  if (b.sel === null && !b.ask && !b.del && !b.place) {   // nothing asked, nothing chosen: Esc leaves full screen (one press never does both)
+    if (b.full && b.drag === null && b.data && !bdInField(e)) { e.preventDefault(); b.full = false; bdDraw(); }
+    return;
+  }
   if (bdInField(e)) return;
   e.preventDefault(); b.sel = null; b.place = null; b.ask = null; b.del = null; akBack(b); bdDraw(); bdWant();   // let go: the tab open before the page again
 });
