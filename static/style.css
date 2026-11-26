@@ -558,6 +558,20 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 @media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
 @media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto!important;flex-basis:auto!important;height:320px;min-height:0}.bdgrip{display:none}}
 .bdcard.tray .bdwas{white-space:normal}
+/* the four panels: three classes' whole cycles and the side panel, two by two; a class panel scrolls on its own, its rows share its height (bdFit sets --bdh) */
+.bdquad{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:stretch;height:max(600px,82vh)}
+.bdpane{--bdlab:42px;--bdw:20px;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:#fff}
+.bdpanehd{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:4px 8px;background:#f4f6fa;border-bottom:1px solid var(--line)}
+.bdpanehd select{font-weight:700;font-size:14px;max-width:100%}
+.bdmain .bdpane .bdwrap{flex:1 1 0;min-height:0;max-height:none;overflow:auto;margin-top:0;border:0;border-radius:0}
+.bdpane .bdnone{margin:auto;padding:20px;text-align:center}
+.bdpane .bdcard{font-size:10.5px;line-height:1.2;padding:1px 3px}
+.bdpane .bdph{white-space:nowrap;overflow:visible}.bdpane .bdph small{text-align:left;padding-left:1px;font-size:9px}   /* a start time under every third period runs over the next two */
+.bdpane.thin .bdcard{flex-direction:row;align-items:center;gap:4px}   /* a low row: the subject whole, then the other lines on the same line, cut short */
+.bdpane.thin .bdcard b{flex:0 0 auto;max-width:none}.bdpane.thin .bdcard span{flex:0 1 auto;min-width:0}
+.bdpane.thin .bdbadge{max-width:50%}
+.bdquad #bdSide{width:auto;flex:none;min-height:0;align-self:stretch}   /* the fourth panel fills its quarter */
+@media (max-width:899px){.bdquad{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-auto-rows:420px;height:auto}.bdquad .bdpane,.bdquad #bdSide{height:420px}}
 /* step 8's upload: two numbered boxes, each opened by a click or a dropped file */
 .upboxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
 .upbox{display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;border:2px dashed #b9c6da;border-radius:12px;padding:14px 16px;cursor:pointer;background:rgba(255,255,255,.6);transition:background .15s,border-color .15s}

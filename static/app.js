@@ -956,13 +956,13 @@ function render() {
   const bars = same ? [...main.querySelectorAll("[id]")].filter(e => /^h[vctbw][A-Z]/.test(e.id)).map(e => [e.id, e.value]) : [];   // the boxes of the "Add …" bars (hvPre, hcNames, htDept…): kept as they are
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && focusKey(f);
   document.querySelector(".layout").classList.toggle("wide", id === "edit" || id === "publish");   // the setup's "Things to fix" column is not shown on steps 8 and 9: the timetable takes its width
-  G.shown = id; bdEnsure(id, true); const bw = same ? main.querySelector(".bdwrap") : null, bpos = bw ? [bw.scrollLeft, bw.scrollTop] : null;
+  G.shown = id; bdEnsure(id, true); const bpos = same ? [...main.querySelectorAll(".bdmain:not(.bdold) .bdwrap")].map(w => [w.scrollLeft, w.scrollTop]) : [];   // the board's scroll boxes (one, or a class panel's each)
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
-  headLocks(main, id); if (S.board) bdPaint();   // the board's colours and outlines for the card selected
+  headLocks(main, id); if (S.board) { bdFit(); bdPaint(); }   // the class panels' rows fitted; the board's colours and outlines for the card selected
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   bars.forEach(([bid, v]) => { const e = document.getElementById(bid); if (e && e.value !== v && (e.tagName !== "SELECT" || [...e.options].some(o => o.value === v))) e.value = v; });
   hwHint(); fitAreas(main);
-  const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
+  const bw2 = [...main.querySelectorAll(".bdmain:not(.bdold) .bdwrap")]; if (bpos.length && bw2.length === bpos.length) bw2.forEach((w, i) => { w.scrollLeft = bpos[i][0]; w.scrollTop = bpos[i][1]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y); stuAfter();   /* the student panel: the page behind locked while it is open, its areas scrolled back */
   stuPubWatch(!same);   /* the Students step: its status line from the server */
@@ -1783,7 +1783,7 @@ const VIEWS = {
   edit() {
     if (S.practice) return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Uploading a timetable is off in a practice copy.</p></div>`;
     return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Bring back the timetable the AI agent made and check it. Change it here until it is right, then publish it on step 9. Nothing is visible to teachers or students until you publish.</p></div>
-      ${exportCard()}${S.board ? `<div class="card" id="bdBox">${bdHTML()}</div>` : ""}`;
+      ${exportCard()}${S.board ? `<div class="${bdBoxClass()}" id="bdBox">${bdHTML()}</div>` : ""}`;
   },
   publish() {
     if (S.practice) return `<div class="card"><h1>Step 9 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
@@ -3436,6 +3436,11 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
 document.addEventListener("change", e => {
   if (e.target.id === "exSetup" || e.target.id === "exTT") upPaint();
   if (e.target.id === "bdFind" && S.board) { S.board.find = e.target.value; bdDraw(); return; }
+  if (e.target.dataset && e.target.dataset.bdpane !== undefined && S.board) {   // a class panel's list: that panel shows the class chosen ("" empties it)
+    const bd = S.board, p = bdFour(), i = Number(e.target.dataset.bdpane);
+    if (!p || bd.wait || bd.drag !== null) { if (p) e.target.value = p[i] || ""; return; }   // nothing is drawn under a drag or a waiting drop: the list goes back
+    e.target.blur(); bdPanelsShow(Board.panelSet(p, i, e.target.value), bd.mode.d); bdDraw(); bdWant(); return;
+  }
   if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
 });
 ["dragover", "dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => {   // a file dropped on one of step 8's upload boxes is chosen there
@@ -4207,6 +4212,19 @@ const BDROWS = [["class", "Classes"], ["teacher", "Teachers"], ["room", "Rooms"]
 const BDALL = { class: "All classes", teacher: "All teachers", room: "All rooms" };
 const BDKIND = { class: ["class", "classes"], teacher: ["teacher", "teachers"], room: ["room", "rooms"] };   // what a folded group hides
 const bdBy = () => (S.board && S.board.mode.by) || "class";
+/* the four panels: three classes' whole cycles and the side panel; S.board.mode is a class's cycle with panels ([a, b, c], each a class or ""), and cls
+   its first class; S.board.panels: the panels last shown, kept in this browser (localStorage) while their classes are on the board */
+const BDPANELS = "tt.bdpanels";
+function bdPanelsRead() { try { const v = JSON.parse(localStorage.getItem(BDPANELS)); return Array.isArray(v) ? v : null; } catch (e) { return null; } }   // the board's classes are applied when it comes (bdTake)
+function bdPanelsKeep(p) { try { if (p) localStorage.setItem(BDPANELS, JSON.stringify(p)); else localStorage.removeItem(BDPANELS); } catch (e) { } }
+const bdFour = () => { const b = S.board, m = b && b.mode; return m && m.kind === "cycle" && Array.isArray(m.panels) && bdBy() === "class" ? m.panels : null; };   // the panels when the four panels are shown, else null
+function bdPanelsShow(p, d) {   // the four panels show p (d: the day to go back to), kept; a chosen lesson on the board none of whose classes is shown is let go; nothing is drawn
+  const b = S.board; if (!b || !Array.isArray(p) || !p.some(x => x)) return;
+  b.mode = { kind: "cycle", cls: p.find(x => x), panels: p.slice(), d }; b.panels = p.slice(); bdPanelsKeep(b.panels); b.place = null;
+  const c = b.sel !== null ? bdCard(b.sel) : null;
+  if (c && !bdInTray(c) && !(c.classes || []).some(k => p.includes(k))) { b.sel = null; b.ask = null; b.del = null; b.note = ""; b.step = null; akBack(b); }
+}
+const bdBoxClass = () => "card" + (bdFour() ? " bdfour" : "") + (S.board && S.board.full ? " bdfull" : "");   // the timetable card's classes
 const bdFoldKey = (by, name) => by === "class" ? name : `${by}:${name}`;   // a level folds by its name, a department or a kind of room by its own
 const bdRowData = el => ({ cls: el.dataset.cls || "", by: el.dataset.by || "class", name: el.dataset.name || "" });   // what a row's element says it is
 const bdInRow = (c, r) => r.by === "teacher" || r.by === "room" ? Board.of(c, r).length > 0 || (r.name === "" && !(c.rows || []).length) : Board.onRow(c, r, S.board.data);   // card c is in that row
@@ -4223,7 +4241,7 @@ const bdShowable = () => !!(S.draft && !S.draft.published && !S.practice);
 const bdSig = j => JSON.stringify([j.upload_id, j.uploaded_at, j.fixes, j.setup_version]);   // which draft a board was fetched for (upload_id: each upload's own; null for a draft saved before there were ids), and the setup it was checked against
 function bdEnsure(id, opening) {   // the board exists on step 8 with a draft, and nowhere else; it is fetched again whenever it is not for the draft the page has (every place that takes a new draft ends here, through drawDraft, render, or bdSync); opening: the step is being drawn, so a failed fetch is tried again
   if (id !== "edit" || !bdShowable()) { if (S.board) { S.board = null; BD.gen++; } return; }
-  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, asking: null, failFor: null, held: null, drag: null, grab: 0, hv: "", ask: null, pt: "", note: "", fail: false, sig: null, up: undefined, loading: null, next: null, wait: null, changed: false, lost: false, step: null, del: null, mouse: null, tabHv: null, reveal: false, side: null, wmark: null, show: null, redraw: false, from: null, about: null, place: null };
+  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, asking: null, failFor: null, held: null, drag: null, grab: 0, hv: "", ask: null, pt: "", note: "", fail: false, sig: null, up: undefined, loading: null, next: null, wait: null, changed: false, lost: false, step: null, del: null, mouse: null, tabHv: null, reveal: false, side: null, wmark: null, show: null, redraw: false, from: null, about: null, place: null, full: false, panels: bdPanelsRead() };
   if (S.board.sig !== bdSig(S.draft) || (opening && S.board.fail)) bdLoad();
 }
 const bdWanted = () => { const b = S.board; return b.held !== null ? b.held : b.sel; };   // the card whose slots are wanted: the one pressed, else the one selected
@@ -4234,7 +4252,7 @@ function bdMount() {   // the card is there when there is a board, and gone when
   if (!S.board) { if (box) box.remove(); return; }
   if (box) return;
   const at = $("#printouts"); if (!at) return;
-  at.insertAdjacentHTML("afterend", `<div class="card" id="bdBox"></div>`); bdDraw();
+  at.insertAdjacentHTML("afterend", `<div class="${bdBoxClass()}" id="bdBox"></div>`); bdDraw();
 }
 const bdEntry = id => typeof id === "string" && id.slice(0, 2) === "a:";   // the id of an entry of the tray's "Step 5 asks for these": "a:" and its step 5 key (it is not a lesson, so it has no number)
 const bdId = el => { const v = el.dataset.card; return bdEntry(v) ? v : Number(v); };   // the id a card's element carries
@@ -4281,7 +4299,10 @@ function bdTake(j) {   // a fetched board becomes the one shown (j.fail: it coul
   if (j.fail) { b.data = null; b.fail = true; return; }
   b.data = j; b.fail = false;
   const last = (j.days || []).length - 1;
-  if (b.mode.kind === "cycle" && bdBy() === "class" && !bdClasses(j).includes(b.mode.cls)) b.mode = { kind: "day", d: b.mode.d };   // a teacher's or room's cycle stays, its row empty when the name has gone
+  const four = b.mode.kind === "cycle" && bdBy() === "class" && Array.isArray(b.mode.panels) ? Board.panels(b.mode.panels, bdClasses(j)) : undefined;   // the four panels: a class the board no longer has leaves its panel empty
+  if (four) { b.mode.panels = four; b.mode.cls = four.find(x => x); }
+  else if (four === null || (b.mode.kind === "cycle" && bdBy() === "class" && !bdClasses(j).includes(b.mode.cls))) b.mode = { kind: "day", d: b.mode.d };   // a teacher's or room's cycle stays, its row empty when the name has gone
+  if (b.panels) { const kept = Board.panels(b.panels, bdClasses(j)); if (JSON.stringify(kept) !== JSON.stringify(b.panels)) { b.panels = kept; bdPanelsKeep(kept); } }   // stored panels with no class left are forgotten
   if (!(b.mode.d >= 0 && b.mode.d <= last)) b.mode.d = 0;   // a day past the last (or none at all) becomes the first
   if (b.sel !== null && !bdCard(b.sel)) b.sel = null;
   if (b.place && !Ask.empty(j, b.place)) b.place = null;   // a lesson came into the empty period selected
@@ -4294,12 +4315,15 @@ function bdNext() {   // a drag has ended: the board that came during it is draw
   if (b.redraw && b.drag === null) { bdDraw(); return true; }
   return false;
 }
-function bdDraw() {   // #bdBox again, the board kept where it was scrolled
+function bdDraw() {   // #bdBox again, the board kept where it was scrolled (a class panel when it holds the same class again)
   const box = $("#bdBox"); if (!box || !S.board) return;
-  const w = box.querySelector(".bdmain:not(.bdold) .bdwrap"), pos = w ? [w.scrollLeft, w.scrollTop] : null, y = window.scrollY, side = bdSideAt();
-  S.board.redraw = false;
+  const w = box.querySelector(".bdmain:not(.bdold):not(.bdquad) .bdwrap"), pos = w ? [w.scrollLeft, w.scrollTop] : null, y = window.scrollY, side = bdSideAt();
+  const panes = [...box.querySelectorAll(".bdmain:not(.bdold) .bdpane")].map(p => { const x = p.querySelector(".bdwrap"); return { cls: p.dataset.panecls, pos: x ? [x.scrollLeft, x.scrollTop] : null }; });
+  S.board.redraw = false; box.className = bdBoxClass();
   fxKeep(() => { if (S.board.drag !== null && BD.dragEl && box.contains(BD.dragEl)) bdKeep(box); else box.innerHTML = bdHTML(); });
-  const w2 = box.querySelector(".bdmain:not(.bdold) .bdwrap"); if (w2 && pos) { w2.scrollLeft = pos[0]; w2.scrollTop = pos[1]; }
+  bdFit();   // the class panels' rows fitted before their scroll is put back
+  const w2 = box.querySelector(".bdmain:not(.bdold):not(.bdquad) .bdwrap"); if (w2 && pos) { w2.scrollLeft = pos[0]; w2.scrollTop = pos[1]; }
+  box.querySelectorAll(".bdmain:not(.bdold) .bdpane").forEach((p, i) => { const o = panes[i], x = p.querySelector(".bdwrap"); if (o && o.pos && x && o.cls === p.dataset.panecls) { x.scrollLeft = o.pos[0]; x.scrollTop = o.pos[1]; } });
   bdSideBack(side);
   window.scrollTo(window.scrollX, y); bdPaint();
 }
@@ -4331,7 +4355,7 @@ function bdTrayHTML(b, hit) {   // the Not placed tray beside the rows: the less
   }).join("")}` : "";
   return `<div id="bdTray">${body}${asks}</div>`;
 }
-function bdRowHTML(row, b, cycle, hit, warned) {   // a class's row, or a teacher's or room's (by, name: "" for "No teacher" / "No room"); a row's label opens its whole cycle
+function bdRowHTML(row, b, cycle, hit, warned, fixed) {   // a class's row, or a teacher's or room's (by, name: "" for "No teacher" / "No room"); a row's label opens its whole cycle; fixed: a class panel's row, its lanes exactly --bdh high (bdFit)
   const d = b.data, by = row.by || "class", open = by === "class" ? `data-bdcls="${esc(row.cls)}"` : `data-bdname="${esc(row.name)}"`;
   const lab = cycle || row.key === "" ? `<span class="bdlab">${esc(row.label)}</span>` : `<button class="bdlab" ${open} title="Show ${esc(row.label)} for the whole cycle">${esc(row.label)}</button>`;
   let cells = "";
@@ -4340,7 +4364,7 @@ function bdRowHTML(row, b, cycle, hit, warned) {   // a class's row, or a teache
     cells += `<i class="bdcell${Board.open(row.codes.charAt(p)) ? "" : " brk"}" data-p="${p}" style="grid-column:${p + 2};grid-row:2/span ${row.lanes}"></i>`;
     strip += `<i class="bdmark" data-p="${p}" style="grid-column:${p + 2};grid-row:1"></i>`;   // the fit strip: a mark a period, above the cards, coloured while a card is selected
   }
-  return `<div class="bdrow" data-row="${esc(row.key)}" data-d="${row.d}" data-cls="${esc(row.cls)}" data-by="${by}" data-name="${esc(row.name || "")}" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr));grid-template-rows:var(--bdstrip) repeat(${row.lanes},minmax(var(--bdh),auto))">${lab}${strip}${cells}${bdPieces(row, d, b, hit, warned)}</div>`;
+  return `<div class="bdrow" data-row="${esc(row.key)}" data-d="${row.d}" data-cls="${esc(row.cls)}" data-by="${by}" data-name="${esc(row.name || "")}"${fixed ? ` data-lanes="${row.lanes}"` : ""} style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr));grid-template-rows:var(--bdstrip) repeat(${row.lanes},${fixed ? "var(--bdh)" : "minmax(var(--bdh),auto)"})">${lab}${strip}${cells}${bdPieces(row, d, b, hit, warned)}</div>`;
 }
 const bdHitSet = b => b.step && b.data ? new Set(Board.hits(b.data, b.step).map(c => c.id)) : null;   // the ids the counter being stepped through counts
 const bdWarned = () => Board.warned((S.draft && S.draft.warnings) || []);
@@ -4350,25 +4374,41 @@ function bdHTML() {   // the timetable card: the board with its side panel, the 
   const tail = `<div id="bdFoot">${parts.foot}</div>`;
   if (b.sel === null) b.step = null;   // a counter's fade lasts while its card is selected
   if (!d) return head + `<div class="bdmain"><p class="muted bdnone">${b.fail ? "The timetable could not be loaded. Open the step again." : "Loading the timetable…"}</p>${bdSideHTML(b, null, parts)}</div>` + tail;
-  const weeks = Grid.weeks(d.days || []), m = b.mode, cycle = m.kind === "cycle";
+  const weeks = Grid.weeks(d.days || []), m = b.mode, cycle = m.kind === "cycle", four = bdFour();
   const hit = bdHitSet(b), warned = bdWarned();
   const tabs = weeks.map(w => `<span class="bdweek">${weeks.length > 1 ? `<span class="muted small">${esc(w.name)}</span>` : ""}${w.days.map(x => `<button class="bdtab${!cycle && x.i === m.d ? " on" : ""}" data-bdday="${x.i}">${esc(x.label)}</button>`).join("")}</span>`).join("");
   const finder = `<label class="bdfind">Find a subject: <select id="bdFind">${Board.finds(d).map(o => `<option value="${esc(o.value)}"${o.value === b.find ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`;
   const by = bdBy(), who = by === "class" ? m.cls : m.name ? m.name : by === "teacher" ? "No teacher" : "No room";
   const rows = `<div class="row bdrows"><span>Rows:</span>${BDROWS.map(([k, l]) => `<button data-bdrows="${k}" class="${k === by ? "on" : ""}" aria-pressed="${k === by}">${l}</button>`).join("")}</div>`;
-  const controls = rows + `<div class="row bdctl">${cycle ? `<button data-bdall="1">${BDALL[by]}</button><b>${esc(who)}: the whole cycle</b>` : tabs}${finder}</div>`;
+  const fourBtn = !four && by === "class" && bdClasses(d).length ? `<button data-bdfour="1">Four panels</button>` : "";   // on the day board's Classes rows and a class's cycle
+  const controls = rows + `<div class="row bdctl">${four ? `<button data-bdall="1">${BDALL.class}</button><b>Four panels</b>` : cycle ? `<button data-bdall="1">${BDALL[by]}</button><b>${esc(who)}: the whole cycle</b>` : tabs}${fourBtn}${finder}</div>`;
   const hdr = `<div class="bdhead" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr))"><span class="bdcorner"></span>${(d.times || []).slice(0, d.NP).map((t, p) => `<div class="bdph">${p}<small>${esc(t[0] || "")}</small></div>`).join("")}</div>`;
+  setTimeout(bdPopDraw, 0);   // the pop-out is placed once the card is on the page
+  const top = head + controls + bdCountersHTML(d) + bdHowHTML() + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>`, pop = `<div class="bdpop" id="bdPop" role="dialog" aria-live="polite" hidden></div>`;
+  if (four) return top + `\n    <div class="bdmain bdquad">${bdPanesHTML(b, d, four, weeks, hit, warned)}${bdSideHTML(b, hit, parts)}</div>` + pop + tail;   // the side panel is the fourth
   const body = Board.groups(d, m, weeks).map(g => {
     const fk = bdFoldKey(by, g.name), folded = !cycle && !!b.fold[fk], k = g.rows.length, kind = BDKIND[by];
     const gh = cycle || (by !== "class" && !g.name) ? (cycle && g.name ? `<div class="bdgrp"><span>${esc(g.name)}</span></div>` : "")   // the "No teacher" / "No room" row has no heading
       : `<div class="bdgrp"><button data-bdfold="${esc(fk)}" aria-expanded="${!folded}">${folded ? "▸" : "▾"} ${esc(g.name)}${folded ? ` (${k} ${k === 1 ? kind[0] : kind[1]} hidden)` : ""}</button></div>`;
     return gh + (folded ? "" : g.rows.map(r => bdRowHTML(r, b, cycle, hit, warned)).join(""));
   }).join("");
-  setTimeout(bdPopDraw, 0);   // the pop-out is placed once the card is on the page
-  return head + controls + bdCountersHTML(d) + bdHowHTML() + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>
+  return top + `
     <div class="bdmain"><div class="bdwrap"><div class="bdin${by === "class" ? "" : " people"}" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div>`
     + `<div class="bdgrip" id="bdGrip" role="separator" aria-orientation="vertical" aria-label="Drag to make the side panel wider or narrower" title="Drag to make the side panel wider or narrower. Double-click: back to its usual width."></div>${bdSideHTML(b, hit, parts)}</div>`
-    + `<div class="bdpop" id="bdPop" role="dialog" aria-live="polite" hidden></div>` + tail;
+    + pop + tail;
+}
+function bdPanesHTML(b, d, four, weeks, hit, warned) {   // the three class panels: a list of the classes at the top of each, then that class's whole cycle (rows keyed class|day), or the words of an empty panel
+  const times = (d.times || []).slice(0, d.NP);
+  const hdr = `<div class="bdhead" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr))"><span class="bdcorner"></span>${times.map((t, p) => { const tm = t[0] || ""; return `<div class="bdph" title="Period ${p}${tm ? `, ${esc(tm)}` : ""}">${p}<small>${p % 3 === 0 && tm ? esc(tm) : "&nbsp;"}</small></div>`; }).join("")}</div>`;   // a start time under every third period; every period's title says its time
+  return Board.panes(d, four, weeks).map((pn, i) => {
+    const cls = pn.cls, others = four.filter((x, j) => j !== i && x);
+    const opts = (cls ? (others.length ? `<option value="">No class here</option>` : "") : `<option value="">Choose a class…</option>`)
+      + (d.levels || []).map(lv => { const cs = lv.classes.filter(x => !others.includes(x)); return cs.length ? `<optgroup label="${esc(lv.level)}">${cs.map(x => `<option value="${esc(x)}"${x === cls ? " selected" : ""}>${esc(x)}</option>`).join("")}</optgroup>` : ""; }).join("");
+    const list = `<div class="bdpanehd"><select data-bdpane="${i}" aria-label="The class in this panel">${opts}</select></div>`;
+    if (!cls) return `<div class="bdpane" data-pane="${i}" data-panecls="">${list}<p class="muted bdnone">Choose a class at the top to show it here.</p></div>`;
+    const body = pn.groups.map(g => (weeks.length > 1 ? `<div class="bdgrp"><span>${esc(g.name)}</span></div>` : "") + g.rows.map(r => bdRowHTML(r, b, true, hit, warned, true)).join("")).join("");
+    return `<div class="bdpane" data-pane="${i}" data-panecls="${esc(cls)}">${list}<div class="bdwrap"><div class="bdin" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div></div>`;
+  }).join("");
 }
 /* the side panel beside the board (under it on a narrow window): three tabs, and a fourth while the board is about something (akOpen):
    Lesson or Empty period, the page about what was last pointed at; the one chosen kept while step 8 is open; with none chosen,
@@ -4386,7 +4426,7 @@ function bdSideHTML(b, hit, parts) {
   const all = [["tray", "Not placed", nU], ["warn", "Warnings", nW], ["changes", "Changes", nC]].concat(b.about ? [["ask", Ask.tabLabel(b.about.sub), null]] : []);   // the page while it is about something
   const tabs = all.map(([k, l, n]) => `<button role="tab" class="bdstab${k === tab ? " on" : ""}" data-bdside="${k}" aria-selected="${k === tab}">${esc(l)}${n === null ? "" : ` ${n}`}</button>`).join("");
   const body = tab === "ask" ? akHTML(b) : tab === "tray" ? (d ? bdTrayHTML(b, hit) : `<p class="muted small">Loading the timetable…</p>`) : tab === "warn" ? parts.warns : parts.changes;
-  const w = bdSideW();
+  const w = bdFour() ? null : bdSideW();   // the fourth panel takes its quarter: the stored width is neither used nor changed there
   return `<div id="bdSide" data-tab="${tab}"${all.length > 3 ? ` class="two"` : ""}${w ? ` style="width:${w}px;flex-basis:${w}px"` : ""}><div class="bdstabs" role="tablist">${tabs}</div><p class="bdtdrop">Drop here to lift it out.</p><div class="bdsbody">${body}</div></div>`;
 }
 const bdSideAt = () => { const el = $("#bdSide"), y = el && el.querySelector(".bdsbody"); return el && y ? { tab: el.dataset.tab, top: y.scrollTop } : null; };   // the tab shown and how far it is scrolled
@@ -4544,7 +4584,8 @@ function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the a
   if (!html) { pop.hidden = true; pop.innerHTML = ""; return; }
   pop.innerHTML = html; pop.hidden = false;
   const r = box.getBoundingClientRect(), pt = BD.popXY ? Object.assign({}, BD.popXY) : null, panel = !!(pt && pt.side && b.ask && b.ask.lesson);   // panel: a question from the side panel's lists, beside where it was asked
-  const sel = pt && !panel ? [...box.querySelectorAll(".bdmain:not(.bdold) .bdcard.sel")].map(x => x.getBoundingClientRect()).filter(q => q.height) : [];
+  const inPane = pt && bdFour() && pt.pane !== null && pt.pane !== undefined ? `.bdpane[data-pane="${Number(pt.pane)}"] ` : "";   // pressed in a class panel: only the lesson's pieces in that panel are kept clear
+  const sel = pt && !panel ? [...box.querySelectorAll(`.bdmain:not(.bdold) ${inPane}.bdcard.sel`)].map(x => x.getBoundingClientRect()).filter(q => q.height) : [];
   if (sel.length) {   // the selected lesson's rows stay free to click
     pt.top = Math.min(...sel.map(q => q.top)) - r.top; pt.bottom = Math.max(...sel.map(q => q.bottom)) - r.top;
     if (pt.side) pt.x = sel[0].left - r.left + 24;   // pressed in the side panel: under the lesson itself, not under the panel
@@ -4554,12 +4595,12 @@ function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the a
 }
 document.addEventListener("pointerdown", e => {   // where the pointer was pressed in the timetable card (not in the pop-out itself): the pop-out goes beside it
   const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target) || e.target.closest("#bdPop")) return;
-  const r = box.getBoundingClientRect(), row = e.target.closest(".bdrow"), q = row ? row.getBoundingClientRect() : null;
-  BD.popXY = Object.assign({ x: e.clientX - r.left, y: e.clientY - r.top, side: !!e.target.closest("#bdSide") }, q ? { top: q.top - r.top, bottom: q.bottom - r.top } : {});   // side: pressed in the side panel (a question from its lists goes beside the pointer)
+  const r = box.getBoundingClientRect(), row = e.target.closest(".bdrow"), q = row ? row.getBoundingClientRect() : null, pane = e.target.closest(".bdpane");
+  BD.popXY = Object.assign({ x: e.clientX - r.left, y: e.clientY - r.top, side: !!e.target.closest("#bdSide"), pane: pane ? Number(pane.dataset.pane) : null }, q ? { top: q.top - r.top, bottom: q.bottom - r.top } : {});   // side: pressed in the side panel (a question from its lists goes beside the pointer); pane: the class panel pressed in, else null
 }, true);
 document.addEventListener("drop", e => {   // a drop: the question it asks goes beside where the lesson was let go
   const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target)) return;
-  const r = box.getBoundingClientRect(); BD.popXY = { x: e.clientX - r.left, y: e.clientY - r.top };
+  const r = box.getBoundingClientRect(), pane = e.target.closest && e.target.closest(".bdpane"); BD.popXY = { x: e.clientX - r.left, y: e.clientY - r.top, pane: pane ? Number(pane.dataset.pane) : null };
 }, true);
 /* the side panel's width: dragged with the grip between the board and the panel, kept in this browser (localStorage), back to its usual width on a double-click */
 const BDSIDE = "tt.bdside";
@@ -4589,13 +4630,25 @@ function bdBusy() {   // a post starts or ends: the board's buttons that post fo
   box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdanyway], [data-bdyes], [data-bdlift], [data-bddel], [data-bddelgo], [data-bdlt], [data-bdlr], [data-bdlall]").forEach(x => { x.disabled = FX.busy; });
 }
 const BDST = ["own", "ok", "prefer", "no", "na", "ask"];
+function bdFit() {   // each class panel's rows share its height: a lane is Board.lane(H, F, L) pixels (H: the scroll box, F: all of .bdin that is not a lane, L: the lanes), the cards on one line below 28 (styles and classes only)
+  const box = $("#bdBox"); if (!box) return;
+  const got = [...box.querySelectorAll(".bdmain:not(.bdold) .bdpane")].map(p => {   // measured first, then set
+    const w = p.querySelector(".bdwrap"), inn = w && w.querySelector(".bdin"), rows = inn ? [...inn.querySelectorAll(".bdrow[data-lanes]")] : [];
+    if (!rows.length) return null;
+    const L = rows.reduce((n, r) => n + (Number(r.dataset.lanes) || 0), 0), now = parseFloat(getComputedStyle(p).getPropertyValue("--bdh")) || 0;
+    return { p, H: w.clientHeight, F: Math.ceil(inn.getBoundingClientRect().height - L * now), L };   // the lanes are exactly --bdh high, so the rest is F
+  });
+  got.forEach(g => { if (!g) return; const n = Board.lane(g.H, g.F, g.L); g.p.style.setProperty("--bdh", n + "px"); g.p.classList.toggle("thin", n < 28); });
+}
+let bdFitAt = 0;   // a resize waits for the next frame, once
+window.addEventListener("resize", () => { if (!bdFitAt) bdFitAt = requestAnimationFrame(() => { bdFitAt = 0; bdFit(); }); });
 function bdPaint() {   // the cells and the strip of every row take the state of the card selected or pressed, and the cards it can be swapped with get an outline (classes only, so a drag in the air is not cancelled); rows it cannot be dropped on are dimmed
   const b = S.board, box = $("#bdBox"); if (!b || !b.data || !box) return;
-  const id = bdWanted(), c = id !== null ? bdCard(id) : null, d = b.data, slots = c && b.slotsFor === c.id ? b.slots : null, cycle = b.mode.kind === "cycle";
+  const id = bdWanted(), c = id !== null ? bdCard(id) : null, d = b.data, slots = c && b.slotsFor === c.id ? b.slots : null, cycle = b.mode.kind === "cycle", four = !!bdFour();
   box.querySelectorAll(".bdrow").forEach(r => {
     const rd = bdRowData(r), day = Number(r.dataset.d), people = rd.by !== "class", tray = !!c && bdInTray(c);
     const ok = !!c && (people ? !tray : Board.onRow(c, rd, d));   // a teacher's or room's row takes a drop of a lesson on the board (a hand-over on another row); a lesson of the tray is placed from the Classes rows
-    r.classList.toggle("dim", !!c && !ok);
+    r.classList.toggle("dim", !!c && !ok && !four);   // in the four panels another class's panel is not dimmed: it must stay readable
     const strip = ok && (!people || cycle || bdInRow(c, rd));   // in the day view only the rows the lesson is in show where it fits, on that row's day as its class's row would
     const st = strip && slots ? Board.states(c, slots, day, d.NP) : null;
     const paint = x => {
@@ -4691,8 +4744,8 @@ const bdTell = (s, c) => bdThere(s) ? BDWHY.thereTell : Board.tell(s, S.board.da
 const bdHit = e => { const t = e.target; if (!(t.closest && t.closest(".bdold"))) return t; return document.elementFromPoint(e.clientX, e.clientY) || t; };   // what is under a drag's pointer: Chromium may still send a drag's events to the board as it was before it was drawn again under the drag (hidden now), so then it is found by the point
 const bdUnder = (row, e) => { const t = bdHit(e), el = t.closest && t.closest(".bdcard"); return el && row.contains(el) ? Number(el.dataset.card) : null; };   // the lesson under the pointer on this row
 const bdPlaceAt = (row, p, e) => Object.assign(bdRowData(row), { d: Number(row.dataset.d), p, over: e ? bdUnder(row, e) : null });   // a place of the board {cls, by, name, d, p, over}, kept apart from the row's element (a redraw replaces it)
-function bdWhyText(a, drag) {
-  if (a.why === "class") return drag ? BDWHY.class : BDWHY.classClick;
+function bdWhyText(a, drag, c) {   // c: the lesson; in the four panels a place of another class's panel says whose rows it can go on
+  if (a.why === "class") { const own = bdFour() && c ? Board.ownRows(c) : ""; return own || (drag ? BDWHY.class : BDWHY.classClick); }
   if (a.why === "own") return Board.tell(a.slot, S.board.data.days);
   if (a.why === "slot") return a.slot.why || BDWHY.none;
   return BDWHY[a.why] || BDWHY.none;
@@ -4700,7 +4753,7 @@ function bdWhyText(a, drag) {
 /* hand: {from, to} when the place is on another teacher's (or room's) row than the one the lesson was taken from: the change of time
    is made first (its own question included) and the hand-over is asked after it (bdTimeThen) */
 function bdAct(c, a, drag, end, hand) {   // a judged place: ask, make the change, or say why not; end: when a waiting drop's 8 seconds are up
-  if (a.why) { if (a.why !== "own") toast(bdWhyText(a, drag)); return; }
+  if (a.why) { if (a.why !== "own") toast(bdWhyText(a, drag, c)); return; }
   const b = S.board;
   if (a.act === "fetch") { bdAskPlace(c, a.slot, drag, end, hand); return; }
   if (a.act === "ask") { b.ask = { id: c.id, slot: a.slot, q: Board.question(c, a.slot, b.data), hand: hand || null }; b.del = null; bdLineDraw(); return; }
@@ -4855,6 +4908,13 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdcls !== undefined) { bd.mode = { kind: "cycle", cls: d.bdcls, d: bd.mode.d }; bd.place = null; bdDraw(); return true; }
   if (d.bdname !== undefined) { bd.mode = { kind: "cycle", by: bdBy(), name: d.bdname, d: bd.mode.d }; bd.place = null; bdDraw(); return true; }   // a teacher's or room's whole cycle
   if (d.bdall !== undefined) { bd.mode = { kind: "day", d: bd.mode.d, by: bdBy() }; bd.place = null; bdDraw(); return true; }
+  if (d.bdfour !== undefined) {   // Four panels: the stored panels (holding the cycle's class), else the cycle's class alone, else the first classes of the chosen lesson's level or of the first level not folded
+    const j = bd.data; if (!j || bd.drag !== null || bdBy() !== "class") return true;
+    const c = bd.sel !== null ? bdCard(bd.sel) : null, k = c && !bdInTray(c) ? (c.classes || [])[0] : undefined, lvs = j.levels || [];
+    const lv = (k !== undefined && lvs.find(x => x.classes.includes(k))) || lvs.find(x => !bd.fold[x.level]);
+    const p = Board.panelsFor(bd.panels, lvs, bd.mode.kind === "cycle" ? bd.mode.cls || "" : "", lv ? lv.level : "");
+    if (p) { bdPanelsShow(p, bd.mode.d); bdDraw(); bdWant(); } return true;
+  }
   if (d.bdyes !== undefined) { const a = bd.ask; if (a && a.run) { if (FX.busy) toast(BDWHY.busy); else a.run(); } return true; }   // a yes or no question's Yes
   if (d.bdfold !== undefined) { if (bd.fold[d.bdfold]) delete bd.fold[d.bdfold]; else bd.fold[d.bdfold] = true; bdDraw(); return true; }
   if (d.bdhow !== undefined) {   // the green box folded or opened: kept in this browser; nothing else is drawn again
@@ -4919,7 +4979,9 @@ function bdGoTo(c) {   // the board shows card c: its day, or its class's cycle 
     Board.groups(d, { kind: "day", d: c.d, by }, null).forEach(g => { if (g.rows.some(r => r.cards.some(x => x.card.id === c.id))) delete bd.fold[bdFoldKey(by, g.name)]; });
     return;
   }
-  if (bd.mode.kind === "cycle" && !cls.includes(bd.mode.cls)) bd.mode = bdClasses(d).includes(cls[0]) ? { kind: "cycle", cls: cls[0], d: c.d } : { kind: "day", d: c.d };
+  const four = bdFour();
+  if (four) { const r = Board.panelShow(four, cls.filter(x => bdClasses(d).includes(x))); if (r) bdPanelsShow(r.panels, c.d); else bd.mode = { kind: "day", d: c.d }; }   // the four panels: a panel of its class, else its first class in an empty panel, else its day (the panels stay stored)
+  else if (bd.mode.kind === "cycle" && !cls.includes(bd.mode.cls)) bd.mode = bdClasses(d).includes(cls[0]) ? { kind: "cycle", cls: cls[0], d: c.d } : { kind: "day", d: c.d };
   bd.mode.d = c.d;   // the day shown, or the day the cycle view goes back to
   (d.levels || []).forEach(lv => { if (lv.classes.some(x => cls.includes(x))) delete bd.fold[lv.level]; });
 }
@@ -4963,7 +5025,7 @@ function bdShowWarning(key, stay) {
   if (a) { b.ask = null; b.del = null; b.note = ""; b.step = null; b.held = null; b.place = null; }
   if (c) { b.sel = c.id; if (!bdInTray(c)) bdGoTo(c); else if (!stay) b.side = "tray"; akOpen(Ask.ofCard(c, null), !stay); }   // with stay the panel keeps Warnings; the lesson's page is there to open
   else if (a && a.teacher) c = bdShowTeacher(a, stay);
-  else if (a) { b.sel = null; b.mode = { kind: "cycle", cls: a.cls, d: a.d !== null ? a.d : b.mode.d }; }
+  else if (a) { b.sel = null; const four = bdFour(), r = four ? Board.panelShow(four, [a.cls]) : null; if (r) bdPanelsShow(r.panels, a.d !== null ? a.d : b.mode.d); else b.mode = { kind: "cycle", cls: a.cls, d: a.d !== null ? a.d : b.mode.d }; }   // the four panels: the class's panel, else an empty one; else that class's own cycle
   bdDraw(); bdWant();
   const box = $("#bdBox"); if (!box) return;
   const trow = a && a.teacher && b.mode.kind === "day" ? [...box.querySelectorAll(`.bdmain:not(.bdold) .bdrow[data-by="teacher"]`)].find(x => x.dataset.name === a.teacher) : null;
@@ -4973,6 +5035,10 @@ function bdShowWarning(key, stay) {
     els.forEach(x => x.classList.add("flash")); setTimeout(() => els.forEach(x => x.classList.remove("flash")), 1200);
   } else if (trow) trow.scrollIntoView({ block: "nearest" });   // the teacher's row, with no lesson to select
   else if (a && a.teacher) box.scrollIntoView({ block: "nearest" });   // a teacher's whole cycle
+  else if (a && bdFour()) {   // the class's panel, then its row of that day
+    const pane = [...box.querySelectorAll(".bdmain:not(.bdold) .bdpane")].find(x => x.dataset.panecls === a.cls), r = pane && a.d !== null ? [...pane.querySelectorAll(`.bdrow[data-d="${a.d}"]`)].find(x => x.dataset.cls === a.cls) : null;
+    (pane || box).scrollIntoView({ block: "nearest" }); if (r) r.scrollIntoView({ block: "nearest" });
+  }
   else if (a) { const r = a.d !== null ? box.querySelector(`.bdmain:not(.bdold) .bdrow[data-d="${a.d}"]`) : null; (r || box).scrollIntoView({ block: "nearest" }); }
   else if (stay) box.scrollIntoView({ block: "start" });
   const y = box.querySelector("#bdSide .bdsbody"), li = y && [...y.querySelectorAll("li.warn")].find(x => x.dataset.wkey === key);
@@ -5073,7 +5139,7 @@ document.addEventListener("dragover", e => {   // over a place: the cells it wou
   const key = `${row.dataset.row}|${row.dataset.d}|${p}|${o ? o.id : ""}|${a.slot ? a.slot.state : a.why}`;
   if (key === b.hv) return;
   b.hv = key; bdOver(row, o ? o.p : p, o || c); bdTrayLit(false);
-  b.pt = a.slot && a.why !== "taken" ? bdTell(a.slot, c) : wait ? bdAirText(b) : bdWhyText(a, true);
+  b.pt = a.slot && a.why !== "taken" ? bdTell(a.slot, c) : wait ? bdAirText(b) : bdWhyText(a, true, c);
   if (hand && (a.slot || wait)) b.pt = `${b.pt} ${bdHandHint(hand, false)}`.trim();
   bdLineDraw();
 });
