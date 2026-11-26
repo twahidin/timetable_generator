@@ -48,6 +48,28 @@ nav.rtabs button .n:empty{display:none}
 .rf-err:empty{display:none}
 .rf-shared{margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .rf-none{margin:0}
+/* Pick dates: two months side by side (relief-dates.js) */
+.rd-cal{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;margin-top:10px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.rd-month{flex:0 0 292px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px 12px}
+.rd-head{display:flex;align-items:center;justify-content:space-between;gap:6px;font-weight:600;font-size:14.5px;margin-bottom:6px;min-height:28px}
+.rd-arrow,.rd-gap{flex:none;width:30px;height:28px}
+.rd-arrow{padding:0;border-radius:8px;color:var(--navy);font-size:15px;line-height:1}
+.rd-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;touch-action:none}   /* a finger drags across the days rather than scrolls */
+.rd-dow{font-size:11px;font-weight:600;color:var(--muted);text-align:center;padding:2px 0 4px}
+.rd-d{height:34px;min-width:0;padding:0;border:1px solid transparent;border-radius:8px;background:var(--panel);color:var(--ink);font-size:14px;box-shadow:none;transition:none}
+.rd-d:hover:not(.off){border-color:#9db4cf;box-shadow:none}
+.rd-d:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.rd-d.off{background:#f0f1f4;color:#b3b9c3;cursor:not-allowed}
+.rd-d.off:hover{border-color:transparent;box-shadow:none}
+.rd-d.hol{background:repeating-linear-gradient(135deg,#f0f1f4 0 5px,#e6e8ed 5px 10px)}
+.rd-d.today{border-color:var(--navy);font-weight:700}
+.rd-d.pick{background:var(--navy);color:#fff}
+.rd-d.add{background:#cfe0f3;color:var(--ink)}
+.rd-d.rem{background:#f6d9d6;color:#8c2b20;text-decoration:line-through}
+.rd-sum{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;min-height:30px}
+.rd-sum b{font-weight:600}
+.rd-full{font-size:12.5px;color:#9a5b00}
+.rd-note{margin:8px 0 0}
 /* the person picker */
 .picker{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px;max-width:440px}
 .picker .row{flex-wrap:nowrap}
@@ -193,7 +215,7 @@ table.sm-table{min-width:620px}
 .cv:focus{outline:2px solid rgba(37,99,235,.35);outline-offset:2px}
 @media (max-width:760px){.td-row{grid-template-columns:64px minmax(0,1fr)}.td-row>.td-relief,.td-row>.td-state{grid-column:1 / -1}.td-row.td-cols{display:none}
   .td-acts{justify-content:flex-start}}
-@media (max-width:640px){.relief{padding:12px}.seg{display:flex}.seg button{flex:1 1 auto;padding:7px 8px}.bar .grow{display:none}
+@media (max-width:640px){.relief{padding:12px}.rd-cal{flex-direction:column}.rd-month{flex:none;width:100%;max-width:360px}.seg{display:flex}.seg button{flex:1 1 auto;padding:7px 8px}.bar .grow{display:none}
   .cand{grid-template-columns:auto auto minmax(0,1fr)}.cand .cand-who{grid-column:1 / -1}.cand button,.cand .chip{justify-self:end}
   .counter{min-width:0;flex:1 1 40%}.td-day .seg{flex:1 1 100%}.sm-facts{gap:8px}.sm-facts>div{display:block}
   .td-acts [data-td="remind-all"]{order:1;margin-right:0}.td-gap{display:none}}   /* Remind all last: it comes and goes under the others, with no empty line */
@@ -231,6 +253,7 @@ table.sm-table{min-width:620px}
   <section class="pane" id="pane-summary" role="tabpanel" aria-labelledby="tab-summary" hidden></section>
 </main>
 <script src="/static/relief-form.js"></script>
+<script src="/static/relief-dates.js"></script>
 <script src="/static/relief.js"></script>
 <script src="/static/relief-telegram.js"></script>
 <script src="/static/relief-plan.js"></script>
