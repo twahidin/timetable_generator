@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.9 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.10 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill; the last number counts up, so 2026-11.10 is newer than 2026-11.9). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -29,19 +29,42 @@ subject-based banding) schools, and for any school that fills the same template.
 - Python 3.10+ with `pip install ortools openpyxl reportlab` (reportlab is only for the PDFs).
 - The scripts: if `scripts/ttgen/` is next to this file, use them (run from the `scripts` folder, or put it on
   `PYTHONPATH`). If they are missing, build them from **Building it without the scripts** below.
+  Run them with `python -B` so no `__pycache__` folder is left inside the skill, and never edit them in place: when you
+  need to change the solver (rules in words), work on a copy of `scripts/`.
 
 ## Workflow
 
-1. **Check the input first.** `python -m ttgen check SETUP.xlsx`. Fix or report every problem before solving:
-   subjects with no periods for a level, rows with no class or teacher, unknown subjects. Also open `6 Lessons`,
-   `More rules` and `4 Teachers`: text in a **Check** or **Load check** column is a problem the person must fix
-   (teacher twice in a block, repeated code, over allowance).
-2. **Do the capacity sums** (cheap, catches most impossible inputs):
+1. **Check the input first.** `python -m ttgen check SETUP.xlsx`. After the counts it lists **Critical** items, then
+   **Warnings**, in the same words as step 7 of the setup app (the app and the skill run the same sums from one file,
+   `ttgen/checks.py`), then the rules in words for you to honour. When anything is critical, the check ends with an error.
+   - **Any critical item: stop.** Tell the person what it is and the smallest change that fixes it, and do not solve.
+     Do not change the setup yourself. The one exception is a setup with a `Choices` sheet: when the check says
+     `Giving way in the committee's order, nothing is critical after choice k`, it ends without an error and you solve
+     as that sheet says (see **First and second choices**). `solve` still tries the first choices for one `--time`
+     before it gives way: that wait is not a stall. `Even after every second choice` and `None of the second choices
+     can be used` mean stop.
+   - **A `[lessons]` warning that names a lesson row: tell the person and wait for their answer before solving.** It
+     means that lesson will be left out (no class, an unknown subject, no periods for the level), will have no teacher
+     (critical in `check-timetable`, so the app will not publish the timetable), or will not be split as typed (a
+     lesson pattern that does not add up, which often means a wrong number of periods on that row).
+   - **The other warnings** do not stop you (`[classes]` almost full, `[teachers]` over allowance, `[rules]` a rule row
+     that cannot be used as written, `[venues]`): put every one in the summary you give at the end.
+   - `The setup could not be checked: ...` and nothing after it means nothing was checked (exit code 2). Tell the
+     person the message; do not take it for older scripts and do not solve.
+   The **Check** and **Load check** columns on `6 Lessons`, `More rules` and `4 Teachers` flag problems inside the
+   workbook (teacher twice in a block, repeated code, over allowance), but a workbook downloaded from the setup app often
+   has those cells empty, because the formulas were never calculated: empty does not mean clean. Go by what the check
+   prints, not by those cells. The check does not look for one of these, a group code used on two rows of `6 Lessons`:
+   count the codes yourself and tell the person about any repeat.
+2. **The capacity sums: the check has done these sums.** They are cheap and catch most impossible inputs, and step 1
+   lists what they find as Critical items or Warnings, so do not repeat them by hand:
    - each class: periods it needs (whole-class subjects + the longest group in each block it belongs to) against the
      `L` periods in its level's Day structure, remembering that lessons have fixed lengths and cannot cross a break;
    - each teacher: periods taught against allowance, and against the lesson periods of the levels they teach
      (above about 85% is usually impossible to pack);
    - each block: groups needing a special room kind at once against the number of rooms of that kind.
+   Only when the check prints no Critical or Warnings section (scripts older than 2026-11.10) do these sums yourself,
+   and report every teacher over allowance by name and by how many periods.
 3. **Solve and export in one go** (when the setup has no rules "In words"; with them, solve first, add the Rule report
    sheet, then export: see **Typed rules** below).
    `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx --time 300 --workers 8 --export OUTPUT_FOLDER`.
@@ -49,29 +72,36 @@ subject-based banding) schools, and for any school that fills the same template.
    (fewer after-school lessons, fewer bent Prefer rules) for 5-15 minutes; 30+ classes with heavy banding may need
    20-30 minutes. Run long solves in the background, tell the person roughly how long it will take, and report the
    best timetable found when the time is up. Exporting a 600-student school takes about a minute more.
+   These times assume about 8 cores. On 2-4 cores expect several times longer, and for 30+ classes solve each level on
+   its own first (step 5) before spending time on one whole-school search.
 4. **Read the result**: the solver prints the status, the checks and notes; the workbook's `Read me` sheet and the
    HTML page's **Checks** tab list problems, after-school lessons, rules checked after solving, and notes.
 5. **If no timetable is found** (INFEASIBLE, or UNKNOWN after the time limit):
    - INFEASIBLE in seconds means a hard contradiction. Find it by solving with the rules removed, then adding
      them back one at a time; and by checking teacher loads, room counts and Must rules against part-time teachers.
-   - UNKNOWN means not found in time: give it more time before changing anything. If it is still UNKNOWN after
-     20-30 minutes, solve each level on its own (a copy with only that level's classes): when every level solves in
-     seconds, the levels only clash through shared teachers and rooms and the single search is stalling. Use
-     `--staged` (below) instead of waiting longer.
+   - UNKNOWN means not found in time. With fewer than 30 classes, give it more time before changing anything. With 30+
+     classes, or when it is still UNKNOWN after 10 minutes, solve each level on its own (a copy with only that level's
+     classes; about a minute each): when every level solves in seconds, the levels only clash through shared teachers
+     and rooms and the single search is stalling. Use `--staged` (below) instead of waiting longer.
    - **Staged solve** for 30+ classes with tight days: `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx
      --staged --time 180 --workers 8` (`--time` is per step). It builds level by level, hardest first, keeping
      earlier levels fixed; a level that does not fit is placed with clashes against other levels allowed but
      penalised; then only the classes in the remaining clashes are re-solved until there are none; then the whole
      school is checked with every lesson kept. The committee app does this by itself for a first timetable of a
      school with 30+ classes.
+     The order of the levels matters. A level with a group that has a lesson on nearly every day (G1 Maths split over
+     three bands: ten lessons in ten days) can be shut out within seconds by the levels placed before it. When a level
+     is INFEASIBLE at once with the earlier levels kept, start again with that level first, or solve it together with
+     the level it shares most teachers with, before letting everything move.
+     `--staged` does not carry rules in words: with them, stage your own solver in the same way (see **Typed rules**).
    - Tell the person exactly what blocks the timetable and the smallest change that fixes it (for example "the four
      Sec 3 CCE classes share one teacher, so 'same time across classes' cannot hold"). Never drop a Must rule or
      change their data silently; propose the change and let them decide.
 6. **Deliver** (see **Outputs**) with a short summary: whether every check passed, which lessons (if any) fell into
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
    row: the solve result lists them), any notes, and the Rule report for every typed rule. Give the person the Excel workbook, the
-   HTML page, the four PDF books, the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
-   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first: the lines it marks `[critical: ...]` are the ones the app will not publish with.
+   HTML page, the PDF books (four; three when the setup has no Students sheet), the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
+   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first: the lines it marks `[critical: ...]` are the ones the app will not publish with. `export` and `check-timetable` can end with exit code 1 when nothing is critical: `Teacher in two lessons (allowed that day)` lines count for both, and for `check-timetable` a Must typed rule reported `Partly` counts too. Exit code 1 is not a failure by itself; read the first line of `check-timetable` (`N warnings, M critical`), and with 0 critical the timetable can be published (`export` prints `all checks passed` or `N problems` on its first line).
 
 ## Outputs
 
@@ -88,6 +118,9 @@ subject-based banding) schools, and for any school that fills the same template.
 Student timetables need the `Students` sheet (each student's class and group codes). Without it the Students
 outputs are skipped and the HTML page's **Build a timetable** lets a student pick their groups instead; say so.
 Options: `--no-individual` (books only, faster), `--no-pdf`, `--no-html`, `--no-excel`, `--no-db`.
+Export into a folder on a local disk. SQLite cannot write the database into some synced, mounted or network folders: it
+stops with `disk I/O error` and leaves a broken `.sqlite` and a `-journal` file behind. Export locally, check the
+database there, then copy the whole folder across.
 
 **A timetable made some other way** (by hand, or by your own solver) exports the same way: write a workbook with a
 `Lessons` sheet in the hand-over format below and run `python -m ttgen export SETUP.xlsx THAT.xlsx --out FOLDER`.
@@ -190,6 +223,34 @@ lists each one as "For the agent to honour: T1 · Must · Sec 1 · No PE in the 
   3. `python -m ttgen export SETUP.xlsx TIMETABLE.xlsx --out OUTPUT_FOLDER`: the `.sqlite` it writes carries the report as
      its `rule_report` table, and that is the file to hand back (with `TIMETABLE.xlsx` beside it).
   A database written before the sheet was added has no report, and the committee app then says "No rule report came back".
+
+**How to honour them.** `ttgen.solver.solve` has no place to add a constraint of your own, so either build your own solver
+(see **Building it without the scripts**) or work on a copy:
+
+- Copy `scripts/` to a working folder and change only the copy. `check`, `export` and `check-timetable` are always run
+  from the unchanged scripts, and the setup workbook is never changed. In the copy's `solve()` there are three places to
+  add to: right after `lesson_domains`, trim where each lesson may start (a day, a period, a fixed start); just before
+  `m.Minimize`, add constraints on the lessons' start variables and intervals; add a term to `extra_cost` for each Prefer.
+- Sort the rules before writing anything. A rule about where one lesson may start is a trimmed list of starts (cheap and
+  exact). A rule about two lessons is a constraint. A rule about rooms is mostly a choice in the room hand-out, with at
+  most one cumulative limit in the solver.
+- A typed rule that the list can already say is better as a list row, because the app then enforces it too: a lesson at
+  a set time is a `Fixed lessons` row, two subjects kept apart is "Not on the same day as". Honour it as typed, and tell
+  the committee which rows they could move.
+- **Two Musts that contradict each other** (no lessons after school, and a lesson fixed in an after-school slot): never
+  choose silently. Follow the more specific rule, report the other as `Partly` with the reason in How, and put the
+  contradiction at the top of your summary. When neither is more specific, ask before solving.
+- **A day when teachers and rooms are not booked** (home-based learning; Settings `Teachers may take two lessons at once on`):
+  that setting only changes the check, and the solver still keeps a teacher in one lesson at a time. When a rule needs
+  the overlap, leave that day's lessons out of the teacher and room constraints, keep each teacher's Not available
+  times, and leave Room blank for those lessons: a blank room passes every check, and an invented name such as "Online"
+  would be counted as one real room. Put a small cost on each overlap so they stay few. "Max periods in a row" is still
+  counted on that day, so a teacher with a lesson in every hour of it is listed.
+- **Notes on a band** (`5 Blocks`) are not rules and the scripts do not read them. A note that reads as an instruction
+  ("3 periods on Odd Tuesday 2.20pm") may be honoured where it breaks no rule. Say in your summary which notes you
+  treated as fixed, and suggest the committee move them to `Fixed lessons`.
+- Check every typed rule on the finished `Lessons` sheet with code that shares nothing with the solver, and write the
+  Rule report from that check, not from what the solver was asked to do.
 
 Before you hand back, run `python -m ttgen check-timetable <the database>`. It lists the clashes, the places the timetable differs
 from the setup, the rules it breaks and the typed rules your report says are not met. Fix what it lists, or say in the notes why
@@ -295,3 +356,12 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
   only; the rest of the class is free or in another band's short lesson. With a Students sheet, a G1 student who
   takes Mother Tongue at G3 must not clash with those extra lessons, and the solver handles it.
 - Report clock times, not only period numbers: Period times gives start and end of every period.
+- Without a Students sheet the solver protects one kind of student per G level in each class. A student who mixes
+  levels (Higher MT with G2 Maths) is not protected. `side_by_side` above 0 in the solve result means two band lessons
+  of one class run at the same time: find which, and keep them apart when a student could be in both.
+- Keeping one-hour lessons to back-to-back starts in each stretch between breaks (its first period, then every third)
+  makes the search far smaller and leaves no one-period holes. Allow other starts only on a day that has a shorter lesson.
+- "No free periods" needs a meaning before solving. Count a period as free for a kind of student when it lies before a
+  later lesson of theirs on that day; time after their last lesson is an early dismissal, not a free period.
+- In a big school a whole-school search can find nothing in 15 minutes while every level solves alone in under a
+  minute. Probe the levels early.
