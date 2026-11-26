@@ -202,7 +202,9 @@ is not on step 3, and a named subject the class has only in groups.
    clash or a broken rule), blue has another lesson there and asks, grey cannot take it (a break, outside the day).
    A lesson dropped where it clashes lands there and is marked on its card with the first thing that is in two places
    (**Teacher in two places**: one of its teachers has another lesson then; **Class in two places**: the class has another
-   lesson then; **Room in two places**: the room holds more lessons then than it takes), and the counters above the board (Not placed,
+   lesson then, though two groups of one band, or of one class, at the same time are not counted; **Room in two places**: the room
+   holds more lessons then than it takes). A card shows the first of these that applies, and the title on hover starts with it. The
+   Warnings list keeps its own words ("Teacher in two places", "Class clash", "Room used twice"). The counters above the board (Not placed,
    No teacher, In two places, In a break, No room) count what is wrong; a click on one steps through its lessons. A drop
    on another lesson asks first and lists every collision at that place (a teacher, a class, shared students, a room), at most 8 and then "and n more".
    It offers to swap with the lesson, to put the dropped one beside it (when nothing collides), or **Put it here anyway**, which leaves both lessons
@@ -258,10 +260,11 @@ is not on step 3, and a named subject the class has only in groups.
    under the upload's notes, **Go to step 9** goes on. Steps 8 and 9 do not show the setup's "Things to fix" column, so the
    timetable has the page's width.
 
-   **Four panels and full screen.** On the one-day board (Classes rows) and on a class's whole cycle, **Four panels** shows three
-   classes at once, each with its whole cycle (every week), and the side panel as the fourth panel. A list at the top of a class
+   **Four panels and full screen.** On the one-day board and on a whole cycle, whatever the rows (from Teachers or Rooms rows it opens
+   them on Classes rows), **Four panels** shows three classes at once, each with its whole cycle (every week), and the side panel as the fourth panel. A list at the top of a class
    panel changes its class or empties it ("No class here"); **All classes** goes back to the one-day board. The classes shown are
-   remembered in this browser. Each class panel is edited as one class's cycle is (drag, click then click, the drop box, Undo), but
+   remembered in this browser. Pressed with a lesson on the board chosen, the panels always show one of its classes (in an empty
+   panel, else in the third panel's place). Each class panel is edited as one class's cycle is (drag, click then click, the drop box, Undo), but
    a lesson goes only on its own class's rows: dropped on another class's panel it is refused ("This lesson is 1A's. It can only
    go on 1A's rows."). A band shows in each of its classes' panels and is one lesson. The rows share each panel's height, a lesson
    is one line on a small window, and a panel scrolls when its rows do not fit; under 900 pixels wide the panels are one column. A counter's
@@ -273,7 +276,7 @@ is not on step 3, and a named subject the class has only in groups.
 
    **What a lesson is tied to.** In the four panels, with a lesson chosen, the same teacher's lessons get a purple outline, lessons in
    the same room (a combined venue counts with its rooms) a dotted teal one in the other classes' panels, and the rest of those
-   panels fade a little; a key under the counters names them. With the pointer resting on a red place of the lesson's own rows, the
+   panels fade a little; a key under the counters names them (not in full screen, where the rows get the height). With the pointer resting on a red place of the lesson's own rows, the
    lessons in the way there get a red dashed outline in whichever panels show them (a place red because of a rule outlines nothing).
    The **Lesson** tab gains **Where it can go** (how many clean places, how many that bend a Prefer, how many with another lesson of
    the class) and **Tied to** (for each teacher, the other classes they teach and how many lessons; in the four panels a class shown
