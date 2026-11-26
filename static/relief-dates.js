@@ -127,7 +127,14 @@ window.ReliefDates = (function () {
     box.innerHTML = `<p class="small muted rd-note">Reading the school calendar…</p>`;
     load(url => window.Relief.api(url)).then(r => {
       if (v.box !== box) return;   /* a newer mount drew it */
-      if (r.ok) { draw(v); return; }
+      const focus = v.focusPending;
+      v.focusPending = false;
+      if (r.ok) {
+        draw(v);
+        const a = document.activeElement;   /* asked for while reading: given now, unless the person has gone on elsewhere */
+        if (focus && (!a || a === document.body || box.contains(a))) focusFirst(box);
+        return;
+      }
       box.innerHTML = `<p class="rd-note">${window.Relief.say({ text: r.error, bad: true, status: r.status })}`
         + `${r.status === 0 ? ` <button type="button" class="small" data-rd="retry">Try again</button>` : ""}</p>`;
     });
@@ -146,9 +153,11 @@ window.ReliefDates = (function () {
     b.tabIndex = 0;
     b.focus();
   }
-  function focusFirst(box) {
+  function focusFirst(box) {   /* while the school days are still being read, once they are drawn */
     const b = box && box.querySelector(".rd-d:not(.off)");
-    if (b) focusDay(box, b);
+    if (b) { focusDay(box, b); return; }
+    const v = box && viewOf(box);
+    if (v && !info) v.focusPending = true;
   }
 
   /* ---------------------------------------------------------------- what the person does */
@@ -195,10 +204,12 @@ window.ReliefDates = (function () {
 
   function bind(box) {
     box.addEventListener("pointerdown", e => {
+      if (active) cancel();   /* a drag still open lost its release: a new press ends it with no change */
       const v = viewOf(box), c = dayOf(e);
-      if (!v || !info || active || e.button !== 0 || !c || why(c.dataset.d, info)) return;
+      /* Ctrl or Cmd with the main button is a context menu on a Mac, which swallows the release */
+      if (!v || !info || e.button !== 0 || e.ctrlKey || e.metaKey || !c || why(c.dataset.d, info)) return;
       e.preventDefault();   /* no text selection, no focus ring under the pointer */
-      v.drag = { anchor: c.dataset.d, end: c.dataset.d, pointerId: e.pointerId };
+      v.drag = { anchor: c.dataset.d, end: c.dataset.d, pointerId: e.pointerId, pointerType: e.pointerType };
       active = v;
       paint(v);
     });
@@ -225,26 +236,35 @@ window.ReliefDates = (function () {
     document.addEventListener("pointermove", e => {
       const v = active;
       if (!v || e.pointerId !== v.drag.pointerId) return;
+      if (e.buttons === 0) { cancel(); return; }   /* its button is up: the release never came */
       const el = document.elementFromPoint(e.clientX, e.clientY), c = el && el.closest ? el.closest(".rd-d[data-d]") : null;
       if (!c || !v.box.contains(c) || why(c.dataset.d, info) || c.dataset.d === v.drag.end) return;   /* a grey day keeps the last school day */
       v.drag.end = c.dataset.d;
       paint(v);
     });
-    const release = ok => e => {
+    document.addEventListener("pointerup", e => {
       const v = active;
       if (!v || e.pointerId !== v.drag.pointerId) return;
       const d = v.drag;
       v.drag = null; active = null;
-      if (ok) apply(v, d.anchor, d.end, false); else draw(v);
-    };
-    document.addEventListener("pointerup", release(true));
-    document.addEventListener("pointercancel", release(false));
+      apply(v, d.anchor, d.end, false);
+    });
+    document.addEventListener("pointercancel", e => { if (active && e.pointerId === active.drag.pointerId) cancel(); });
+    /* a context menu takes the release; a finger held still on Android raises one too, and that drag goes on (its menu, if any, cancels it) */
+    document.addEventListener("contextmenu", () => { if (active && active.drag.pointerType !== "touch") cancel(); });
+  }
+
+  function cancel() {   /* the drag in progress ends with no change */
+    const v = active;
+    if (!v) return;
+    v.drag = null; active = null;
+    draw(v);
   }
 
   function mount(box, opts) {
     const o = opts || {}, key = String(o.key || "");
     let v = views.get(key);
-    if (!v) { v = { first: null, picked: [], max: MAX, onChange: null, capped: false, box: null, drag: null }; views.set(key, v); }
+    if (!v) { v = { first: null, picked: [], max: MAX, onChange: null, capped: false, box: null, drag: null, focusPending: false }; views.set(key, v); }
     v.picked = sorted(o.picked);
     v.max = Number(o.max) || MAX;
     v.onChange = typeof o.onChange === "function" ? o.onChange : null;

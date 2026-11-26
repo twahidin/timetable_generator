@@ -248,6 +248,64 @@ ta("a mount during a drag only records the dates; the calendar is drawn on relea
   assert.strictEqual(first.draws, had);
   same(got, [["2026-11-27", "2026-12-14"]]);
 });
+ta("focusFirst while the school days are being read focuses the first school day once they are drawn", async () => {
+  let answer;
+  const p = page(() => new Promise(f => { answer = f; })), box = standBox(), first = dayEl("2026-11-26"), focused = [];
+  first.focus = () => focused.push(first.dataset.d);
+  box.querySelector = s => (s === ".rd-d:not(.off)" && box.innerHTML.includes("rd-month") ? first : null);
+  p.RD.mount(box, { key: "plan", picked: [], max: 20 });
+  p.RD.focusFirst(box);   /* Pick dates was just chosen; the calendar says "Reading the school calendar…" */
+  assert.strictEqual(focused.length, 0);
+  answer(OK); await tick();
+  same(focused, ["2026-11-26"]);
+  assert.strictEqual(first.tabIndex, 0);
+});
+ta("a press while a drag is still open (its release lost) ends that drag with no change and starts a new one", async () => {
+  const days = fiveDays(), [d27, d30, , d08] = days, p = page(OK), box = standBox(days), got = [];
+  p.RD.mount(box, { key: "plan", picked: [], max: 20, onChange: l => got.push(Array.from(l)) }); await tick();
+  fire(box, "pointerdown", { target: d27, pointerId: 1 }); p.doc.under = d08; fire(p.doc, "pointermove", { pointerId: 1 });
+  const drawn = box.draws;
+  fire(box, "pointerdown", { target: d30, pointerId: 2 });
+  assert.strictEqual(got.length, 0);
+  assert.strictEqual(box.draws, drawn + 1, "the old drag's preview is drawn away");
+  assert.ok(d30.cls.has("add") && !d27.cls.has("add") && !d08.cls.has("add"), "the new drag starts at 30 Nov");
+  fire(p.doc, "pointerup", { pointerId: 1 });
+  assert.strictEqual(got.length, 0, "the old pointer's late release does nothing");
+  fire(p.doc, "pointerup", { pointerId: 2 });
+  same(got, [["2026-11-30"]]);
+});
+ta("a context menu ends a mouse drag with no change; a finger held still goes on", async () => {
+  const days = fiveDays(), [d27, , , d08] = days, p = page(OK), box = standBox(days), got = [];
+  p.RD.mount(box, { key: "plan", picked: [], max: 20, onChange: l => got.push(Array.from(l)) }); await tick();
+  fire(box, "pointerdown", { target: d27, pointerType: "mouse" }); p.doc.under = d08; fire(p.doc, "pointermove", {});
+  const drawn = box.draws;
+  fire(p.doc, "contextmenu", {});
+  assert.strictEqual(box.draws, drawn + 1);
+  fire(p.doc, "pointerup", {});
+  assert.strictEqual(got.length, 0);
+  fire(box, "pointerdown", { target: d27, pointerType: "touch" }); fire(p.doc, "pointermove", {});
+  fire(p.doc, "contextmenu", {}); fire(p.doc, "pointerup", {});
+  same(got, [SEVEN]);
+});
+ta("a pointer move with no button down ends the drag with no change", async () => {
+  const days = fiveDays(), [d27, , , d08] = days, p = page(OK), box = standBox(days), got = [];
+  p.RD.mount(box, { key: "plan", picked: [], max: 20, onChange: l => got.push(l) }); await tick();
+  fire(box, "pointerdown", { target: d27 }); p.doc.under = d08; fire(p.doc, "pointermove", { buttons: 1 });
+  assert.ok(d08.cls.has("add"));
+  const drawn = box.draws;
+  fire(p.doc, "pointermove", { buttons: 0 });
+  assert.strictEqual(box.draws, drawn + 1);
+  fire(p.doc, "pointerup", {});
+  assert.strictEqual(got.length, 0);
+});
+ta("a press with Ctrl or Cmd starts nothing", async () => {
+  const days = fiveDays(), [d27] = days, p = page(OK), box = standBox(days), got = [];
+  p.RD.mount(box, { key: "plan", picked: [], max: 20, onChange: l => got.push(l) }); await tick();
+  fire(box, "pointerdown", { target: d27, ctrlKey: true }); fire(p.doc, "pointerup", {});
+  fire(box, "pointerdown", { target: d27, metaKey: true }); fire(p.doc, "pointerup", {});
+  assert.strictEqual(got.length, 0);
+  assert.ok(!d27.cls.has("add"));
+});
 ta("Clear all takes every date off", async () => {
   const p = page(OK), box = standBox(), got = [];
   p.RD.mount(box, { key: "plan", picked: SEVEN, max: 20, onChange: l => got.push(Array.from(l)) }); await tick();
