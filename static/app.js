@@ -4338,7 +4338,7 @@ function bdPieces(row, d, b, hit, warned) {   // warned: the open warnings by le
   row.cards.forEach(x => {
     const c = x.card, bx = Board.box(c, d.NP), ln = Board.lines(c, d, row), pal = bdPal(d, ln), bg = Board.flag(c, warned);
     const time = ((d.times || [])[c.p] || [])[0] || "", day = (d.days || [])[c.d] || "";
-    const tip = [c.what, `${day} period ${c.p}${time ? ` (${time})` : ""}`, ln.title].concat(ln.lines, [c.why || ""], (warned[c.id] || []).map(w => w.text)).filter(Boolean).join("\n");
+    const mk = Board.badge(c), tip = [mk ? mk.text : "", c.what, `${day} period ${c.p}${time ? ` (${time})` : ""}`, ln.title].concat(ln.lines, [c.why || ""], (warned[c.id] || []).map(w => w.text)).filter(Boolean).join("\n");
     const badge = bg && bg.text ? `<em class="bdbadge${bg.crit ? " crit" : " warn"}">${esc(bg.text)}</em>` : "";
     st.push(`<button class="${bdCardClass(c, d, b, hit)}" data-card="${c.id}" draggable="true" title="${esc(tip)}" style="grid-column:${bx.from + 2}/${bx.to + 3};grid-row:${x.lane + 2}${pal ? `;${pal}` : ""}">${badge}<b>${esc(ln.title)}</b>${ln.lines.map(l => `<span>${esc(l)}</span>`).join("")}</button>`);
   });
@@ -4575,7 +4575,8 @@ function bdHowHTML() {   // how to change the timetable: always in the same plac
     <li><b>Move a lesson:</b> drag it to another time on its row, or click it and then click a place.</li>
     <li><b>Colours:</b> ${sw("ok")}green is clean, ${sw("prefer")}amber bends a rule, ${sw("no")}red lands with a problem, ${sw("ask")}blue has another lesson there and asks, ${sw("na")}grey cannot take it.</li>
     <li><b>Ask:</b> click a lesson or an empty period; its questions are on the right.</li>
-    <li><b>Whole cycle:</b> click a name at the left.</li>
+    <li><b>Whole cycle:</b> click a name at the left. <b>Four panels</b> shows three classes at once; <b>Full screen</b> fills the window.</li>
+    <li><b>In two places:</b> Teacher: one of the lesson's teachers has another lesson then. Class: the class has another lesson then (two groups of one band, or of one class, do not count). Room: the room holds more lessons then than it takes.</li>
     <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc lets go of the lesson, then leaves full screen.</li></ul></div>`;
 }
 function bdLineDraw() {
@@ -4677,6 +4678,8 @@ function bdPaint() {   // the cells and the strip of every row take the state of
     const own = !!o && Board.onRow(c, bdRowData(row), d), tie = o ? Board.tied(c, o, d.room_parts) : "";
     x.classList.toggle("tiet", tie === "teacher"); x.classList.toggle("tier", tie === "room" && !own); x.classList.toggle("tief", !!o && !own && !tie);
   });
+  const wb = $("#akWhere"), pc = wb && b.about && b.about.card !== null ? bdCard(b.about.card) : null;   /* the Lesson page's "Where it can go": written again as the places arrive, with no redraw of the panel */
+  if (wb && pc) { const l = akWhereLines(pc), key = akWhereData(l); if (wb.dataset.lines !== key) { wb.dataset.lines = key; wb.innerHTML = akWhereInner(l); } }
 }
 function bdSlotsP(id) {   // where card id may go in the draft of the board now: one fetch a card and board, shared by every asker (a press, a selection, a drop); null when it could not be had, and then asked again the next time
   if (!BD.sp || BD.sp.gen !== BD.gen) BD.sp = { gen: BD.gen, by: {}, got: {}, del: {} };
@@ -4924,6 +4927,10 @@ function bdClick(b) {   // true when the click was the board's
     const p = Board.panelsFor(bd.panels, lvs, bd.mode.kind === "cycle" ? bd.mode.cls || "" : "", lv ? lv.level : "");
     if (p) { bdPanelsShow(p, bd.mode.d); bdDraw(); bdWant(); } return true;
   }
+  if (d.bdshowcls !== undefined) {   // Show 2A (the Lesson page): the class goes into the first empty panel
+    const four = bdFour(), p = four ? Board.panelPut(four, d.bdshowcls) : null;
+    if (p) { bdPanelsShow(p, bd.mode.d); bdDraw(); bdWant(); } return true;
+  }
   if (d.bdyes !== undefined) { const a = bd.ask; if (a && a.run) { if (FX.busy) toast(BDWHY.busy); else a.run(); } return true; }   // a yes or no question's Yes
   if (d.bdfold !== undefined) { if (bd.fold[d.bdfold]) delete bd.fold[d.bdfold]; else bd.fold[d.bdfold] = true; bdDraw(); return true; }
   if (d.bdhow !== undefined) {   // the green box folded or opened: kept in this browser; nothing else is drawn again
@@ -5137,8 +5144,8 @@ document.addEventListener("dragover", e => {   // over a place: the cells it wou
   }
   if (!c || !row || p < 0) { bdBlock(null); if (b.hv) { b.hv = ""; b.pt = b.changed ? bdAirText(b) : ""; bdOver(null); bdTrayLit(false); bdLineDraw(); } return; }
   const at = bdPlaceAt(row, p, e);
-  bdBlock(bdBlockAt(c, row, p));   // a red place: the lesson in the way is outlined once the pointer rests there
   e.preventDefault(); e.dataTransfer.dropEffect = "move";   // every place of a row takes the drop, which is judged where it is let go: a quick drag over a refused row must not leave the drop refused (the drop then says why)
+  bdBlock(bdBlockAt(c, row, p));   // a red place: the lesson in the way is outlined once the pointer rests there (after the drop is let through: an error here must never refuse a drop)
   const hand = bdHandOf(c, at);
   if (hand && at.d === c.d && p === c.p) {   // another teacher's or room's row at the lesson's own time: a hand-over only
     const key = `${row.dataset.row}|${row.dataset.d}|${p}|hand`; if (key === b.hv) return;
@@ -5233,13 +5240,14 @@ function bdBlockAt(c, row, p) {   // the place to ask bdBlock about: a red place
   return Board.states(c, b.slots, day, d.NP)[p] === "no" ? { id: c.id, d: day, p } : null;
 }
 function bdBlock(at) {   // the lessons in the way at a red place (at: {id, d, p}; null: none) get a red dashed outline once the pointer has rested there 200 ms: asked of GET /api/draft/place once a lesson, place and board; classes only, and only the outline (what a click or a drop does is unchanged)
-  const z = BD.blk, key = at ? `${at.id}|${at.d}|${at.p}` : "";
+  const z = BD.blk, key = at ? `${at.id}|${at.d}|${at.p}` : "", req = BD.gen;
   if (key === z.key) return;
   clearTimeout(z.t); z.t = 0; z.key = key;
   document.querySelectorAll("#bdBox .bdcard.blk").forEach(x => x.classList.remove("blk"));
   if (!key) return;
   z.t = setTimeout(async () => {
-    if (z.key !== key) return;
+    if (!S.board) return;
+    if (z.key !== key || BD.gen !== req) return;   // the pointer left, or the board was fetched again since the request was made
     if (z.gen !== BD.gen) { z.gen = BD.gen; z.got = {}; }   // the board was fetched again: what was kept is for the old one
     const gen = BD.gen;
     let ids = z.got[key];
@@ -5371,13 +5379,41 @@ function akHTML(b) {   // the page: what it is about, Lift out and Delete this l
   } else if (pt.lift || pt.del) acts = `<div class="row akdo">${pt.lift ? `<button data-bdlift="1"${dis}>Lift out</button>` : ""}${pt.del ? `<button data-bddel="1"${dis}>Delete this lesson</button>` : ""}</div>`;
   const ws = c && !c.entry ? bdLineWarnings(c, Infinity) : "", gs = A.pick && c ? Ask.groups(c) : [];
   const on = gs.length ? String(sub.group !== null && sub.group !== undefined ? sub.group : gs[0].group) : "";
+  const tie = c && !gone && !c.entry && !bdInTray(c) ? `<div class="aktie"><h4>Where it can go</h4>${akWhereBox(c)}<h4>Tied to</h4>${akTiedHTML(c, d)}</div>` : "";
   const chips = gs.length ? `<div class="akchips">${gs.map(g => `<button class="akchip${String(g.group) === on ? " on" : ""}" data-akgroup="${esc(g.group)}" aria-pressed="${String(g.group) === on}">${esc(g.label)}</button>`).join("")}</div>` : "";
   const starts = gone ? "" : `<div class="akstart">${Ask.starters(sub, c).map(s => `<button data-akq="${esc(s.q)}">${esc(s.label)}</button>`).join("")}</div>`;   // a deleted lesson: nothing to ask
   let lists = "";
   const L = A.les, r = pt.lists && L && L.id === c.id ? (c.rows || []).find(x => String(x.group) === String(L.group)) : null;
   if (r) lists = `<div class="aklists">${L.got === "fail" ? `<p class="bdwhy">${esc(BDWHY.lessonFailed)}</p>` : L.got && typeof L.got === "object" && Array.isArray(L.got.teachers) ? bdLessonLists(L, r, L.got) : `<p class="muted">Loading…</p>`}</div>`;
   const log = A.log.map((e, i) => akEntryHTML(e, i, sub)).join("");
-  return `<div class="akabout">${head}${acts}${ws ? `<div class="bdlws">${ws}</div>` : ""}${chips}${starts}${lists}${log}${A.log.length ? `<div class="row"><button data-akclear="1">Clear</button></div>` : ""}</div>`;
+  return `<div class="akabout">${head}${acts}${ws ? `<div class="bdlws">${ws}</div>` : ""}${tie}${chips}${starts}${lists}${log}${A.log.length ? `<div class="row"><button data-akclear="1">Clear</button></div>` : ""}</div>`;
+}
+function akWhereLines(c) {   /* the lines under "Where it can go": none before the lesson's places have arrived */
+  const sl = bdSlotsHad(c.id); if (!sl) return [];
+  const t = Board.tally(c, sl), out = [];
+  if (t.ok) out.push(t.ok === 1 ? "1 clean place" : `${t.ok} clean places`);
+  if (t.prefer) out.push(t.prefer === 1 ? "1 that bends a Prefer" : `${t.prefer} that bend a Prefer`);
+  if (t.ask) out.push(t.ask === 1 ? "1 where another lesson of the class is: a swap is asked" : `${t.ask} where another lesson of the class is: a swap is asked`);
+  return out.length ? out : ["Nowhere else in the cycle."];
+}
+const akWhereData = lines => lines.join("\n");
+function akWhereInner(lines) { return lines.length === 1 && lines[0] === "Nowhere else in the cycle." ? `<p class="small muted">${esc(lines[0])}</p>` : lines.length ? `<ul class="small">${lines.map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""; }
+function akWhereBox(c) { const l = akWhereLines(c); return `<div id="akWhere" data-lines="${esc(akWhereData(l))}">${akWhereInner(l)}</div>`; }
+function akTiedHTML(c, d) {   /* what the lesson is tied to: its band's classes, else each teacher's other classes (with Show buttons in the four panels) */
+  const t = Board.ties(c, d), four = bdFour();
+  if (t.band) return `<p class="small">${esc(`This lesson is one band. It moves in ${Board.andList(t.band)} at the same time.`)}</p>`;
+  if (!t.teachers.length) return `<p class="small muted">This lesson has no teacher.</p>`;
+  const spare = !!four && four.indexOf("") >= 0;
+  return t.teachers.map(x => {
+    if (!x.classes.length) return `<p class="small muted">${esc(`${x.name} teaches no other class.`)}</p>`;
+    const li = x.classes.map(k => {
+      const txt = `${k.cls}: ${k.n === 1 ? "1 lesson" : `${k.n} lessons`}`;
+      if (!four) return `<li>${esc(txt)}</li>`;
+      if (four.indexOf(k.cls) >= 0) return `<li>${esc(txt)} · shown</li>`;
+      return `<li>${esc(txt)} <button data-bdshowcls="${esc(k.cls)}"${spare ? "" : ` disabled title="All three panels are in use: change one at its top"`}>${esc(`Show ${k.cls}`)}</button></li>`;
+    }).join("");
+    return `<p class="small">${esc(`${x.name} also teaches:`)}</p><ul class="small">${li}</ul>`;
+  }).join("");
 }
 function akEntryHTML(e, i, sub) {   // one question of the log and its answer (about another thing than the page's: its title after it); once the timetable has changed: struck through, with no buttons but its heading, which asks it again
   const a = e.got, old = akStale(e), label = old && !akGone(S.board, e.sub) ? `<button class="akagain" data-akagain="${i}">${esc(e.label)}</button>` : esc(e.label);

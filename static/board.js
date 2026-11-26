@@ -343,8 +343,8 @@ var Board = (function () {
   /* the marks of a card, a missing list being empty */
   function marksOf(card) { return card.marks || []; }
 
-  var MARK = { notplaced: "Not placed", noteacher: "No teacher", "break": "In a break", teacher: "In two places",
-    "class": "In two places", room: "In two places", noroom: "No room" };
+  var MARK = { notplaced: "Not placed", noteacher: "No teacher", "break": "In a break", teacher: "Teacher in two places",
+    "class": "Class in two places", room: "Room in two places", noroom: "No room" };
   var COUNTERS = [["notplaced", "Not placed"], ["noteacher", "No teacher"], ["twoplaces", "In two places"],
     ["inbreak", "Not lesson time"], ["noroom", "No room"]];
 
@@ -669,12 +669,53 @@ var Board = (function () {
     return out.sort(function (a, b) { return a - b; });
   }
 
+  /* names joined as "1A", "1A and 1B", "1A, 1B and 1C" */
+  function andList(names) {
+    return names.length < 2 ? names.join("") : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+  }
+
   /* the sentence telling whose rows a lesson can go on; "" for a lesson with no class */
   function ownRows(card) {
     var c = (card && card.classes) || [];
     if (!c.length) return "";
     if (c.length === 1) return "This lesson is " + c[0] + "'s. It can only go on " + c[0] + "'s rows.";
-    return "This lesson is " + c.slice(0, -1).join(", ") + " and " + c[c.length - 1] + "'s. It can only go on their rows.";
+    return "This lesson is " + andList(c) + "'s. It can only go on their rows.";
+  }
+
+  /* where a lesson can go, counted as states() colours the places: another lesson of the class there is "ask", else ok or prefer */
+  function tally(card, slots) {
+    var out = { ok: 0, prefer: 0, ask: 0 };
+    (slots || []).forEach(function (s) {
+      if (!s || s.state === "own") return;
+      if (Array.isArray(s.there) && s.there.length) { out.ask++; return; }
+      var o = offers(card, s);
+      if (o && (o.swap || o.beside || o.anyway)) out.ask++;
+      else if (!o && s.state === "ok") out.ok++;
+      else if (!o && s.state === "prefer") out.prefer++;
+    });
+    return out;
+  }
+
+  /* what a lesson is tied to: its classes when it is a band of two or more, and for each of its teachers (once, in order)
+     the other classes whose placed cards have that teacher, with the number of such cards */
+  function ties(card, board) {
+    var own = (card && card.classes) || [], teachers = [], order = [];
+    ((card && card.rows) || []).forEach(function (r) { (r.teachers || []).forEach(function (x) { if (x && teachers.indexOf(x) < 0) teachers.push(x); }); });
+    ((board && board.levels) || []).forEach(function (lv) { (lv.classes || []).forEach(function (c) { if (order.indexOf(c) < 0) order.push(c); }); });
+    var placed = ((board && board.cards) || []).filter(function (c) { return c.d !== null && c.d !== undefined; });
+    return {
+      band: card && card.band && own.length >= 2 ? own.slice() : null,
+      teachers: teachers.map(function (name) {
+        var n = {};
+        placed.forEach(function (c) {
+          if (!(c.rows || []).some(function (r) { return (r.teachers || []).indexOf(name) >= 0; })) return;
+          (c.classes || []).forEach(function (k) { if (own.indexOf(k) < 0) n[k] = (n[k] || 0) + 1; });
+        });
+        var ks = Object.keys(n), known = order.filter(function (k) { return n[k]; });
+        ks = known.concat(ks.filter(function (k) { return order.indexOf(k) < 0; }).sort());
+        return { name: name, classes: ks.map(function (k) { return { cls: k, n: n[k] }; }) };
+      })
+    };
   }
 
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
@@ -684,6 +725,6 @@ var Board = (function () {
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
            teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet,
            panels: panels, panelsFor: panelsFor, panelSet: panelSet, panelPut: panelPut, panelShow: panelShow, panes: panes, lane: lane, ownRows: ownRows,
-           tied: tied, blockers: blockers };
+           tied: tied, blockers: blockers, tally: tally, ties: ties, andList: andList };
 })();
 if (typeof module !== "undefined") module.exports = Board;

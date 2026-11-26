@@ -507,6 +507,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.tier{outline:2px dotted #0f8f8f;outline-offset:-2px}   /* of its room, in another class's panel */
 .bdcard.tief:not(.fade):not(.cfade):not(.blk){opacity:.62}   /* the rest of another class's panel: Find's and a counter's 25% stay */
 .bdcard.blk{outline:3px dashed #c62828;outline-offset:-3px;opacity:1;z-index:2}   /* in the way at the red place under the pointer */
+.bdcard.blk.swap,.bdcard.blk.swap.swapprefer{outline-color:#c62828}   /* a card that is both in the way and a swap keeps the blocker's red */
 .bdties{gap:14px;margin:0 0 6px;font-size:12px;color:#3b4458}
 .bdkey.kt,.bdkey.kr,.bdkey.kb{background:#fff;border:0;margin-right:5px}
 .bdkey.kt{outline:2px solid #7c3aed;outline-offset:-2px}.bdkey.kr{outline:2px dotted #0f8f8f;outline-offset:-2px}.bdkey.kb{outline:2px dashed #c62828;outline-offset:-2px}
@@ -545,6 +546,8 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdlnote{margin:0 0 4px}
 .bdlall{display:flex;gap:4px;align-items:center}
 /* the page (the Lesson or Empty period tab): what it is about, Lift out and Delete this lesson (or the delete question), a band's groups as chips, the starters (wrapping buttons), then each question asked and its options */
+.akabout .aktie{border-top:1px solid var(--line);padding:4px 0 6px;margin:0 0 6px}.akabout .aktie h4{margin:6px 0 2px;font-size:13px}
+.akabout .aktie ul{margin:0 0 4px;padding-left:18px}.akabout .aktie p{margin:0 0 2px}.akabout .aktie li button{margin-left:4px;font-size:12px;padding:1px 8px}
 .akabout .aktitle{margin:0 0 4px}.akabout .bdlws{margin:0 0 6px}.akabout .bdlw{display:block;margin:0 0 2px}
 .akdo{margin:0 0 6px;gap:6px}
 .akdo [data-bddel],.akdel [data-bddelgo]{color:#b4233b;border-color:#f0c4cc}

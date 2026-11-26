@@ -191,15 +191,15 @@ const marked = (board0) => Object.assign({ unplaced: [], short: [] }, board0);
 const ev = (d, p) => ({ d: d, p: p, state: "ok", why: "", swap: null, also: [], push: null });
 
 t("MARK and critical: every mark but noroom is critical", () => {
-  assert.deepStrictEqual(Board.MARK, { notplaced: "Not placed", noteacher: "No teacher", "break": "In a break", teacher: "In two places",
-    "class": "In two places", room: "In two places", noroom: "No room" });
+  assert.deepStrictEqual(Board.MARK, { notplaced: "Not placed", noteacher: "No teacher", "break": "In a break", teacher: "Teacher in two places",
+    "class": "Class in two places", room: "Room in two places", noroom: "No room" });
   assert.strictEqual(Board.critical(card(1, 0, 0, 1, ["1A"], { marks: ["noroom"] })), false);
   assert.strictEqual(Board.critical(card(1, 0, 0, 1, ["1A"], { marks: ["noroom", "teacher"] })), true);
   assert.strictEqual(Board.critical(card(1, 0, 0, 1, ["1A"])), false);
 });
 
 t("badge: the first mark's words and whether it is critical; null with no mark", () => {
-  assert.deepStrictEqual(Board.badge(card(1, 0, 0, 1, ["1A"], { marks: ["class", "noroom"] })), { text: "In two places", crit: true });
+  assert.deepStrictEqual(Board.badge(card(1, 0, 0, 1, ["1A"], { marks: ["class", "noroom"] })), { text: "Class in two places", crit: true });
   assert.deepStrictEqual(Board.badge(card(1, 0, 0, 1, ["1A"], { marks: ["noroom"] })), { text: "No room", crit: false });
   assert.strictEqual(Board.badge(card(1, 0, 0, 1, ["1A"], { marks: [] })), null);
   assert.strictEqual(Board.badge(card(1, 0, 0, 1, ["1A"])), null);
@@ -225,7 +225,7 @@ t("counts: lessons, a card once for two places; a missing list is empty", () => 
     ["inbreak", "Not lesson time"], ["noroom", "No room"]]);
   assert.strictEqual(Board.badge({ marks: ["break"] }).text, "In a break");
   assert.strictEqual(Board.badge({ marks: ["break"], out: true }).text, "Outside the day");   // no school then, or past the day's end
-  assert.strictEqual(Board.badge({ marks: ["teacher"], out: true }).text, "In two places");
+  assert.strictEqual(Board.badge({ marks: ["teacher"], out: true }).text, "Teacher in two places");
 });
 
 t("hits: the cards a counter counts, by day, period, first class, id; the tray's order for notplaced", () => {
@@ -416,7 +416,7 @@ t("warned: the open warnings that name a lesson, by lesson id, critical ones fir
 t("flag: a mark keeps its badge; else the lesson's warnings are counted; else nothing", () => {
   const marked = card(3, 0, 1, 1, ["1A"], { marks: ["teacher"] }), plain = card(4, 0, 2, 1, ["1A"]), other = card(5, 0, 3, 1, ["1A"]);
   const w = Board.warned([wn("a", { id: 3 }), wn("b", { id: 4 }), wn("c", { id: 4 }), wn("d", { id: 5 })]);
-  assert.deepStrictEqual(Board.flag(marked, w), { text: "In two places", crit: true });
+  assert.deepStrictEqual(Board.flag(marked, w), { text: "Teacher in two places", crit: true });
   assert.deepStrictEqual(Board.flag(plain, w), { text: "2 warnings", crit: false });
   assert.deepStrictEqual(Board.flag(other, w), { text: "1 warning", crit: false });
   assert.strictEqual(Board.flag(card(6, 0, 4, 1, ["1A"]), w), null);
@@ -795,6 +795,23 @@ t("tied: the same teacher, else a room that meets, else nothing", () => {
 t("blockers: the ids a judged place names, each once, in order", () => {
   assert.deepStrictEqual(Board.blockers({ clashes: [{ kind: "teacher", text: "x", ids: [7] }, { kind: "room", text: "y", ids: [3, 7, 9] }, { kind: "room", text: "z", ids: [] }] }), [3, 7, 9]);
   [null, undefined, {}, { clashes: null }, { clashes: "x" }, { clashes: [{ kind: "class", text: "from an older server" }] }].forEach(s => assert.deepStrictEqual(Board.blockers(s), []));
+});
+
+t("tally: where a lesson can go, counted as the board colours its places", () => {
+  const c = card(1, 0, 0, 1, ["1A"]), s = (d, p, state, more) => Object.assign({ d: d, p: p, state: state, why: "", swap: null, also: [], there: null }, more || {});
+  const slots = [s(0, 1, "ok"), s(0, 2, "ok"), s(0, 3, "prefer"), s(0, 4, "no"), s(0, 5, "na"),
+    s(1, 0, "ok", { swap: 5, there: [{ id: 5 }] }), s(1, 1, "na", { there: [{ id: 6 }, { id: 7 }] })];
+  assert.deepStrictEqual(Board.tally(c, slots), { ok: 2, prefer: 1, ask: 2 });
+  assert.deepStrictEqual(Board.tally(c, null), { ok: 0, prefer: 0, ask: 0 });
+});
+t("ties: each teacher's other classes with their lessons; a band of several classes says so", () => {
+  const mk = (id, cls, teachers) => card(id, 0, 0, 1, cls, { rows: [{ group: "G", subject: "Maths", teachers: teachers, room: "" }] });
+  const me = mk(1, ["1A"], ["Mr Tan", "Ms Lee"]);
+  const b = board([me, mk(2, ["1A"], ["Mr Tan"]), mk(3, ["2A"], ["Mr Tan"]), mk(4, ["1B"], ["Mr Tan"]), mk(5, ["2A"], ["Mr Tan"]), mk(6, ["1B", "2A"], ["Mr Ong"])]);
+  assert.deepStrictEqual(Board.ties(me, b), { band: null, teachers: [{ name: "Mr Tan", classes: [{ cls: "1B", n: 1 }, { cls: "2A", n: 2 }] }, { name: "Ms Lee", classes: [] }] });
+  assert.deepStrictEqual(Board.ties(card(7, 0, 0, 1, ["1A", "1B"], { band: "MT" }), b).band, ["1A", "1B"]);
+  assert.strictEqual(Board.ties(card(8, 0, 0, 1, ["1A"], { band: "MT" }), b).band, null);
+  assert.deepStrictEqual(Board.ties({ id: 9, classes: ["1A"] }, b), { band: null, teachers: [] });
 });
 
 console.log(`${n} cases passed`);
