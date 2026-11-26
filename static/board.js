@@ -598,6 +598,17 @@ var Board = (function () {
     return pick ? panels(pick.classes.slice(0, 3), pick.classes) : null;
   }
 
+  /* the panels to open with a lesson of these classes chosen: a new list showing one of them (as they are when one is shown,
+     else classes[0] in the first empty panel, else in the third panel's place); classes empty or panels not three: panels as given */
+  function panelsWith(panels, classes) {
+    if (!Array.isArray(panels) || panels.length !== 3 || !Array.isArray(classes) || !classes.length) return panels;
+    var out = panels.slice();
+    if (classes.some(function (k) { return out.indexOf(k) >= 0; })) return out;
+    var i = out.indexOf("");
+    out[i >= 0 ? i : 2] = classes[0];
+    return out;
+  }
+
   /* the panels with panel i showing cls ("" empties it); unchanged when that is not allowed */
   function panelSet(list, i, cls) {
     var out = list.slice();
@@ -724,7 +735,7 @@ var Board = (function () {
            lands: lands, forced: forced, asks: asks, CLASH: CLASH, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
            teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet,
-           panels: panels, panelsFor: panelsFor, panelSet: panelSet, panelPut: panelPut, panelShow: panelShow, panes: panes, lane: lane, ownRows: ownRows,
+           panels: panels, panelsFor: panelsFor, panelsWith: panelsWith, panelSet: panelSet, panelPut: panelPut, panelShow: panelShow, panes: panes, lane: lane, ownRows: ownRows,
            tied: tied, blockers: blockers, tally: tally, ties: ties, andList: andList };
 })();
 if (typeof module !== "undefined") module.exports = Board;

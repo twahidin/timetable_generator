@@ -570,11 +570,13 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.tray .bdwas{white-space:normal}
 /* the four panels: three classes' whole cycles and the side panel, two by two; a class panel scrolls on its own, its rows share its height (bdFit sets --bdh) */
 .bdquad{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:stretch;height:max(600px,82vh)}
-.bdpane{--bdlab:42px;--bdw:20px;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:#fff}
-.bdpanehd{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:4px 8px;background:#f4f6fa;border-bottom:1px solid var(--line)}
-.bdpanehd select{font-weight:700;font-size:14px;max-width:100%}
+.bdpane{--bdlab:42px;--bdw:20px;--bdstrip:4px;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:#fff}
+.bdpanehd{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:3px 8px;background:#f4f6fa;border-bottom:1px solid var(--line)}
+.bdpanehd select{font-weight:700;font-size:13px;line-height:16px;padding:1px 6px;max-width:100%}   /* the head line about 27px with its border to the rows */
 .bdmain .bdpane .bdwrap{flex:1 1 0;min-height:0;max-height:none;overflow:auto;margin-top:0;border:0;border-radius:0}
 .bdpane .bdnone{margin:auto;padding:20px;text-align:center}
+.bdpane .bdgrp{font-size:10px;line-height:13px;padding:0 6px}   /* a week heading about 14px with its border */
+.bdpane .bdmark{height:var(--bdstrip)}   /* the fit strip, 4px in a class panel */
 .bdpane .bdcard{font-size:10.5px;line-height:1.2;padding:1px 3px}
 .bdpane .bdph{white-space:nowrap;overflow:visible}.bdpane .bdph small{text-align:left;padding-left:1px;font-size:9px}   /* a start time under every third period runs over the next two */
 .bdpane.thin .bdcard{flex-direction:row;align-items:center;gap:4px}   /* a low row: the subject whole, then the other lines on the same line, cut short */

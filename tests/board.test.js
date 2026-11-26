@@ -814,4 +814,12 @@ t("ties: each teacher's other classes with their lessons; a band of several clas
   assert.deepStrictEqual(Board.ties({ id: 9, classes: ["1A"] }, b), { band: null, teachers: [] });
 });
 
+t("panelsWith: the panels to open always show a class of the chosen lesson", () => {
+  assert.deepStrictEqual(Board.panelsWith(["1A", "1B", "2A"], ["2A", "3C"]), ["1A", "1B", "2A"]);   // shown already
+  assert.deepStrictEqual(Board.panelsWith(["1A", "", "2A"], ["3C", "3D"]), ["1A", "3C", "2A"]);     // the first empty panel
+  assert.deepStrictEqual(Board.panelsWith(["1A", "1B", "2A"], ["3C"]), ["1A", "1B", "3C"]);         // none empty: the third panel's place
+  assert.deepStrictEqual(Board.panelsWith(["1A", "1B", "2A"], []), ["1A", "1B", "2A"]);
+  const p = ["1A", "", ""]; assert.notStrictEqual(Board.panelsWith(p, ["1A"]), p); assert.deepStrictEqual(p, ["1A", "", ""]);   // never changes the list given
+});
+
 console.log(`${n} cases passed`);

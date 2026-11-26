@@ -4382,7 +4382,7 @@ function bdHTML() {   // the timetable card: the board with its side panel, the 
   const finder = `<label class="bdfind">Find a subject: <select id="bdFind">${Board.finds(d).map(o => `<option value="${esc(o.value)}"${o.value === b.find ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`;
   const by = bdBy(), who = by === "class" ? m.cls : m.name ? m.name : by === "teacher" ? "No teacher" : "No room";
   const rows = `<div class="row bdrows"><span>Rows:</span>${BDROWS.map(([k, l]) => `<button data-bdrows="${k}" class="${k === by ? "on" : ""}" aria-pressed="${k === by}">${l}</button>`).join("")}</div>`;
-  const fourBtn = !four && by === "class" && bdClasses(d).length ? `<button data-bdfour="1">Four panels</button>` : "";   // on the day board's Classes rows and a class's cycle
+  const fourBtn = !four && bdClasses(d).length ? `<button data-bdfour="1">Four panels</button>` : "";   // on the day board and a whole cycle, whatever the rows (from Teachers or Rooms it opens the panels on Classes rows)
   const controls = rows + `<div class="row bdctl">${four ? `<button data-bdall="1">${BDALL.class}</button><b>Four panels</b>` : cycle ? `<button data-bdall="1">${BDALL[by]}</button><b>${esc(who)}: the whole cycle</b>` : tabs}${fourBtn}${finder}</div>`;
   const hdr = `<div class="bdhead" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr))"><span class="bdcorner"></span>${(d.times || []).slice(0, d.NP).map((t, p) => `<div class="bdph">${p}<small>${esc(t[0] || "")}</small></div>`).join("")}</div>`;
   setTimeout(bdPopDraw, 0);   // the pop-out is placed once the card is on the page
@@ -4920,11 +4920,12 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdname !== undefined) { bd.mode = { kind: "cycle", by: bdBy(), name: d.bdname, d: bd.mode.d }; bd.place = null; bdDraw(); return true; }   // a teacher's or room's whole cycle
   if (d.bdfull !== undefined) { if (bd.drag !== null) return true; bd.full = !bd.full; bdDraw(); return true; }   // Full screen / Exit full screen: the card fills the window (the chosen lesson, the question and the side panel's tab stay); the first line has returned while a drop waits
   if (d.bdall !== undefined) { bd.mode = { kind: "day", d: bd.mode.d, by: bdBy() }; bd.place = null; bdDraw(); return true; }
-  if (d.bdfour !== undefined) {   // Four panels: the stored panels (holding the cycle's class), else the cycle's class alone, else the first classes of the chosen lesson's level or of the first level not folded
-    const j = bd.data; if (!j || bd.drag !== null || bdBy() !== "class") return true;
-    const c = bd.sel !== null ? bdCard(bd.sel) : null, k = c && !bdInTray(c) ? (c.classes || [])[0] : undefined, lvs = j.levels || [];
+  if (d.bdfour !== undefined) {   // Four panels (on Classes rows; from Teachers or Rooms rows it opens them on Classes rows): the stored panels (holding a class's cycle's class), else that class alone, else the first classes of the chosen lesson's level or of the first level not folded; a chosen lesson on the board always has one of its classes shown
+    const j = bd.data; if (!j || bd.drag !== null) return true;
+    const c = bd.sel !== null ? bdCard(bd.sel) : null, on = c && !bdInTray(c) && !c.entry, k = on ? (c.classes || [])[0] : undefined, lvs = j.levels || [];
     const lv = (k !== undefined && lvs.find(x => x.classes.includes(k))) || lvs.find(x => !bd.fold[x.level]);
-    const p = Board.panelsFor(bd.panels, lvs, bd.mode.kind === "cycle" ? bd.mode.cls || "" : "", lv ? lv.level : "");
+    const all = bdClasses(j), own = on ? (c.classes || []).filter(x => all.includes(x)) : [];
+    const p = Board.panelsWith(Board.panelsFor(bd.panels, lvs, bd.mode.kind === "cycle" && bdBy() === "class" ? bd.mode.cls || "" : "", lv ? lv.level : ""), own);
     if (p) { bdPanelsShow(p, bd.mode.d); bdDraw(); bdWant(); } return true;
   }
   if (d.bdshowcls !== undefined) {   // Show 2A (the Lesson page): the class goes into the first empty panel
@@ -5283,7 +5284,7 @@ document.addEventListener("keydown", e => {   // Escape clears the board's selec
   const b0 = S.board; if (e.key === "Escape" && b0 && b0.drag !== null) bdLostDrag();
   const b = S.board; if (e.key !== "Escape" || !b || b.wait) return;   // a waiting drop (a moment) is not cancelled by it
   if (b.sel === null && !b.ask && !b.del && !b.place) {   // nothing asked, nothing chosen: Esc leaves full screen (one press never does both)
-    if (b.full && b.drag === null && b.data && !bdInField(e)) { e.preventDefault(); b.full = false; bdDraw(); }
+    if (b.full && b.drag === null && !bdInField(e)) { e.preventDefault(); b.full = false; bdDraw(); }   /* also when the board failed to load */
     return;
   }
   if (bdInField(e)) return;
@@ -5379,7 +5380,7 @@ function akHTML(b) {   // the page: what it is about, Lift out and Delete this l
   } else if (pt.lift || pt.del) acts = `<div class="row akdo">${pt.lift ? `<button data-bdlift="1"${dis}>Lift out</button>` : ""}${pt.del ? `<button data-bddel="1"${dis}>Delete this lesson</button>` : ""}</div>`;
   const ws = c && !c.entry ? bdLineWarnings(c, Infinity) : "", gs = A.pick && c ? Ask.groups(c) : [];
   const on = gs.length ? String(sub.group !== null && sub.group !== undefined ? sub.group : gs[0].group) : "";
-  const tie = c && !gone && !c.entry && !bdInTray(c) ? `<div class="aktie"><h4>Where it can go</h4>${akWhereBox(c)}<h4>Tied to</h4>${akTiedHTML(c, d)}</div>` : "";
+  const tie = c && !gone && !c.entry && !bdInTray(c) ? `<div class="aktie">${akWhereBox(c)}<h4>Tied to</h4>${akTiedHTML(c, d)}</div>` : "";
   const chips = gs.length ? `<div class="akchips">${gs.map(g => `<button class="akchip${String(g.group) === on ? " on" : ""}" data-akgroup="${esc(g.group)}" aria-pressed="${String(g.group) === on}">${esc(g.label)}</button>`).join("")}</div>` : "";
   const starts = gone ? "" : `<div class="akstart">${Ask.starters(sub, c).map(s => `<button data-akq="${esc(s.q)}">${esc(s.label)}</button>`).join("")}</div>`;   // a deleted lesson: nothing to ask
   let lists = "";
@@ -5397,18 +5398,22 @@ function akWhereLines(c) {   /* the lines under "Where it can go": none before t
   return out.length ? out : ["Nowhere else in the cycle."];
 }
 const akWhereData = lines => lines.join("\n");
-function akWhereInner(lines) { return lines.length === 1 && lines[0] === "Nowhere else in the cycle." ? `<p class="small muted">${esc(lines[0])}</p>` : lines.length ? `<ul class="small">${lines.map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""; }
-function akWhereBox(c) { const l = akWhereLines(c); return `<div id="akWhere" data-lines="${esc(akWhereData(l))}">${akWhereInner(l)}</div>`; }
+function akWhereInner(lines) { return !lines.length ? "" : `<h4>Where it can go</h4>` + (lines.length === 1 && lines[0] === "Nowhere else in the cycle." ? `<p class="small muted">${esc(lines[0])}</p>` : `<ul class="small">${lines.map(l => `<li>${esc(l)}</li>`).join("")}</ul>`); }   /* the heading comes with its lines: before the places are here the box is empty */
+let akWhereOut = "";   /* the places the Lesson page has asked for and not yet had ("gen|id"), so a redraw of the side panel does not ask again */
+function akWhereBox(c) {
+  const b = S.board, key = `${BD.gen}|${c.id}`;
+  if (!bdSlotsHad(c.id) && akWhereOut !== key) { akWhereOut = key; bdSlotsP(c.id).then(() => { if (akWhereOut === key) akWhereOut = ""; if (S.board === b) bdPaint(); }); }   /* bdPaint writes the lines in when they come */
+  const l = akWhereLines(c); return `<div id="akWhere" data-lines="${esc(akWhereData(l))}">${akWhereInner(l)}</div>`; }
 function akTiedHTML(c, d) {   /* what the lesson is tied to: its band's classes, else each teacher's other classes (with Show buttons in the four panels) */
   const t = Board.ties(c, d), four = bdFour();
   if (t.band) return `<p class="small">${esc(`This lesson is one band. It moves in ${Board.andList(t.band)} at the same time.`)}</p>`;
   if (!t.teachers.length) return `<p class="small muted">This lesson has no teacher.</p>`;
-  const spare = !!four && four.indexOf("") >= 0;
+  const spare = !!four && four.indexOf("") >= 0, has = four && d ? bdClasses(d) : [];
   return t.teachers.map(x => {
     if (!x.classes.length) return `<p class="small muted">${esc(`${x.name} teaches no other class.`)}</p>`;
     const li = x.classes.map(k => {
       const txt = `${k.cls}: ${k.n === 1 ? "1 lesson" : `${k.n} lessons`}`;
-      if (!four) return `<li>${esc(txt)}</li>`;
+      if (!four || !has.includes(k.cls)) return `<li>${esc(txt)}</li>`;   /* no Show button for a class the board has no row for */
       if (four.indexOf(k.cls) >= 0) return `<li>${esc(txt)} · shown</li>`;
       return `<li>${esc(txt)} <button data-bdshowcls="${esc(k.cls)}"${spare ? "" : ` disabled title="All three panels are in use: change one at its top"`}>${esc(`Show ${k.cls}`)}</button></li>`;
     }).join("");
