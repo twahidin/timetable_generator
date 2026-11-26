@@ -1345,12 +1345,7 @@ def the_pages_carry_the_words():
 NOW = "2026-10-01T09:00:00"
 
 def _approved(access=None, rooms=None):
-    s = _made_sched()
-    if access is not None: s["access"] = list(access)
-    s = _mk(s) if rooms is None else _mk(s, rooms=rooms)
-    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
-    AP.approve(s, "Timetable committee", NOW)
-    return s
+    return F.approved_exam(_PUB, access=access, **({} if rooms is None else dict(rooms=rooms)))
 
 @t
 def dates_read_as_on_the_page():
@@ -3093,7 +3088,10 @@ def a_plain_teacher_gets_only_their_own_duties():
     full = PB.day(_PUB, F.CAL, [A1], D5, True)["exams"]
     assert own["teachers"] == {"Mr Ben Ong": full["teachers"]["Mr Ben Ong"]} and own["rooms"] == {}, own
     assert own["teachers"]["Mr Ben Ong"][0]["room"] == "3-01" and own["teachers"]["Mr Ben Ong"][0]["role"] == "Invigilate"
-    assert own["classes"] == full["classes"]
+    import copy
+    c = copy.deepcopy(A1); d0 = c["made"]["duties"][0]; d0["chief"] = d0["names"][0]; boss = d0["chief"]
+    got = PB.day(_PUB, F.CAL, [c], D5, False, only=boss)["exams"]["teachers"][boss]
+    assert got[0]["role"] == "Chief invigilator" and got[0]["room"] == d0["room"], got
     none = PB.day(_PUB, F.CAL, [A1], D5, False)["exams"]
     assert none["teachers"] == {} and none["rooms"] == {}
     assert PB.day(_PUB, F.CAL, [A1], D5, True, only="Mr Ben Ong")["exams"] == full

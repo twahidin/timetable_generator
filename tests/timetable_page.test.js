@@ -282,4 +282,26 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     await X.tick();
     assert(!X.el("tabs").innerHTML.includes('data-tab="teachers"') && X.run("S.tab") === "classes", X.el("tabs").innerHTML);
   });
+  await t("a teacher's Exams tab shows their own duties above the exams; none, no section", async () => {
+    const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" });
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], "", ""]); d.rooms = []; d.students = []; };
+    const EL = [200, { schedules: [STUROW], banner: null }];
+    const DU = { schedules: [{ id: "a1", name: "Sec 3 Exam", kind: "exam", duties: [
+      { date: "2026-10-05", start: "09:45", end: "11:10", room: "3-01", label: "Sec 3 Pure Chemistry Paper 1", role: "Chief invigilator" },
+      { date: "2026-10-05", start: "07:35", end: "09:00", room: "3-02", label: "Sec 3 English Paper 1 <b>", role: "Invigilate" }] }], lessons: [] };
+    const P = boot({ "/api/published/exams": EL, "/api/exams/my-duties": [200, DU] }, STAFF, cut);
+    await P.tick(); P.run("show('exams', null)");
+    const v = P.view(), i = v.indexOf("Your duties");
+    assert(i > 0 && i < v.indexOf("Science Centre"), "the duties come above the exam list: " + v);
+    assert(v.includes("<td>07:35–09:00</td><td>3-02</td><td>Sec 3 English Paper 1 &lt;b&gt;</td><td>Invigilate</td>") && v.includes("<td>3-01</td><td>Sec 3 Pure Chemistry Paper 1</td><td>Chief invigilator</td>"), v);
+    assert(v.indexOf("07:35") < v.indexOf("09:45"), "in time order");
+    const N = boot({ "/api/published/exams": EL, "/api/exams/my-duties": [200, { schedules: [], lessons: [] }] }, STAFF, cut);
+    await N.tick(); N.run("show('exams', null)");
+    assert(!N.view().includes("Your duties") && N.view().includes("Science Centre"), N.view());
+    const E = boot({ "/api/published/exams": EL, "/api/exams/my-duties": [403, { error: "x" }] }, STAFF, cut);
+    await E.tick(); E.run("show('exams', null)");
+    assert(!E.view().includes("Your duties"), "no section on an error");
+    const F = boot({ "/api/published/exams": LIST }, APP);
+    await F.tick(); assert(!F.fetched.includes("/api/exams/my-duties"), "only staff mode asks");
+  });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });

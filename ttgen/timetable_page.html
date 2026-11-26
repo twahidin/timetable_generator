@@ -553,10 +553,17 @@ function eventHTML(s) {
   const staff = s.in_charge ? `<p class="evl">Teacher in charge: ${esc(s.in_charge)}</p>${(s.going || []).length ? `<p class="evl">Going: ${esc(s.going.join(", "))}</p>` : ""}${(s.duties || []).length ? tbl(["Duty", "Who", "Time"], s.duties.map(d => [d.duty, d.who, d.time])) : ""}` : "";
   return `<h2>${esc(s.name)}<small>${esc(KINDS.event)} · ${esc(span2(s.start, s.end))}</small></h2>${line ? `<p class="evl">${esc(line)}</p>` : ""}${dy}${staff}`;
 }
+/* a teacher's own duties (staff mode; /api/exams/my-duties holds only the caller's): date, time, room, paper, role; nothing when there are none */
+function dutiesHTML() {
+  const rows = [];
+  for (const s of (S.duties && S.duties.schedules) || []) for (const d of s.duties || []) rows.push([d.date, d.start, d.end, s.kind === "event" ? s.where || "" : d.room, s.kind === "event" ? s.name : d.label, s.kind === "event" ? d.duty || "At event" : d.role]);
+  rows.sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+  return rows.length ? `<div class="myduties"><h2>Your duties</h2>${tbl(["Date", "Time", "Room", "Paper", "Role"], rows.map(r => [niceDate(r[0]), `${r[1]}–${r[2]}`, r[3], r[4], r[5]]))}</div>` : "";
+}
 function renderExams() {
   const ex = S.ex;
   const body = !ex ? `<p class="count">Loading the exams…</p>` : ex.error ? `<p class="badline">${esc(ex.error)}</p>` : !(ex.schedules || []).length ? `<div class="empty">No exams, tests or events on the main site now.</div>` : ex.schedules.map(s => s.kind === "event" ? eventHTML(s) : examHTML(s)).join("");
-  $("#view").innerHTML = `<div class="card exams"><h1 style="margin:0 0 4px;font-size:20px">Exams and events</h1>${body}</div>`;
+  $("#view").innerHTML = `<div class="card exams"><h1 style="margin:0 0 4px;font-size:20px">Exams and events</h1>${dutiesHTML()}${body}</div>`;
   setHash("#exams");
 }
 function loadExams() {
@@ -570,6 +577,7 @@ function loadExams() {
     if (S.tab === "exams") renderExams();
   };
   fetch("/api/published/exams", { credentials: "same-origin" }).then(r => r.json()).then(done, () => done(null));
+  if (MODE === "staff") fetch("/api/exams/my-duties", { credentials: "same-origin" }).then(r => r.json()).then(j => { S.duties = j && !j.error && Array.isArray(j.schedules) ? j : null; if (S.tab === "exams" && S.ex) renderExams(); }, () => {});
 }
 
 // ------------------------------------------------------------------ the timetable on a date (/api/day)

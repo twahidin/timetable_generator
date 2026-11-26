@@ -500,19 +500,19 @@ def the_shared_teacher_code_is_narrow_when_staff_codes_are_off():
 def exams_for_a_plain_teacher_are_their_own_duties_and_the_classes():
     from unittest import mock
     from exams import fake as F, published as PB
-    import subprocess   # a made and approved exam, from test_exams' own fixture, run apart so its suite and data folder stay out of this one
-    out = subprocess.run([sys.executable, "-c", "import sys, json, runpy; g = runpy.run_path('tests/test_exams.py'); "
-                          "sys.__stdout__.write('@@' + json.dumps(g['A1']))"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
-    s = json.loads(out.split("@@", 1)[1])
+    from exams import approval
+    s = approval.as_schedule(F.approved_exam())
     staff_off(admin()); publish_real()
     teacher, hod = signed_in(BEN), signed_in(ERIC, group="hod")
     with mock.patch.object(A.store, "published", return_value=F.sample_pub()), mock.patch.object(A.exams_schedules, "on_site", return_value=[s]), \
          mock.patch.object(A, "_exam_cal", return_value=F.CAL), mock.patch.object(A, "_exams_today", return_value=datetime.date(2026, 10, 1)):
         d = teacher.get("/api/day?date=2026-10-05"); assert d.status_code == 200, d.data
         e = d.get_json()["exams"]
-        assert list(e["teachers"]) == [BEN] and e["rooms"] == {} and e["teachers"][BEN][0]["room"] == "3-01" and e["classes"], e
+        mine = PB.day(F.sample_pub(), F.CAL, [s], "2026-10-05", True)["exams"]["teachers"][BEN]
+        assert e["teachers"] == {BEN: mine} and e["rooms"] == {} and e["classes"], e
+        du = teacher.get("/api/exams/my-duties").get_json(); assert [x["room"] for x in du["schedules"][0]["duties"]] == [x["room"] for x in mine], du
         e = hod.get("/api/day?date=2026-10-05").get_json()["exams"]
-        assert len(e["teachers"]) == 6 and set(e["rooms"]) == {"3-01", "3-02"}, e
+        assert e == PB.day(F.sample_pub(), F.CAL, [s], "2026-10-05", True)["exams"] and e["rooms"], e
         r = teacher.get("/api/published/exams"); assert r.status_code == 200
         assert "Aisha" not in r.get_data(as_text=True) and r.get_json()["schedules"][0]["id"] == s["id"]
         assert r.get_json() == json.loads(json.dumps(PB.listing(F.sample_pub(), [s], datetime.date(2026, 10, 1), False, cal=F.CAL))), "the student-level listing"
@@ -520,7 +520,7 @@ def exams_for_a_plain_teacher_are_their_own_duties_and_the_classes():
         assert hod.get(f"/api/published/exams/{s['id']}/print/seating.pdf").status_code != 403
         P.update(lambda d: d["ways"].update(staff_off=None))
         e = teacher.get("/api/day?date=2026-10-05").get_json()["exams"]
-        assert len(e["teachers"]) == 6 and e["rooms"], "staff codes on: as today"
+        assert e == PB.day(F.sample_pub(), F.CAL, [s], "2026-10-05", True)["exams"], "staff codes on: as today"
 
 @t
 def nothing_typed_reaches_the_history():

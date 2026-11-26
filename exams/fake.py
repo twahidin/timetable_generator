@@ -56,3 +56,25 @@ def sample_pub() -> dict:
                  teachers=model_teachers, rooms=rooms, room_parts={"LT1&2": ["LT1", "LT2"]}, lessons=lessons,
                  setup=dict(teachers=teachers, roles=[], rules=rules))
     return dict(meta=dict(school="Sample School"), codes={}, views={}, model=model)
+
+
+def approved_exam(pub=None, access=None, rooms=("3-01", "3-02", "4-01", "Hall")) -> dict:
+    """a made and approved Sec 3 exam on 2026-10-05 (English at 07:50, Pure Chemistry at 10:00; invigilators from TEACHERS), as
+    the exams store holds it (approval.as_schedule(...) gives the copy the main site uses): the tests' one shared fixture"""
+    import secrets
+    from exams import approval, make, schedules, settings
+    pub = pub or sample_pub()
+    paper = lambda subject, start: dict(id=secrets.token_hex(3), level="Sec 3", subject=subject, paper="Paper 1", minutes=60,
+                                       date="2026-10-05", start=start, who="groups", students=[], together="")
+    s = schedules.new("exam", "Sec 3 End-of-Year Exam", ["Sec 3"], "2026-10-05", "2026-10-06", "Ms Grace Yeo", pub=pub)
+    s.update(papers=[paper("English", "07:50"), paper("Pure Chemistry", "10:00")], levels=["Sec 3"], access=list(access or []),
+             days={"2026-10-05": dict(levels=["Sec 3"], whole=True)})
+    full = {"3-01": (40, 6, 7, False, False), "3-02": (40, 6, 7, False, False), "4-01": (40, 6, 7, False, False),
+            "Hall": (240, 24, 10, True, False), "3-11": (24, 4, 6, False, True), "LT1&2": (80, None, None, False, False),
+            "LT1": (40, None, None, False, False), "LT2": (40, None, None, False, False)}
+    x = settings.defaults()
+    x["rooms"] = {n: dict(seats=v[0], rows=v[1], cols=v[2], hall=v[3], access=v[4], note="") for n, v in full.items() if n in rooms}
+    s = make.make(pub, CAL, s, x, only=None, elsewhere=[])
+    approval.send(s, pub["model"], "Ms Grace Yeo", "2026-10-01T09:00:00", False, [])
+    approval.approve(s, "Timetable committee", "2026-10-01T09:00:00")
+    return s
