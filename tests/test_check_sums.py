@@ -65,7 +65,7 @@ def an_overfull_class_is_critical_and_ends_with_1():
     assert text.index(CRIT) < text.index(WARN) and not any("Class 1B needs" in l for l in section(text, WARN))
 
 @t
-def the_same_words_as_the_app():
+def every_finding_is_printed_in_order():
     for sp in (secondary(), fuller(40), fuller(6)):
         code, text, found = run(sp)
         assert section(text, CRIT) + section(text, WARN) == [f" - [{f['area']}] {f['text']}" for f in found], text
@@ -105,6 +105,81 @@ def old_lines_are_gone_and_the_rest_stays():
     code, text, _ = run(sp); assert " * For the agent to honour: T1 · Must · Whole school · No PE in the first period" in text, text
 
 @t
+def a_pattern_that_does_not_add_up_is_listed():
+    """reading a lesson pattern that does not add up reports it only the first time: the sums must run before anything else works the setup out"""
+    sp = secondary(); row = next(x for x in sp["lessons"] if not x.get("block") and x["classes"] == ["1B"] and x["subject"] == "Art"); row["pattern"] = [2]
+    code, text, _ = run(sp)
+    assert code == 0 and any(l.startswith(" - [lessons] Lesson row ") and "lesson pattern" in l and "so the usual split is used" in l for l in section(text, WARN)), text
+
+@t
+def a_teacher_over_allowance_is_listed():
+    sp = secondary(); who = next(x for x in sp["lessons"] if x["teachers"])["teachers"][0]
+    next(t_ for t_ in sp["teachers"] if t_["name"] == who)["allowance"] = 1
+    code, text, _ = run(sp)
+    assert any(l.startswith(f" - [teachers] {who} teaches ") and l.endswith("over their allowance of 1.") for l in section(text, WARN)), text
+
+@t
+def a_rule_that_cannot_be_used_is_in_the_list_not_on_a_line_of_its_own():
+    sp = secondary(); sp["rules"] = list(sp["rules"]) + [dict(scope="Level", target="Sec 9", rule="Not in periods", week="Both", day="All", **{"from": 1, "to": 2}, strength="Must")]
+    code, text, found = run(sp)
+    assert any(f["area"] == "rules" for f in found), found
+    assert any(l.startswith(" - [rules] Rule ") for l in section(text, CRIT) + section(text, WARN)), text
+    assert not any(l.startswith(" ! Rule ") for l in text.splitlines())
+
+@t
+def other_duties_in_words_do_not_stop_the_check():
+    sp = secondary(); sp["teachers"][0]["other_duties"] = "two"; sp["teachers"][1]["other_duties"] = "2.5"
+    code, text, _ = run(sp); want = run(secondary())[1]
+    assert code == 0 and "Critical (0)" in text and count(text, WARN) == count(want, WARN), text
+
+@t
+def a_setup_that_cannot_be_checked_says_so():
+    keep = C.findings
+    def boom(spec, P=None): raise ValueError("no such thing")
+    C.findings = boom; out = io.StringIO(); code = None
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "s.xlsx"); template.write_template(secondary(), p)
+            with contextlib.redirect_stdout(out): code = main.main(["check", p])
+    finally: C.findings = keep
+    text = out.getvalue()
+    assert code == 2 and text.strip() == "The setup could not be checked: no such thing" and "Critical (" not in text, (code, text)
+
+@t
+def nothing_found_prints_two_zeros():
+    keep = C.findings; C.findings = lambda spec, P=None: []
+    try:
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "s.xlsx"); template.write_template(secondary(), p)
+            with contextlib.redirect_stdout(out): code = main.main(["check", p])
+    finally: C.findings = keep
+    lines = out.getvalue().splitlines()
+    assert code == 0 and "Critical (0): no timetable can be made until these are fixed" in lines and "Warnings (0): a timetable can still be made; a person should check these" in lines, lines
+
+SAME = dict(kind="setting", key="after_school", second="No", order=1)   # a choice that cannot be used: the same as the first
+RECESS = dict(kind="recess", level="Sec 2", window=["09:00", "11:20"], order=3)
+
+@t
+def the_give_way_line_names_only_the_choices_it_needed():
+    sp = fuller(6, after_school=False, choice=True); sp["choices"].append(dict(RECESS))
+    code, text, _ = run(sp)
+    assert code == 0 and "Giving way in the committee's order, nothing is critical after choice 1: After-school slot allowed when a class cannot fit." in text.splitlines(), text
+
+@t
+def the_give_way_line_uses_the_lists_own_numbers():
+    sp = fuller(6, after_school=False); sp["choices"] = [dict(SAME), dict(kind="setting", key="after_school", second="Yes", order=2)]
+    code, text, _ = run(sp)
+    assert code == 0 and "Giving way in the committee's order, nothing is critical after choice 2: After-school slot allowed when a class cannot fit." in text.splitlines(), text
+    assert " ! Second choice 1: The second choice is the same as the first." in text and " * Second choice 2: After-school slot allowed when a class cannot fit — No → Yes" in text, text
+
+@t
+def second_choices_that_cannot_be_used():
+    sp = fuller(6, after_school=False); sp["choices"] = [dict(SAME)]
+    code, text, _ = run(sp)
+    assert code == 1 and "None of the second choices can be used, so 1 thing will still not fit." in text.splitlines() and "Even after" not in text, text
+
+@t
 def root_name_is_the_same_module():
     import checks
     assert checks is C and checks._class_fit is C._class_fit and checks.findings is C.findings and checks.CRITICAL == "critical"
@@ -130,7 +205,9 @@ def skill_md_says_what_the_check_prints():
     from ttgen import spec as SPEC
     s = open(os.path.join(ROOT, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
     assert SPEC.SKILL_VERSION == "2026-11.10" and "Skill version: 2026-11.10" in s
-    for words in ("**Critical** items", "**Any critical item: stop.**", "nothing is critical after choice", "`ttgen/checks.py`", "the check has done these sums"): assert words in s, words
+    for words in ("**Critical** items", "**Any critical item: stop.**", "nothing is critical after choice", "`ttgen/checks.py`", "the check has done these sums",
+                  "**A `[lessons]` warning that names a lesson row: tell the person and wait", "The setup could not be checked", "None of the second choices", "a group code used on two rows"): assert words in s, words
+    assert "Fix or report each of these before solving" not in s
     readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
     assert "`ttgen/checks.py`" in readme and "Skill version: 2026-11.10" in readme
 

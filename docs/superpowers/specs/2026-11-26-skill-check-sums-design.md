@@ -60,7 +60,7 @@ order, nothing is critical after choice k: <items>.` or `Even after every second
 
 **How it ends.** Exit code 1 when anything is critical and no step of the second choices clears it; otherwise 0.
 
-**`SKILL.md`.** The lead's draft as given, with two changes of mine, both small:
+**`SKILL.md`.** The lead's draft as given, with small changes of mine (two when this was written; the notes file lists all of them after the review):
 
 - one sentence in step 1 for the second-choices line above (the draft's "Any critical item: stop" would otherwise
   stop an agent whose Choices sheet already answers the problem);

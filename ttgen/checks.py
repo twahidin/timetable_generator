@@ -244,7 +244,10 @@ def _loads_and_rooms(spec, P):
             for t in r["teachers"]:
                 load[t] += r["periods"]; lvls[t].add(u["level"])
     allow = {t["name"]: t.get("allowance") for t in spec["teachers"]}
-    other = {t["name"]: int(t.get("other_duties") or 0) for t in spec["teachers"]}
+    def whole(v):   # other duties typed as words, or left as text, count as none here (as on the page) and never stop the sums
+        try: return int(float(v or 0))
+        except (TypeError, ValueError): return 0
+    other = {t["name"]: whole(t.get("other_duties")) for t in spec["teachers"]}
     for t, n in sorted(load.items(), key=lambda x: -x[1]):
         a = allow.get(t)
         try: a = int(a)

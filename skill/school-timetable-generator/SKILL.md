@@ -40,14 +40,22 @@ subject-based banding) schools, and for any school that fills the same template.
    - **Any critical item: stop.** Tell the person what it is and the smallest change that fixes it, and do not solve.
      Do not change the setup yourself. The one exception is a setup with a `Choices` sheet: when the check says
      `Giving way in the committee's order, nothing is critical after choice k`, it ends without an error and you solve
-     as that sheet says (see **First and second choices**). `Even after every second choice` means stop.
-   - **Warnings** do not stop you: put every one in the summary you give at the end.
-   - The check also reports subjects with no periods for a level, rows with no class or teacher, unknown subjects, rule
-     rows that cannot be used as written and fixed lessons that clash. Fix or report each of these before solving.
+     as that sheet says (see **First and second choices**). `solve` still tries the first choices for one `--time`
+     before it gives way: that wait is not a stall. `Even after every second choice` and `None of the second choices
+     can be used` mean stop.
+   - **A `[lessons]` warning that names a lesson row: tell the person and wait for their answer before solving.** It
+     means that lesson will be left out (no class, an unknown subject, no periods for the level), will have no teacher
+     (critical in `check-timetable`, so the app will not publish the timetable), or will not be split as typed (a
+     lesson pattern that does not add up, which often means a wrong number of periods on that row).
+   - **The other warnings** do not stop you (`[classes]` almost full, `[teachers]` over allowance, `[rules]` a rule row
+     that cannot be used as written, `[venues]`): put every one in the summary you give at the end.
+   - `The setup could not be checked: ...` and nothing after it means nothing was checked (exit code 2). Tell the
+     person the message; do not take it for older scripts and do not solve.
    The **Check** and **Load check** columns on `6 Lessons`, `More rules` and `4 Teachers` flag problems inside the
    workbook (teacher twice in a block, repeated code, over allowance), but a workbook downloaded from the setup app often
    has those cells empty, because the formulas were never calculated: empty does not mean clean. Go by what the check
-   prints, not by those cells.
+   prints, not by those cells. The check does not look for one of these, a group code used on two rows of `6 Lessons`:
+   count the codes yourself and tell the person about any repeat.
 2. **The capacity sums: the check has done these sums.** They are cheap and catch most impossible inputs, and step 1
    lists what they find as Critical items or Warnings, so do not repeat them by hand:
    - each class: periods it needs (whole-class subjects + the longest group in each block it belongs to) against the
@@ -93,7 +101,7 @@ subject-based banding) schools, and for any school that fills the same template.
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
    row: the solve result lists them), any notes, and the Rule report for every typed rule. Give the person the Excel workbook, the
    HTML page, the PDF books (four; three when the setup has no Students sheet), the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
-   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first: the lines it marks `[critical: ...]` are the ones the app will not publish with. `export` and `check-timetable` can end with exit code 1 when nothing is critical: `Teacher in two lessons (allowed that day)` lines and a Must typed rule reported `Partly` count too. Exit code 1 is not a failure by itself; read the first line of `check-timetable` (`N warnings, M critical`), and with 0 critical the timetable can be published (`export` prints `all checks passed` or `N problems` on its first line).
+   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first: the lines it marks `[critical: ...]` are the ones the app will not publish with. `export` and `check-timetable` can end with exit code 1 when nothing is critical: `Teacher in two lessons (allowed that day)` lines count for both, and for `check-timetable` a Must typed rule reported `Partly` counts too. Exit code 1 is not a failure by itself; read the first line of `check-timetable` (`N warnings, M critical`), and with 0 critical the timetable can be published (`export` prints `all checks passed` or `N problems` on its first line).
 
 ## Outputs
 

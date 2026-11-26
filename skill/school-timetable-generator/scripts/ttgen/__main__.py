@@ -67,7 +67,8 @@ def main(argv=None):
         from . import checks
         from .solver import Problem
         raw = copy.deepcopy(spec) if spec.get("choices") else None   # for the sums down the give-way list: findings() works the setup out in place
-        found = checks.findings(spec); P = Problem(spec)   # the sums of the app's step 7, Will it fit?: the same list, in the same words
+        try: found = checks.findings(spec); P = Problem(spec)   # the sums of the app's step 7, Will it fit?: the same list, in the same words. First: reading the setup reports a pattern that does not add up only once
+        except Exception as e: print(f"The setup could not be checked: {e}"); return 2   # the app's own words for it; 2, not 1: nothing was checked
         print(f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} blocks, "
               f"{len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students")
         print(f"{len(P.units)} units to place over {P.ND} days x {P.NP} periods")
@@ -76,9 +77,12 @@ def main(argv=None):
         for f in crit: print(f" - [{f['area']}] {f['text']}")
         stop = bool(crit)
         if crit and raw is not None:   # second choices: do the critical items go once the committee's list is given way on, in its order?
-            fb = checks.with_fallbacks(raw); k = fb["pass_at"]
-            if k: print(f"Giving way in the committee's order, nothing is critical after choice {k}: {'; '.join(fb['items'][:k])}."); stop = False
-            elif k is None: m = fb["critical"][-1]; print(f"Even after every second choice ({len(fb['items'])}), {m} thing{'' if m == 1 else 's'} will not fit.")
+            from . import choices as ch
+            fb = checks.with_fallbacks(raw); k = fb["pass_at"]; m = fb["critical"][-1]; things = f"{m} thing{'' if m == 1 else 's'}"
+            skip = {i for i, _ in ch.problems(raw)}; nums = [n for n, (i, _) in enumerate(ch.ordered(raw), start=1) if i not in skip]   # the numbers the list below gives the choices that can be used
+            if k: print(f"Giving way in the committee's order, nothing is critical after choice {nums[k - 1]}: {'; '.join(fb['items'][:k])}."); stop = False
+            elif not fb["items"]: print(f"None of the second choices can be used, so {things} will still not fit.")
+            elif k is None: print(f"Even after every second choice ({len(fb['items'])}), {things} will not fit.")
         print(f"Warnings ({len(warn)}): a timetable can still be made; a person should check these")
         for f in warn: print(f" - [{f['area']}] {f['text']}")
         from .spec import typed_rules, typed_label

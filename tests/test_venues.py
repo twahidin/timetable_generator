@@ -66,7 +66,7 @@ def the_other_columns_of_the_venues_sheet_have_not_moved():
 
 @t
 def equipment_decides_nothing():
-    import checks                                              # the app's own list of findings for a setup (checks.py at the repository's root)
+    import checks                                              # the app's own list of findings for a setup (ttgen/checks.py; checks.py at the repository's root is a name for it)
     assert checks.findings(setup()) == checks.findings(secondary())
 
 
