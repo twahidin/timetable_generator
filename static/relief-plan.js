@@ -209,18 +209,14 @@
 
   const segBtn = (what, v, on, label) => `<button type="button" data-pl="${what}" data-v="${esc(v)}" class="${on ? "on" : ""}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
 
-  function paintDay() {
+  function paintDay() {   /* Pick dates is the calendar (relief-dates.js), which draws itself again on each change */
     const t = RF.today(), box = $("#plDay", P.pane);
     let under;
     if (P.day === "today") under = `<div class="small muted under">${esc(day(t))}</div>`;
     else if (P.day === "tomorrow") under = `<div class="small muted under">${esc(day(RF.addDays(t, 1)))}</div>`;
-    else {
-      const full = P.picked.length >= 10;
-      under = `<div class="line"><input type="date" id="plDate" min="${esc(t)}" ${full ? "disabled" : ""} aria-label="A date to add"><button type="button" class="small" data-pl="adddate" ${full ? "disabled" : ""}>Add this date</button>
-        <span class="small muted">${full ? "That is 10 dates, the most at one time." : "Up to 10 dates."}</span></div>
-        <div class="chiprow">${P.picked.length ? P.picked.map(d => `<span class="chip dchip">${esc(day(d))}<button type="button" data-pl="undate" data-v="${esc(d)}" title="Take this date off" aria-label="Take ${esc(day(d))} off">✕</button></span>`).join("") : `<span class="small muted">No dates yet.</span>`}</div>`;
-    }
+    else under = `<div class="rd-box"></div>`;
     box.innerHTML = `<div class="seg" role="group" aria-label="Which day">${segBtn("day", "today", P.day === "today", "Today")}${segBtn("day", "tomorrow", P.day === "tomorrow", "Tomorrow")}${segBtn("day", "pick", P.day === "pick", "Pick dates")}</div>${under}`;
+    if (P.day === "pick") window.ReliefDates.mount($(".rd-box", box), { key: "plan", picked: P.picked, max: 20, onChange: list => { P.picked = list; changed(); reread(); } });
   }
 
   function paintWho() {
@@ -320,14 +316,6 @@
     if (!r.ok) { P.perr = { text: r.error, bad: true, status: r.status }; paintWho(); return; }
     P.people = r.data || [];
     paintWho();
-  }
-
-  function addDate() {
-    const el = $("#plDate", P.pane), v = el && el.value;
-    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) { if (el) el.focus(); return; }
-    if (!P.picked.includes(v) && P.picked.length < 10) P.picked.push(v);
-    P.picked.sort(); changed(); paintDay(); reread();
-    const again = $("#plDate", P.pane); if (again && !again.disabled) again.focus();
   }
 
   async function send() {
@@ -444,9 +432,7 @@
     if (!b || b.disabled) return;
     const a = b.dataset.pl, v = b.dataset.v;
     switch (a) {
-      case "day": if (v !== P.day) { P.day = v; changed(); paintDay(); reread(); if (v === "pick") { const d = $("#plDate", P.pane); if (d) d.focus(); } } return;
-      case "adddate": addDate(); return;
-      case "undate": P.picked = P.picked.filter(d => d !== v); changed(); paintDay(); reread(); return;
+      case "day": if (v !== P.day) { P.day = v; changed(); paintDay(); reread(); if (v === "pick") window.ReliefDates.focusFirst($("#plDay .rd-box", P.pane)); } return;
       case "away": if (v !== P.away) { P.away = v; changed(); paintAway(); reread(); } return;
       case "reason": P.reason = v; changed(); paintReason(); if (v === "Other") { const w = $("#plWhy", P.pane); if (w) w.focus(); } return;
       case "people": loadPeople(); return;
@@ -489,7 +475,6 @@
   }
 
   function onKey(e) {
-    if (e.target.id === "plDate" && e.key === "Enter") { e.preventDefault(); addDate(); }
     if (e.key === "Escape" && F.open && e.target.closest && e.target.closest(".pl-list")) { e.preventDefault(); closeFree(); }
   }
 

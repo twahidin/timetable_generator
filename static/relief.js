@@ -482,18 +482,14 @@
 
   const segBtn = (what, v, on, label) => `<button type="button" data-a="${what}" data-v="${esc(v)}" class="${on ? "on" : ""}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
 
-  function paintDay() {
+  function paintDay() {   /* Pick dates is the calendar (relief-dates.js), which draws itself again on each change */
     const t = RF.today(), box = $("#askDay", A.pane);
     let under;
     if (A.day === "today") under = `<div class="small muted under">${esc(day(t))}</div>`;
     else if (A.day === "tomorrow") under = `<div class="small muted under">${esc(day(RF.addDays(t, 1)))}</div>`;
-    else {
-      const full = A.picked.length >= 10;
-      under = `<div class="line"><input type="date" id="askDate" min="${esc(t)}" ${full ? "disabled" : ""} aria-label="A date to add"><button type="button" class="small" data-a="adddate" ${full ? "disabled" : ""}>Add this date</button>
-        <span class="small muted">${full ? "That is 10 dates, the most at one time." : "Up to 10 dates."}</span></div>
-        <div class="chiprow">${A.picked.length ? A.picked.map(d => `<span class="chip dchip">${esc(day(d))}<button type="button" data-a="undate" data-v="${esc(d)}" title="Take this date off" aria-label="Take ${esc(day(d))} off">✕</button></span>`).join("") : `<span class="small muted">No dates yet.</span>`}</div>`;
-    }
+    else under = `<div class="rd-box"></div>`;
     box.innerHTML = `<div class="seg" role="group" aria-label="Which day">${segBtn("day", "today", A.day === "today", "Today")}${segBtn("day", "tomorrow", A.day === "tomorrow", "Tomorrow")}${segBtn("day", "pick", A.day === "pick", "Pick dates")}</div>${under}`;
+    if (A.day === "pick") window.ReliefDates.mount($(".rd-box", box), { key: "ask", picked: A.picked, max: 20, onChange: list => { A.picked = list; changed(); reread(); } });
   }
 
   function paintAway() {
@@ -572,14 +568,6 @@
     paintRO();
   }
 
-  function addDate() {
-    const el = $("#askDate", A.pane), v = el && el.value;
-    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) { if (el) el.focus(); return; }
-    if (!A.picked.includes(v) && A.picked.length < 10) A.picked.push(v);
-    A.picked.sort(); changed(); paintDay(); reread();
-    const again = $("#askDate", A.pane); if (again && !again.disabled) again.focus();
-  }
-
   async function attach(rec, list) {   /* the files chosen in a ReliefForm, sent once the absence is saved, then attached to their lessons: -> what failed, in words */
     const failed = [];
     for (const { key, files } of RF.files(list)) {
@@ -623,9 +611,7 @@
     if (!b || b.disabled) return;
     if (b.dataset.go) { go(b.dataset.go); return; }
     const a = b.dataset.a, v = b.dataset.v;
-    if (a === "day" && v !== A.day) { A.day = v; changed(); paintDay(); reread(); if (v === "pick") { const d = $("#askDate", A.pane); if (d) d.focus(); } return; }
-    if (a === "adddate") { addDate(); return; }
-    if (a === "undate") { A.picked = A.picked.filter(d => d !== v); changed(); paintDay(); reread(); return; }
+    if (a === "day" && v !== A.day) { A.day = v; changed(); paintDay(); reread(); if (v === "pick") window.ReliefDates.focusFirst($("#askDay .rd-box", A.pane)); return; }
     if (a === "away" && v !== A.away) { A.away = v; changed(); paintAway(); reread(); return; }
     if (a === "reason") { A.reason = v; changed(); paintReason(); if (v === "Other") { const w = $("#askWhy", A.pane); if (w) w.focus(); } return; }
     if (a === "people") { loadPeople(); return; }
@@ -646,10 +632,6 @@
     changed(); paintAway(); reread();
   }
 
-  function askKey(e) {
-    if (e.target.id === "askDate" && e.key === "Enter") { e.preventDefault(); addDate(); }
-  }
-
   tab("ask", {
     init(pane) {
       A.pane = pane;
@@ -663,7 +645,6 @@
       pane.addEventListener("click", askClick);
       pane.addEventListener("input", askInput);
       pane.addEventListener("change", askChange);
-      pane.addEventListener("keydown", askKey);
       paintDay(); paintAway(); paintReason(); paintRO(); paintSend();
       loadPeople(); reread();
     },

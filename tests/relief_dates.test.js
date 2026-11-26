@@ -330,6 +330,145 @@ ta("arrow keys move the months on when focus leaves them, and stop at the ends",
   assert.ok(box.innerHTML.includes("February 2027") && !box.innerHTML.includes("March 2027"));
 });
 
+/* ---- Calendar, Task 4 ---- */
+/* Pick dates on Plan relief (relief-plan.js) and on Ask for relief (relief.js) is the calendar: the date box, its chips and the
+   10 are gone */
+const callOf = (code, name) => {   /* the text of the first call name(...), to its closing parenthesis; "" when there is none */
+  const at = code.indexOf(name + "(");
+  if (at < 0) return "";
+  for (let i = at + name.length, depth = 0; i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) return code.slice(at, i + 1);
+  }
+  return "";
+};
+for (const [f, key] of [["relief-plan.js", "plan"], ["relief.js", "ask"]]) {
+  t(`${f}: no date box, no chips, no 10 dates`, () => {
+    const code = read(f);
+    for (const gone of ['type="date" id="plDate"', 'id="askDate"', "adddate", "undate", "Up to 10 dates", "10 dates"]) assert.ok(!code.includes(gone), `${f} still holds ${gone}`);
+  });
+  t(`${f}: Pick dates mounts the calendar with key "${key}" and at most 20, and gives it the focus`, () => {
+    const code = read(f), call = callOf(code, "ReliefDates.mount");
+    assert.ok(call, `${f} calls ReliefDates.mount(`);
+    assert.ok(call.includes(`key: "${key}"`) && call.includes("max: 20"), call);
+    assert.ok(!call.includes("paintDay"), "the calendar draws itself again on a change: the form does not");
+    assert.ok(code.includes("ReliefDates.focusFirst("), `${f}: choosing Pick dates focuses the first school day`);
+  });
+}
+
+const DOM = require("./dom.js");
+t("relief.html: above 640 px the two months stay side by side and shrink rather than wrap; under it they stack", () => {
+  const cal = DOM.css("relief.html", ".rd-cal"), month = DOM.css("relief.html", ".rd-month");
+  assert.ok(!/flex-wrap:\s*wrap/.test(cal), cal);
+  assert.ok(/(^|;)flex:1 1 0(;|$)/.test(month) && /(^|;)min-width:0(;|$)/.test(month) && /(^|;)max-width:\d+px(;|$)/.test(month), month);
+  assert.ok(DOM.css("relief.html", ".rd-cal", "(max-width:640px)").includes("flex-direction:column"), "stacked under 640 px");
+  assert.ok(DOM.css("relief.html", ".rd-month", "(max-width:640px)").includes("width:100%"));
+});
+t("relief.html: today ticked keeps a ring of its own (its navy outline is lost on the navy of a ticked day)", () => {
+  const rule = DOM.css("relief.html", ".rd-d.today.pick");
+  assert.ok(/box-shadow:inset [^;]*#fff/.test(rule), rule);
+});
+
+/* the two forms in the page stand-in (tests/dom.js), with their own scripts: Pick dates draws the calendar, a click or a drag
+   reads the lessons of those dates, Send sends them, and the form starts again with no dates. The stand-in cannot read the
+   selector :not(.off), so ReliefDates.focusFirst is recorded rather than run. A made-up school: today Tue 13 Oct 2026, its school
+   days the weekdays to Fri 18 Dec but for Sports Day (Fri 23 Oct). */
+const EVE = "Ms Evelyn Koh", MAYA = "Ms Maya Lee";
+const TERM = weekdays("2026-10-13", "2026-12-18").filter(d => d !== "2026-10-23");
+function form(hash) {
+  const sent = [];
+  const p = DOM.open("relief.html", { now: "2026-10-13T07:20:00+08:00", hash, server: c => {
+    const ok = data => ({ status: 200, data });
+    if (c.url === "/api/relief/me") return ok({ name: EVE, depts: ["Science"], published: true, today: "2026-10-13", can_plan: true });
+    if (c.url === "/api/relief/school-days") return ok({ today: "2026-10-13", days: TERM, off: { "2026-10-23": "Sports Day" } });
+    if (c.url === "/api/relief/people") return ok([{ name: EVE, depts: ["Science"] }, { name: MAYA, depts: ["Science"] }]);
+    if (c.method === "POST" && c.url === "/api/relief/absences") {
+      const r = { id: "a" + (sent.length + 1), teacher: c.body.teacher || EVE, dates: c.body.dates, periods: null, reason: "", reason_text: "", lessons: [], acknowledged: false };
+      sent.push(r);
+      return ok(r);
+    }
+    if (c.url === "/api/relief/absences/planned") return ok({ absences: sent });
+    return ok({ absences: [], lessons: [], periods: [], duties: {} });
+  } });
+  p.run("relief-form.js", "relief-dates.js");
+  p.firsts = [];
+  p.window.ReliefDates.focusFirst = box => p.firsts.push(box);
+  p.run("relief.js", "relief-plan.js");
+  p.reads = () => p.calls.filter(c => c.url.startsWith("/api/relief/lessons?")).map(c => c.url);
+  p.posted = () => p.calls.filter(c => c.method === "POST" && c.url === "/api/relief/absences").map(c => c.body);
+  return p;
+}
+const press = (p, el, type, more) => {   /* as tests/dom.js fires an event: up from the element, then the document and the window */
+  assert.ok(el, `no element for ${type}`);
+  const e = Object.assign({ type, target: el, button: 0, buttons: 1, detail: 1, pointerId: 1, pointerType: "mouse", clientX: 0, clientY: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }, more);
+  for (let x = el; x; x = x.parent) (x.on[type] || []).slice().forEach(f => f(e));
+  for (const x of [p.document, p.window]) (x.on[type] || []).slice().forEach(f => f(e));
+};
+async function dragOn(p, box, from, to) {   /* press on one day, move to another, release */
+  const a = box.querySelector(`.rd-d[data-d="${from}"]`), b = box.querySelector(`.rd-d[data-d="${to}"]`);
+  press(p, a, "pointerdown");
+  p.document.elementFromPoint = () => b;
+  press(p, b, "pointermove");
+  press(p, b, "pointerup");
+  await p.settle();
+}
+const TEN = ["2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"];
+const TWENTY = TERM.filter(d => d >= "2026-10-16").slice(0, 20);
+
+ta("Ask for relief: Pick dates is the calendar; a click and a drag read the lessons of those dates; Send sends them; then no dates", async () => {
+  const p = form("#ask"); await p.settle();
+  await p.click('#askDay [data-v="pick"]');
+  const box = p.$("#askDay .rd-box");
+  assert.ok(box, p.$("#askDay").innerHTML);
+  assert.ok(p.text(box).includes("October 2026") && p.text(box).includes("November 2026"), p.text(box));
+  assert.strictEqual(p.text("#askDay .rd-sum"), "No dates yet. Up to 20 school days.");
+  assert.ok(p.firsts.length === 1 && p.firsts[0] === box, "choosing Pick dates focuses the calendar's first school day");
+  assert.ok(p.text("#askSend").includes("Choose the dates first."), p.text("#askSend"));
+  const had = p.reads().length;
+  press(p, box.querySelector('.rd-d[data-d="2026-10-23"]'), "pointerdown"); press(p, box.querySelector('.rd-d[data-d="2026-10-23"]'), "pointerup"); await p.settle();
+  assert.strictEqual(p.reads().length, had, "Sports Day cannot be ticked");
+  assert.strictEqual(box.querySelector('.rd-d[data-d="2026-10-23"]').getAttribute("title"), "Sports Day");
+  press(p, box.querySelector('.rd-d[data-d="2026-10-16"]'), "click", { detail: 0 }); await p.settle();   /* Enter on a day */
+  assert.strictEqual(p.reads().slice(-1)[0], "/api/relief/lessons?dates=2026-10-16");
+  assert.strictEqual(p.text("#askDay .rd-sum"), "1 school day: Fri 16 Oct Clear all");
+  assert.strictEqual(p.$("#askDay .rd-box"), box, "the form does not draw the calendar again: it draws itself");
+  await dragOn(p, box, "2026-10-19", "2026-10-30");
+  assert.strictEqual(p.reads().slice(-1)[0], `/api/relief/lessons?dates=${encodeURIComponent(TEN.join(","))}`);
+  assert.strictEqual(p.text("#askDay .rd-sum"), "10 school days: Fri 16 Oct – Thu 22 Oct, Mon 26 Oct – Fri 30 Oct Clear all");
+  await p.click('#askSend [data-a="send"]');
+  assert.deepStrictEqual(p.posted().map(b => b.dates), [TEN]);
+  assert.ok(p.text("#askSend").includes("Sent."), p.text("#askSend"));
+  assert.strictEqual(p.$('#askDay [data-v="today"]').getAttribute("aria-pressed"), "true");
+  assert.strictEqual(p.$("#askDay .rd-box"), null);
+  await p.click('#askDay [data-v="pick"]');
+  assert.strictEqual(p.text("#askDay .rd-sum"), "No dates yet. Up to 20 school days.");
+  assert.strictEqual(p.$("#askDay .rd-d.pick"), null);
+});
+ta("Plan relief: Pick dates is the calendar; a long drag stops at 20 and a 21st is refused; the lessons and Send carry the 20", async () => {
+  const p = form("#plan"); await p.settle();
+  await p.click('#plDay [data-v="pick"]');
+  const box = p.$("#plDay .rd-box");
+  assert.ok(box, p.$("#plDay").innerHTML);
+  assert.ok(p.firsts.length === 1 && p.firsts[0] === box);
+  assert.ok(p.text("#plSend").includes("Choose the dates first."), p.text("#plSend"));
+  await dragOn(p, box, "2026-10-16", "2026-11-30");
+  const line = "20 school days: Fri 16 Oct – Thu 22 Oct, Mon 26 Oct – Fri 13 Nov Clear all That is 20 school days, the most at one time.";
+  assert.strictEqual(p.text("#plDay .rd-sum"), line);
+  assert.ok(p.text("#plSend").includes("Choose the absent teacher first."), p.text("#plSend"));
+  press(p, box.querySelector('.rd-d[data-d="2026-11-16"]'), "click", { detail: 0 }); await p.settle();
+  assert.strictEqual(p.text("#plDay .rd-sum"), line, "a 21st day is refused");
+  assert.ok(!box.querySelector('.rd-d[data-d="2026-11-16"]').classList.contains("pick"));
+  await p.click(`#plWho [data-pp="pick"][data-name="${MAYA}"]`);
+  assert.strictEqual(p.reads().slice(-1)[0], `/api/relief/lessons?teacher=${encodeURIComponent(MAYA)}&dates=${encodeURIComponent(TWENTY.join(","))}`);
+  await p.click('#plSend [data-pl="send"]');
+  assert.deepStrictEqual(p.posted().map(b => [b.teacher, b.dates]), [[MAYA, TWENTY]]);
+  assert.strictEqual(p.$('#plDay [data-v="today"]').getAttribute("aria-pressed"), "true");
+  assert.strictEqual(p.$("#plDay .rd-box"), null);
+  assert.ok(p.text("#plPlannedList").includes("Fri 16 Oct – Thu 22 Oct, Mon 26 Oct – Fri 13 Nov"), p.text("#plPlannedList"));
+  await p.click('#plDay [data-v="pick"]');
+  assert.strictEqual(p.text("#plDay .rd-sum"), "No dates yet. Up to 20 school days.");
+});
+
 (async () => {
   for (const [name, f] of later) { try { await f(); n++; } catch (e) { console.error("FAIL", name); throw e; } }
   console.log(`${n} relief dates tests passed`);
