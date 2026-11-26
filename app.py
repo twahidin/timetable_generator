@@ -563,7 +563,7 @@ def tidy_once_a_day():
     """the first request of each day ends the Exams and events extras whose date has passed, and removes history files
     over two years old. A failure here never breaks the request"""
     global _tidied_on
-    today = datetime.date.today()
+    today = rights_table.school_today()
     if _tidied_on == today: return None
     _tidied_on = today
     try:
@@ -1466,7 +1466,7 @@ def _group_label(p):
     """the committee page's label for a person: their role's label, then " · " and their committees' labels joined by
     ", " when they have any (Admin last), e.g. "HOD · Timetable committee, Relief team"
     """
-    ex, today = p.get("extras") or {}, datetime.date.today().isoformat()
+    ex, today = p.get("extras") or {}, rights_table.school_today().isoformat()
     on = [label for k, label in people.COMMITTEES if (bool(ex.get(k)) and str(ex[k]) >= today if k == "exams" else ex.get(k) is True)]
     if ex.get("admin") is True: on.append(EXTRA_LABELS["admin"])
     return " · ".join(x for x in (people.LABELS.get(p.get("group")), ", ".join(on)) if x) or None
@@ -2307,7 +2307,7 @@ def admin_person():
     """change one person, or add one by name (added: true) -> their staff item"""
     stop = _admin_off()
     if stop: return stop
-    me, by_, pub, today = who()["name"], by(), store.published(), datetime.date.today()   # by_ before: their own change may end this session
+    me, by_, pub, today = who()["name"], by(), store.published(), rights_table.school_today()   # by_ before: their own change may end this session
     try:
         b = _body()
         if not isinstance(b.get("name"), str): raise Refused(UNREAD_CHANGE)
@@ -2492,7 +2492,7 @@ def admin_bulk():
     """one change for several people: the preview's lines, then (preview: false) all of it or none of it"""
     stop = _admin_off()
     if stop: return stop
-    me, by_, pub, today = who()["name"], by(), store.published(), datetime.date.today()
+    me, by_, pub, today = who()["name"], by(), store.published(), rights_table.school_today()
     try:
         b = _body()
         if b.get("preview", True) is not False:   # only an explicit preview: false changes anything
@@ -2902,7 +2902,7 @@ def exams_me():
 def _exams_committee(pub):
     """the exams committee as the accounts hold it: [name, last day] of each person whose Exams and events extra has not
     ended (only an admin changes it, on the admin page)"""
-    today = datetime.date.today().isoformat()
+    today = rights_table.school_today().isoformat()
     return [[p["name"], p["extras"]["exams"]] for p in people.staff(pub) if (p["extras"].get("exams") or "") >= today and not p["off"]]
 
 def _exam_settings_reply(pub, settings):
