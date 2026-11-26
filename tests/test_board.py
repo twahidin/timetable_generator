@@ -590,7 +590,7 @@ def test_the_place_route_and_the_slots_route_agree_with_the_draft():
     r = c.get(f"/api/draft/place?id={PLAIN_ID}&d={d}&p={p}"); j = r.get_json()
     assert r.status_code == 200 and j == draft.place(PLAIN_ID, d, p) and set(j) == {"d", "p", "state", "why", "swap", "also", "push", "beside", "clashes"} and j["push"]["out"] == x["there"] and j["beside"]["state"] in ("ok", "prefer", "no", "na")
     assert {k: j[k] for k in x if k != "there"} == {k: x[k] for k in x if k != "there"}
-    assert isinstance(j["clashes"], list) and all(isinstance(y, dict) and set(y) == {"kind", "text"} for y in j["clashes"])   # every collision there, with the other lessons left there
+    assert isinstance(j["clashes"], list) and all(isinstance(y, dict) and set(y) == {"kind", "text", "ids"} and all(type(i) is int for i in y["ids"]) for y in j["clashes"])   # every collision there, with the other lessons left there
     free = next(y for y in s if y["there"] is None); j = c.get(f"/api/draft/place?id={PLAIN_ID}&d={free['d']}&p={free['p']}").get_json()
     assert j["push"] is None and j["beside"] is None and j["clashes"] is None and j["state"] == free["state"]
     say = lambda url, code, text: (lambda r: r.status_code == code and r.get_json() == {"error": text})(c.get(url))
