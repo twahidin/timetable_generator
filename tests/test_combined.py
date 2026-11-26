@@ -358,7 +358,7 @@ t(room_pages_show_the_pair_on_each_studio)
 
 def the_skill_explains_made_of():
     root = os.path.dirname(HERE); s = open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
-    assert SPEC.SKILL_VERSION == "2026-11.9" and "Skill version: 2026-11.9" in s and "2026-11.9" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
+    assert SPEC.SKILL_VERSION == "2026-11.10" and "Skill version: 2026-11.10" in s and "2026-11.10" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
     for words in ("Made of", "combined venue", "room_parts", "takes every one of its rooms"): assert words in s, words
 t(the_skill_explains_made_of)
 

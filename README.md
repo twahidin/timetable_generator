@@ -174,10 +174,11 @@ is not on step 3, and a named subject the class has only in groups.
    class's periods against the lesson periods of its days, lessons against the stretches between breaks (a 3-period
    lesson cannot run across recess), a lesson longer than any stretch, special rooms against the lessons that need
    them, each teacher's lessons against the times they can teach, and floating recess that cannot work. Critical
-   first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
+   first, each with a button to the step that fixes it; it runs again whenever the setup changes (`ttgen/checks.py`; the skill's own
+   `python -m ttgen check` prints the same list, critical first, and ends with an error while something critical stays).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.9`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.10`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
@@ -609,7 +610,7 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `tests/test_relief_requests.py` | relief requests: lessons, the free-then list, absences, files and their routes |
 | `tests/test_relief_telegram.py` | relief on Telegram, on the server: no network, and never a real token |
 | `tests/relief_*.test.js`, `tests/dom.js` | relief's page scripts, run with Node in a small stand-in for the browser |
-| `checks.py` | will it fit: the sums on a setup before it is downloaded (class periods, breaks, rooms, teachers' time) |
+| `ttgen/checks.py` | will it fit: the sums on a setup before it is downloaded (class periods, breaks, rooms, teachers' time); in the package, so the skill's check runs them too (`checks.py` at the root is a name for it) |
 | `store.py` | the shared setup (version, change log, restore points) and the published timetable on the volume |
 | `sync.py` | setup changes as small operations: apply, merge, and what a head may change |
 | `static/sync.js` | the same operations in the browser; Node can run it for the tests |

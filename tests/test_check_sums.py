@@ -125,4 +125,13 @@ def the_skill_copy_runs_by_itself():
         r = subprocess.run([sys.executable, "-B", "-m", "ttgen", "check", p], cwd=scripts, capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=""))
         assert r.returncode == 1 and "Critical (" in r.stdout and " - [classes] Class 1B needs 201 periods" in r.stdout, (r.returncode, r.stdout[-400:], r.stderr[-400:])
 
+@t
+def skill_md_says_what_the_check_prints():
+    from ttgen import spec as SPEC
+    s = open(os.path.join(ROOT, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    assert SPEC.SKILL_VERSION == "2026-11.10" and "Skill version: 2026-11.10" in s
+    for words in ("**Critical** items", "**Any critical item: stop.**", "nothing is critical after choice", "`ttgen/checks.py`", "the check has done these sums"): assert words in s, words
+    readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+    assert "`ttgen/checks.py`" in readme and "Skill version: 2026-11.10" in readme
+
 print(f"{n} checks passed")
