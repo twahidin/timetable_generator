@@ -219,10 +219,17 @@
     if (P.day === "pick") window.ReliefDates.mount($(".rd-box", box), { key: "plan", picked: P.picked, max: 20, onChange: list => { P.picked = list; changed(); reread(); } });
   }
 
+  /* the published page's teacher view, both weeks, in a new tab; not for staff added only in the accounts (no timetable) */
+  function theirTimetable(name) {
+    const x = (P.people || []).find(q => q.name === name);
+    if (x && x.staff_only) return "";
+    return `<a class="ghost filebtn small" href="/timetable#teachers/${enc(name)}" target="_blank" rel="noopener">Their timetable ↗</a>`;
+  }
+
   function paintWho() {
     const box = $("#plWho", P.pane);
     if (!P.people) { box.innerHTML = P.perr ? `${say(P.perr)} <button type="button" class="small" data-pl="people">Try again</button>` : `<span class="small muted">Loading…</span>`; return; }
-    RF.person(box, { people: P.people, value: P.teacher, exclude: [R.me.name], label: "Find the absent teacher", onPick: pickTeacher });
+    RF.person(box, { people: P.people, value: P.teacher, exclude: [R.me.name], label: "Find the absent teacher", onPick: pickTeacher, after: theirTimetable });
   }
 
   function pickTeacher(name) {

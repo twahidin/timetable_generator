@@ -231,7 +231,7 @@ window.ReliefForm = (function () {
   }
 
   /* ---------------------------------------------------------------- a person picker */
-  /* opts: people [{name, depts}], value (a name or ""), exclude (names not offered), placeholder, label, onPick(name) */
+  /* opts: people [{name, depts}], value (a name or ""), exclude (names not offered), placeholder, label, onPick(name), after(name) -> html drawn after Change in the chosen row */
   function person(container, opts) {
     let p = pickers.get(container);
     if (!p) { p = { q: "", open: false, opts: {} }; pickers.set(container, p); bindPicker(container, p); }
@@ -254,7 +254,7 @@ window.ReliefForm = (function () {
   function drawPicker(container, p) {
     const v = p.opts.value;
     if (v && !p.open) {
-      container.innerHTML = `<div class="row"><span class="chip pp-chosen">${esc(v)}</span><button type="button" class="small" data-pp="open">Change</button></div>`;
+      container.innerHTML = `<div class="row"><span class="chip pp-chosen">${esc(v)}</span><button type="button" class="small" data-pp="open">Change</button>${p.opts.after ? p.opts.after(v) : ""}</div>`;
       return;
     }
     container.innerHTML = `<div class="picker"><div class="row"><input type="search" data-pp="q" value="${esc(p.q)}" placeholder="${esc(p.opts.placeholder || "Type a name or a department")}" autocomplete="off" aria-label="${esc(p.opts.label || "Find a person")}">

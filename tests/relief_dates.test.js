@@ -373,7 +373,7 @@ t("relief.html: today ticked keeps a ring of its own (its navy outline is lost o
    reads the lessons of those dates, Send sends them, and the form starts again with no dates. The stand-in cannot read the
    selector :not(.off), so ReliefDates.focusFirst is recorded rather than run. A made-up school: today Tue 13 Oct 2026, its school
    days the weekdays to Fri 18 Dec but for Sports Day (Fri 23 Oct). */
-const EVE = "Ms Evelyn Koh", MAYA = "Ms Maya Lee";
+const EVE = "Ms Evelyn Koh", MAYA = "Ms Maya Lee", ACC = "Mr Accounts Only", SLASH = "Mr Raj s/o Dev";
 const TERM = weekdays("2026-10-13", "2026-12-18").filter(d => d !== "2026-10-23");
 function form(hash) {
   const sent = [];
@@ -381,7 +381,7 @@ function form(hash) {
     const ok = data => ({ status: 200, data });
     if (c.url === "/api/relief/me") return ok({ name: EVE, depts: ["Science"], published: true, today: "2026-10-13", can_plan: true });
     if (c.url === "/api/relief/school-days") return ok({ today: "2026-10-13", days: TERM, off: { "2026-10-23": "Sports Day" } });
-    if (c.url === "/api/relief/people") return ok([{ name: EVE, depts: ["Science"] }, { name: MAYA, depts: ["Science"] }]);
+    if (c.url === "/api/relief/people") return ok([{ name: EVE, depts: ["Science"] }, { name: MAYA, depts: ["Science"] }, { name: ACC, depts: [], staff_only: true }, { name: SLASH, depts: ["Science"] }]);
     if (c.method === "POST" && c.url === "/api/relief/absences") {
       const r = { id: "a" + (sent.length + 1), teacher: c.body.teacher || EVE, dates: c.body.dates, periods: null, reason: "", reason_text: "", lessons: [], acknowledged: false };
       sent.push(r);
@@ -467,6 +467,33 @@ ta("Plan relief: Pick dates is the calendar; a long drag stops at 20 and a 21st 
   assert.ok(p.text("#plPlannedList").includes("Fri 16 Oct – Thu 22 Oct, Mon 26 Oct – Fri 13 Nov"), p.text("#plPlannedList"));
   await p.click('#plDay [data-v="pick"]');
   assert.strictEqual(p.text("#plDay .rd-sum"), "No dates yet. Up to 20 school days.");
+});
+/* ---- Calendar, Task 5 ---- */
+const LINK = n => `<a class="ghost filebtn small" href="/timetable#teachers/${encodeURIComponent(n)}" target="_blank" rel="noopener">Their timetable ↗</a>`;
+ta("Task 5: the picker draws opts.after after Change, and nothing more without it", async () => {
+  const p = form("#plan"); await p.settle();
+  const box = p.$("#plWho");
+  await p.click('#plWho [data-pp="pick"][data-name="' + MAYA + '"]');   /* the picker is closed, as when a teacher is chosen */
+  const people = [{ name: "Ms Ada Ong", depts: [] }];
+  p.window.ReliefForm.person(box, { people, value: "Ms Ada Ong" });
+  const plain = box.innerHTML;
+  assert.ok(plain.includes(">Change</button></div>") && !plain.includes("Their timetable"), plain);
+  p.window.ReliefForm.person(box, { people, value: "Ms Ada Ong", after: n => `<a href="/x/${n}">Their timetable ↗</a>` });
+  assert.ok(box.innerHTML.includes(`>Change</button><a href="/x/Ms Ada Ong">Their timetable ↗</a></div>`), box.innerHTML);
+});
+ta("Task 5: Plan relief shows the link for a teacher with a timetable, encoded, also with a slash; not for an accounts-only person; Ask for relief has none", async () => {
+  const p = form("#plan"); await p.settle();
+  assert.ok(!p.text("#plWho").includes("Their timetable"));
+  await p.click(`#plWho [data-pp="pick"][data-name="${MAYA}"]`);
+  assert.ok(p.$("#plWho").innerHTML.includes(LINK(MAYA)), p.$("#plWho").innerHTML);
+  assert.ok(p.$("#plWho").innerHTML.indexOf("Change") < p.$("#plWho").innerHTML.indexOf("Their timetable"));
+  await p.click('#plWho [data-pp="open"]');
+  await p.click(`#plWho [data-pp="pick"][data-name="${SLASH}"]`);
+  assert.ok(p.$("#plWho").innerHTML.includes(`href="/timetable#teachers/Mr%20Raj%20s%2Fo%20Dev"`), p.$("#plWho").innerHTML);
+  await p.click('#plWho [data-pp="open"]');
+  await p.click(`#plWho [data-pp="pick"][data-name="${ACC}"]`);
+  assert.ok(p.text("#plWho").includes(ACC) && !p.text("#plWho").includes("Their timetable"), p.text("#plWho"));
+  assert.ok(!read("relief.js").includes("Their timetable"));
 });
 
 (async () => {
