@@ -1271,6 +1271,12 @@ def words_days_joins_runs_of_three_or_more():
     assert words.days(dict(dates=[])) == "" and words.days(dict()) == ""
 
 @t
+def words_days_runs_across_a_month_and_a_year_end():
+    from relief import words
+    assert words.days(dict(dates=["2026-11-27", "2026-11-30", "2026-12-01"])) == "Fri 27 Nov \u2013 Tue 1 Dec"
+    assert words.days(dict(dates=["2026-12-30", "2026-12-31", "2027-01-01"])) == "Wed 30 Dec \u2013 Fri 1 Jan"
+
+@t
 def calendar_names_a_holiday_without_a_name_holiday():
     from relief import calendar as RC
     cal = dict(terms=[dict(name="Term 4", start="2026-10-12", end="2026-10-30", starts_as="Odd")],

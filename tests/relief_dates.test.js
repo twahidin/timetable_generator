@@ -135,14 +135,16 @@ const later = []; const ta = (name, f) => later.push([name, f]);
 const OK = { ok: true, status: 200, data: { today: "2026-11-26", days: LONG_LIST, off: OFF } };
 function page(answer) {
   const doc = { on: {}, under: null, addEventListener: (k, f) => (doc.on[k] = doc.on[k] || []).push(f), elementFromPoint: () => doc.under, querySelector: () => null };
-  const w = {}, c = vm.createContext({ window: w, document: doc }), calls = { api: 0 };
+  const timers = new Map(); let ids = 0;   /* the hold of a finger: p.hold() runs what is waiting, as if the time had passed */
+  const w = {}, c = vm.createContext({ window: w, document: doc, setTimeout: f => { timers.set(++ids, f); return ids; }, clearTimeout: id => { timers.delete(id); } }), calls = { api: 0 };
   vm.runInContext(read("relief-form.js"), c);
   vm.runInContext(read("relief-dates.js"), c);
   w.Relief = { api: async url => { calls.api++; assert.strictEqual(url, "/api/relief/school-days"); return typeof answer === "function" ? answer(calls.api) : answer; },
                say: m => `<span class="msg bad">${w.ReliefForm.esc(m.text)}</span>` };
-  return { RD: w.ReliefDates, doc, calls };
+  const hold = () => { for (const [id, f] of [...timers]) { timers.delete(id); f(); } };
+  return { RD: w.ReliefDates, doc, calls, hold };
 }
-function dayEl(d) { const el = { dataset: { d }, cls: new Set(), classList: { toggle: (k, on) => (on ? el.cls.add(k) : el.cls.delete(k)) }, closest: s => (s.startsWith(".rd-d") ? el : null) }; return el; }
+function dayEl(d) { const el = { dataset: { d }, cls: new Set(), classList: { toggle: (k, on) => (on ? el.cls.add(k) : el.cls.delete(k)), contains: k => el.cls.has(k) }, closest: s => (s.startsWith(".rd-d") ? el : null), focus() {} }; return el; }
 function btnEl(rd) { const el = { dataset: { rd }, disabled: false, closest: s => (s.startsWith("button[data-rd]") ? el : null) }; return el; }
 function standBox(days) {
   let html = "";
@@ -252,7 +254,7 @@ ta("focusFirst while the school days are being read focuses the first school day
   let answer;
   const p = page(() => new Promise(f => { answer = f; })), box = standBox(), first = dayEl("2026-11-26"), focused = [];
   first.focus = () => focused.push(first.dataset.d);
-  box.querySelector = s => (s === ".rd-d:not(.off)" && box.innerHTML.includes("rd-month") ? first : null);
+  box.querySelectorAll = s => (box.innerHTML.includes("rd-month") ? [first] : []);   /* the first school day, once drawn */
   p.RD.mount(box, { key: "plan", picked: [], max: 20 });
   p.RD.focusFirst(box);   /* Pick dates was just chosen; the calendar says "Reading the school calendar…" */
   assert.strictEqual(focused.length, 0);
@@ -283,9 +285,11 @@ ta("a context menu ends a mouse drag with no change; a finger held still goes on
   assert.strictEqual(box.draws, drawn + 1);
   fire(p.doc, "pointerup", {});
   assert.strictEqual(got.length, 0);
-  fire(box, "pointerdown", { target: d27, pointerType: "touch" }); fire(p.doc, "pointermove", {});
-  fire(p.doc, "contextmenu", {}); fire(p.doc, "pointerup", {});
+  fire(box, "pointerdown", { target: d27, pointerType: "touch" }); p.hold(); fire(p.doc, "pointermove", {});   /* a finger drags once held */
+  let kept = false;
+  fire(p.doc, "contextmenu", { preventDefault() { kept = true; } }); fire(p.doc, "pointerup", {});
   same(got, [SEVEN]);
+  assert.ok(kept, "no menu over a finger's drag");
 });
 ta("a pointer move with no button down ends the drag with no change", async () => {
   const days = fiveDays(), [d27, , , d08] = days, p = page(OK), box = standBox(days), got = [];
@@ -495,6 +499,130 @@ ta("Task 5: Plan relief shows the link for a teacher with a timetable, encoded, 
   assert.ok(p.text("#plWho").includes(ACC) && !p.text("#plWho").includes("Their timetable"), p.text("#plWho"));
   assert.ok(!read("relief.js").includes("Their timetable"));
 });
+
+/* ---- Calendar, final review ---- */
+const touchPage = async () => {
+  const days = fiveDays(), p = page(OK), box = standBox(days), got = [];
+  p.RD.mount(box, { key: "plan", picked: [], max: 20, onChange: l => got.push(Array.from(l)) }); await tick();
+  return { days, p, box, got };
+};
+const touch = more => Object.assign({ pointerType: "touch", pointerId: 7, buttons: 1, clientX: 100, clientY: 100 }, more);
+ta("touch: a finger that moves before the hold is a scroll: nothing is ticked", async () => {
+  const { days: [d27, , , d08], p, box, got } = await touchPage();
+  fire(box, "pointerdown", touch({ target: d27 }));
+  assert.ok(!d27.cls.has("add"), "no preview before the hold");
+  p.doc.under = d08; fire(p.doc, "pointermove", touch({ clientY: 160 }));
+  p.hold(); fire(p.doc, "pointermove", touch({ clientY: 200 })); fire(p.doc, "pointerup", touch({}));
+  assert.strictEqual(got.length, 0);
+  assert.ok(!d27.cls.has("add") && !d08.cls.has("add"));
+});
+ta("touch: a finger held still, then moved, ticks the run once; the page does not scroll meanwhile", async () => {
+  const { days: [d27, , , d08], p, box, got } = await touchPage();
+  fire(box, "pointerdown", touch({ target: d27 }));
+  let stopped = 0; const tm = () => fire(box, "touchmove", { cancelable: true, preventDefault() { stopped++; } });
+  tm();
+  assert.strictEqual(stopped, 0, "before the hold the page may scroll");
+  p.hold();
+  assert.ok(d27.cls.has("add"), "held: the day shows it is being added");
+  tm();
+  assert.strictEqual(stopped, 1, "a held finger's drag does not scroll the page");
+  p.doc.under = d08; fire(p.doc, "pointermove", touch({ clientY: 180 }));
+  fire(p.doc, "pointerup", touch({}));
+  fire(box, "click", { target: d08, detail: 1 });
+  same(got, [SEVEN]);
+  tm();
+  assert.strictEqual(stopped, 1, "after the release the page scrolls again");
+});
+ta("touch: a tap ticks one day once; a tap after the hold, without moving, takes it off", async () => {
+  const { days: [, d30], p, box, got } = await touchPage();
+  fire(box, "pointerdown", touch({ target: d30 })); fire(p.doc, "pointermove", touch({ clientX: 103 })); fire(p.doc, "pointerup", touch({}));
+  fire(box, "click", { target: d30, detail: 1 });   /* the browser's click after a tap */
+  same(got, [["2026-11-30"]]);
+  fire(box, "pointerdown", touch({ target: d30 })); p.hold(); fire(p.doc, "pointerup", touch({}));
+  same(got, [["2026-11-30"], []]);
+});
+ta("touch: pointercancel while the finger waits for the hold changes nothing", async () => {
+  const { days: [d27], p, box, got } = await touchPage();
+  fire(box, "pointerdown", touch({ target: d27 })); fire(p.doc, "pointercancel", touch({}));
+  p.hold(); fire(p.doc, "pointerup", touch({}));
+  assert.strictEqual(got.length, 0);
+  assert.ok(!d27.cls.has("add"));
+});
+ta("a mouse still drags at once, with no hold", async () => {
+  const { days: [d27, , , d08], p, box, got } = await touchPage();
+  fire(box, "pointerdown", { target: d27, pointerType: "mouse" });
+  assert.ok(d27.cls.has("add"));
+  p.doc.under = d08; fire(p.doc, "pointermove", { pointerType: "mouse" }); fire(p.doc, "pointerup", { pointerType: "mouse" });
+  same(got, [SEVEN]);
+});
+t("relief.html: on the grid a finger may scroll the page up and down (pan-y), no longer none", () => {
+  const rule = DOM.css("relief.html", ".rd-grid");
+  assert.ok(/(^|;)touch-action:pan-y(;|$)/.test(rule), rule);
+});
+ta("a click with detail 1 and no pointer before it (a screen reader's) ticks the day once", async () => {
+  const { days: [, d30], box, got } = await touchPage();
+  fire(box, "click", { target: d30, detail: 1 });
+  same(got, [["2026-11-30"]]);
+});
+ta("a mouse press, release and its click (detail 1) tick the day once, not twice", async () => {
+  const { days: [, d30], p, box, got } = await touchPage();
+  fire(box, "pointerdown", { target: d30, pointerType: "mouse" }); fire(p.doc, "pointerup", { pointerType: "mouse" });
+  fire(box, "click", { target: d30, detail: 1 });
+  same(got, [["2026-11-30"]]);
+});
+ta("forget: the month shown is forgotten, so the next mount opens on the first school day's month", async () => {
+  const p = page(OK), one = standBox();
+  p.RD.mount(one, { key: "plan", picked: [], max: 20 }); await tick();
+  fire(one, "click", { target: btnEl("next"), detail: 1 });
+  assert.ok(one.innerHTML.includes("January 2027"));
+  p.RD.forget("plan");
+  const two = standBox();
+  p.RD.mount(two, { key: "plan", picked: [], max: 20 });
+  assert.ok(two.innerHTML.includes("November 2026") && !two.innerHTML.includes("January 2027"), two.innerHTML);
+});
+ta("Try again after any refusal but the server's own three sentences", async () => {
+  const shown = async answer => { const p = page(answer), b = standBox(); p.RD.mount(b, { key: "plan", picked: [], max: 20 }); await tick(); return b.innerHTML; };
+  for (const status of [0, 401, 500]) {
+    const h = await shown({ ok: false, status, error: "Something went wrong. Try again." });
+    assert.ok(h.includes("Something went wrong. Try again.") && h.includes('data-rd="retry"'), `${status}: ${h}`);
+  }
+  for (const [status, error] of [[400, "Set the school calendar in Relief settings first."], [409, "Nothing is published yet."], [400, "There are no school days coming up in the calendar."]]) {
+    const h = await shown({ ok: false, status, error });
+    assert.ok(h.includes(error) && !h.includes('data-rd="retry"'), `${status}: ${h}`);
+  }
+  const none = await shown({ ok: true, status: 200, data: { today: "2026-11-26", days: [], off: {} } });
+  assert.ok(none.includes("There are no school days coming up in the calendar.") && !none.includes('data-rd="retry"'), none);
+});
+t("html: the line under the calendar is a live region", () => {
+  assert.ok(RD.html(view()).includes('<div class="rd-sum" role="status">'), RD.html(view()));
+});
+for (const [hash, key, pre, send] of [["#ask", "ask", "askDay", '#askSend [data-a="send"]'], ["#plan", "plan", "plDay", '#plSend [data-pl="send"]']]) {
+  ta(`${key}: a tap on a grey day says why in the line, changes nothing, and the next change brings the dates back`, async () => {
+    const p = form(hash); await p.settle();
+    await p.click(`#${pre} [data-v="pick"]`);
+    const box = p.$(`#${pre} .rd-box`), line = p.$(`#${pre} .rd-sum`), had = p.calls.length;
+    assert.strictEqual(line.getAttribute("role"), "status");
+    await p.click(box.querySelector('.rd-d[data-d="2026-10-23"]'));
+    assert.strictEqual(p.text(`#${pre} .rd-sum`), "Fri 23 Oct: Sports Day");
+    assert.strictEqual(p.calls.length, had, "no dates changed: nothing is read");
+    await p.click(box.querySelector('.rd-d[data-d="2026-10-16"]'));   /* a click with no pointer before it */
+    assert.strictEqual(p.text(`#${pre} .rd-sum`), "1 school day: Fri 16 Oct Clear all");
+    assert.strictEqual(p.$(`#${pre} .rd-sum`), line, "the line stays one element, so a screen reader reads its change");
+  });
+  ta(`${key}: after Send, Pick dates opens on the first school day's month again`, async () => {
+    const p = form(hash); await p.settle();
+    if (key === "plan") await p.click(`#plWho [data-pp="pick"][data-name="${MAYA}"]`);
+    await p.click(`#${pre} [data-v="pick"]`);
+    await p.click(`#${pre} [data-rd="next"]`);
+    const box = p.$(`#${pre} .rd-box`);
+    assert.ok(p.text(box).includes("November 2026") && !p.text(box).includes("October 2026"), p.text(box));
+    await p.click(box.querySelector('.rd-d[data-d="2026-11-02"]'));
+    await p.click(send);
+    assert.deepStrictEqual(p.posted().map(b => b.dates), [["2026-11-02"]]);
+    await p.click(`#${pre} [data-v="pick"]`);
+    assert.ok(p.text(`#${pre} .rd-box`).includes("October 2026"), p.text(`#${pre} .rd-box`));
+  });
+}
 
 (async () => {
   for (const [name, f] of later) { try { await f(); n++; } catch (e) { console.error("FAIL", name); throw e; } }

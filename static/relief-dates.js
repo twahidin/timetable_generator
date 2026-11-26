@@ -5,10 +5,12 @@
    ReliefDates.mount(box, {key, picked, max, onChange}) draws the calendar into box. The school days come from
    /api/relief/school-days, read once per page for every form (ReliefDates.load; a failed read is tried again on the next mount).
    Press on a school day and release: it is ticked, or taken off when it was ticked. Press and drag to another day: on release every
-   school day between is ticked (from a ticked day: taken off), at most max, taken from the day the drag started. Enter or Space
-   on a day ticks it or takes it off. onChange(list) is called once, with the sorted ISO dates, when a click or a drag changed them.
-   The month shown is kept for each key, so a form that draws a new box keeps it; while a drag is in progress, a mount only records
-   the dates, and the calendar is drawn on release. Grey days cannot be ticked and say why (ReliefDates.why).
+   school day between is ticked (from a ticked day: taken off), at most max, taken from the day the drag started. A finger drags
+   only after it is held still on a day for a moment (HOLD); before that a move scrolls the page. Enter or Space (or any click the
+   pointer did not make) on a day ticks it or takes it off. onChange(list) is called once, with the sorted ISO dates, when a click
+   or a drag changed them. The month shown is kept for each key, so a form that draws a new box keeps it (ReliefDates.forget(key)
+   after Send starts it again); while a drag is in progress, a mount only records the dates, and the calendar is drawn on release.
+   Grey days cannot be ticked: pointing at one, or a tap or click on it, says why (ReliefDates.why).
    ReliefDates.focusFirst(box) focuses the first school day shown. between, dragResult, months and html are pure, for the tests. */
 window.ReliefDates = (function () {
   const RF = window.ReliefForm, esc = RF.esc;
@@ -19,6 +21,7 @@ window.ReliefDates = (function () {
   const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const STEP = new Map([["ArrowLeft", -1], ["ArrowRight", 1], ["ArrowUp", -7], ["ArrowDown", 7]]);
   const NONE = { add: [], rem: [] }, ISO = /^\d{4}-\d{2}-\d{2}$/;
+  const HOLD = 300, SLOP = 8, CLICK_GAP = 700;   /* ms a finger is held before it drags; px it may move meanwhile; ms a pointer's own click comes after its release */
   const views = new Map(), keyOf = new WeakMap(), bound = new WeakSet();
   let once = null, info = null, active = null, docBound = false;
 
@@ -35,9 +38,9 @@ window.ReliefDates = (function () {
   function load(api) {   /* {ok, status, error, info}; info = {today, days: Set, list, off} */
     if (!once) once = Promise.resolve(api(URL)).then(r => {
       const d = r && r.ok ? r.data || {} : null, list = d ? sorted(d.days) : [];
-      if (!list.length) {
+      if (!list.length) {   /* an answer with no school days is the server's own refusal of that */
         once = null;
-        return { ok: false, status: r ? r.status : 0, error: (r && !r.ok && r.error) || NO_DAYS, info: null };
+        return r && !r.ok ? { ok: false, status: r.status, error: r.error || "", info: null } : { ok: false, status: 400, error: NO_DAYS, info: null };
       }
       const today = ISO.test(String(d.today)) ? String(d.today) : list[0];
       info = { today, days: new Set(list), list, off: d.off && typeof d.off === "object" ? d.off : {} };
@@ -81,7 +84,7 @@ window.ReliefDates = (function () {
   }
 
   /* ---------------------------------------------------------------- drawing */
-  function html(view) {
+  function parts(view) {   /* {cal: the two months, line: the line under them} */
     const inf = view.info, m = months(inf), first = view.first || m.first, right = addMonth(first, 1), max = Number(view.max) || MAX;
     const picked = sorted(view.picked), has = new Set(picked), pv = view.preview || NONE, add = new Set(pv.add || []), rem = new Set(pv.rem || []);
     let stop = false;   /* the first school day shown is the one Tab reaches; the arrow keys go on from there */
@@ -111,14 +114,28 @@ window.ReliefDates = (function () {
     const line = k
       ? `<b>${k} school day${k === 1 ? "" : "s"}:</b> <span>${esc(RF.dayRuns(picked))}</span> <button type="button" class="small" data-rd="clear">Clear all</button>`
       : `<span class="muted">No dates yet. Up to ${max} school days.</span>`;
-    return `<div class="rd-cal">${month(first, true)}${month(right, false)}</div>`
-      + `<div class="rd-sum">${line}${full ? ` <span class="rd-full">That is ${max} school days, the most at one time.</span>` : ""}</div>`;
+    return { cal: month(first, true) + month(right, false), line: line + (full ? ` <span class="rd-full">That is ${max} school days, the most at one time.</span>` : "") };
+  }
+
+  function html(view) {   /* the line is a live region: a screen reader reads its changes (the 20, a grey day's reason) */
+    const p = parts(view);
+    return `<div class="rd-cal">${p.cal}</div><div class="rd-sum" role="status">${p.line}</div>`;
   }
 
   function draw(v) {
     const b = bounds(info);
     v.first = !v.first || v.first < b.lo ? b.lo : v.first > b.hi ? b.hi : v.first;
-    v.box.innerHTML = html({ info, first: v.first, picked: v.picked, preview: NONE, max: v.max, capped: v.capped });
+    const view = { info, first: v.first, picked: v.picked, preview: NONE, max: v.max, capped: v.capped };
+    const cal = v.box.querySelector(".rd-cal"), sum = v.box.querySelector(".rd-sum");
+    if (!cal || !sum) { v.box.innerHTML = html(view); return; }
+    const p = parts(view);   /* drawn before: the line stays the same element, as a live region must to be read */
+    cal.innerHTML = p.cal;
+    sum.innerHTML = p.line;
+  }
+
+  function note(v, text) {   /* a sentence in the line in place of the dates, until the next change draws them again */
+    const sum = v.box.querySelector(".rd-sum");
+    if (sum) sum.innerHTML = `<span class="rd-why">${esc(text)}</span>`;
   }
 
   function show(v) {   /* draw at once when the school days are read; else read them first */
@@ -135,8 +152,9 @@ window.ReliefDates = (function () {
         if (focus && (!a || a === document.body || box.contains(a))) focusFirst(box);
         return;
       }
+      const fixed = r.status === 400 || r.status === 409;   /* no school calendar, nothing published, no school days coming up: another try cannot help */
       box.innerHTML = `<p class="rd-note">${window.Relief.say({ text: r.error, bad: true, status: r.status })}`
-        + `${r.status === 0 ? ` <button type="button" class="small" data-rd="retry">Try again</button>` : ""}</p>`;
+        + `${fixed ? "" : ` <button type="button" class="small" data-rd="retry">Try again</button>`}</p>`;
     });
   }
 
@@ -154,7 +172,7 @@ window.ReliefDates = (function () {
     b.focus();
   }
   function focusFirst(box) {   /* while the school days are still being read, once they are drawn */
-    const b = box && box.querySelector(".rd-d:not(.off)");
+    const b = box && [...box.querySelectorAll(".rd-d")].find(x => !x.classList.contains("off"));
     if (b) { focusDay(box, b); return; }
     const v = box && viewOf(box);
     if (v && !info) v.focusPending = true;
@@ -209,19 +227,28 @@ window.ReliefDates = (function () {
       /* Ctrl or Cmd with the main button is a context menu on a Mac, which swallows the release */
       if (!v || !info || e.button !== 0 || e.ctrlKey || e.metaKey || !c || why(c.dataset.d, info)) return;
       e.preventDefault();   /* no text selection, no focus ring under the pointer */
-      v.drag = { anchor: c.dataset.d, end: c.dataset.d, pointerId: e.pointerId, pointerType: e.pointerType };
+      /* a mouse drags at once; a finger only once held still (before that, a swipe scrolls the page and the browser cancels the press) */
+      const d = v.drag = { anchor: c.dataset.d, end: c.dataset.d, pointerId: e.pointerId, pointerType: e.pointerType, x: e.clientX, y: e.clientY,
+                           live: e.pointerType !== "touch", timer: null };
       active = v;
-      paint(v);
+      if (d.live) paint(v);
+      else d.timer = setTimeout(() => { if (v.drag === d) { d.timer = null; d.live = true; paint(v); } }, HOLD);
     });
     box.addEventListener("click", e => {
       const v = viewOf(box);
       if (!v || v.drag) return;
       const b = e.target && e.target.closest ? e.target.closest("button[data-rd]") : null;
       if (b) { if (!b.disabled) act(v, b.dataset.rd); return; }
-      const c = dayOf(e);
-      /* a pointer's click was the press and release already; only Enter or Space (detail 0) ticks here */
-      if (c && info && e.detail === 0 && !why(c.dataset.d, info)) apply(v, c.dataset.d, c.dataset.d, true);
+      const c = dayOf(e), off = c && info ? why(c.dataset.d, info) : "";
+      if (!c || !info) return;
+      if (off) { note(v, `${RF.day(c.dataset.d)}: ${off}`); return; }   /* a finger cannot point at a grey day: a tap says why */
+      /* the pointer counts its own press on release; any other click ticks here: Enter or Space (detail 0), or a screen reader's
+         click, which can come with detail 1 and no pointer at all */
+      if (e.detail === 0 || Date.now() - (v.ptrAt || 0) > CLICK_GAP) apply(v, c.dataset.d, c.dataset.d, true);
     });
+    /* a finger dragging days does not scroll the page; one not yet held still does (nothing is stopped then). On the box, not the
+       document: a touch's events stay with the day it started on, and the rest of the page keeps scrolling without waiting */
+    box.addEventListener("touchmove", e => { if (active && active.drag.live && active.drag.pointerType === "touch" && e.cancelable) e.preventDefault(); }, { passive: false });
     box.addEventListener("keydown", e => {
       const v = viewOf(box), n = STEP.get(e.key), c = dayOf(e);
       if (!v || !info || !n || !c || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -237,6 +264,11 @@ window.ReliefDates = (function () {
       const v = active;
       if (!v || e.pointerId !== v.drag.pointerId) return;
       if (e.buttons === 0) { cancel(); return; }   /* its button is up: the release never came */
+      const d = v.drag;
+      if (!d.live) {   /* a finger that moves before the hold is not choosing days */
+        if (Math.abs(e.clientX - d.x) > SLOP || Math.abs(e.clientY - d.y) > SLOP) cancel();
+        return;
+      }
       const el = document.elementFromPoint(e.clientX, e.clientY), c = el && el.closest ? el.closest(".rd-d[data-d]") : null;
       if (!c || !v.box.contains(c) || why(c.dataset.d, info) || c.dataset.d === v.drag.end) return;   /* a grey day keeps the last school day */
       v.drag.end = c.dataset.d;
@@ -245,20 +277,36 @@ window.ReliefDates = (function () {
     document.addEventListener("pointerup", e => {
       const v = active;
       if (!v || e.pointerId !== v.drag.pointerId) return;
-      const d = v.drag;
-      v.drag = null; active = null;
-      apply(v, d.anchor, d.end, false);
+      const d = stop(v);
+      apply(v, d.anchor, d.end, false);   /* a tap before the hold: its own day (the end moves only in a drag) */
     });
     document.addEventListener("pointercancel", e => { if (active && e.pointerId === active.drag.pointerId) cancel(); });
-    /* a context menu takes the release; a finger held still on Android raises one too, and that drag goes on (its menu, if any, cancels it) */
-    document.addEventListener("contextmenu", () => { if (active && active.drag.pointerType !== "touch") cancel(); });
+    /* a context menu takes a mouse's release: the drag ends; a finger held still on Android raises one too: no menu, the drag goes on */
+    document.addEventListener("contextmenu", e => {
+      if (!active) return;
+      if (active.drag.pointerType === "touch") e.preventDefault(); else cancel();
+    });
+  }
+
+  function stop(v) {   /* the press in progress is over: -> its drag */
+    const d = v.drag;
+    if (d.timer) clearTimeout(d.timer);
+    v.drag = null; active = null;
+    v.ptrAt = Date.now();   /* the click the browser sends after it is not counted again */
+    return d;
   }
 
   function cancel() {   /* the drag in progress ends with no change */
     const v = active;
     if (!v) return;
-    v.drag = null; active = null;
+    stop(v);
     draw(v);
+  }
+
+  function forget(key) {   /* after Send: next time Pick dates opens on the first school day's month again */
+    const k = String(key || ""), v = views.get(k);
+    if (v && v === active) cancel();
+    views.delete(k);
   }
 
   function mount(box, opts) {
@@ -281,5 +329,5 @@ window.ReliefDates = (function () {
     show(v);
   }
 
-  return { load, why, between, dragResult, months, html, mount, focusFirst };
+  return { load, why, between, dragResult, months, html, mount, focusFirst, forget };
 })();

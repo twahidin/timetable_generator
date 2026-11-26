@@ -338,6 +338,7 @@
     const res = await R.api("/api/relief/absences", R.json("POST", body));
     if (!res.ok) { P.busy = false; P.msg = { text: res.error, bad: true, status: res.status }; paintSend(); return; }
     const failed = await R.attach(res.data, list);
+    window.ReliefDates.forget("plan");   /* Pick dates opens on the first school day's month again */
     Object.assign(P, { day: "today", picked: [], teacher: "", away: "whole", from: null, to: null, reason: "", text: "", remarks: "",
                        readFor: "", lessons: [], lerr: null, busy: false, dirty: false });
     P.chosen.clear();

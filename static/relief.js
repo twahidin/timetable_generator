@@ -598,6 +598,7 @@
     if (!res.ok) { A.busy = false; A.msg = { text: res.error, bad: true, status: res.status }; paintSend(); return; }
     const failed = await attach(res.data, list);
     roRemember(A.ro);
+    window.ReliefDates.forget("ask");   /* Pick dates opens on the first school day's month again */
     Object.assign(A, { day: "today", picked: [], away: "whole", from: null, to: null, reason: "", text: "", busy: false, dirty: false });
     A.msg = { text: sentSays(res.data), bad: false, sent: true,
               files: failed.length ? { text: `Not added: ${failed.join(" ")} Add them in My absences.`, bad: true } : null };

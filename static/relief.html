@@ -52,7 +52,7 @@ nav.rtabs button .n:empty{display:none}
 .rd-head{display:flex;align-items:center;justify-content:space-between;gap:6px;font-weight:600;font-size:14.5px;margin-bottom:6px;min-height:28px}
 .rd-arrow,.rd-gap{flex:none;width:30px;height:28px}
 .rd-arrow{padding:0;border-radius:8px;color:var(--navy);font-size:15px;line-height:1}
-.rd-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;touch-action:none}   /* a finger drags across the days rather than scrolls */
+.rd-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;touch-action:pan-y}   /* a finger scrolls the page up and down; held still on a day first, it drags (relief-dates.js) */
 .rd-dow{font-size:11px;font-weight:600;color:var(--muted);text-align:center;padding:2px 0 4px}
 .rd-d{height:34px;min-width:0;padding:0;border:1px solid transparent;border-radius:8px;background:var(--panel);color:var(--ink);font-size:14px;box-shadow:none;transition:none}
 .rd-d:hover:not(.off){border-color:#9db4cf;box-shadow:none}
