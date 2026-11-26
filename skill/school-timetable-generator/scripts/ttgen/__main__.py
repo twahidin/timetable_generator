@@ -5,7 +5,7 @@
    python -m ttgen check-timetable TIMETABLE.xlsx|TIMETABLE.sqlite [--setup SETUP.xlsx]   (--setup is optional for a database)
    (export also writes the timetable as a SQLite database; a database written this way keeps the setup, so SETUP may be -)"""
 import argparse, os, shutil, sys
-from .reader import read_template, derive
+from .reader import read_template
 
 def _say_outputs(out):
     names = {"excel": "Excel, every timetable", "html": "HTML timetable finder", "pdf_zip": "single PDFs (zip)", "db": "SQLite database, for other systems"}
@@ -63,18 +63,24 @@ def main(argv=None):
         return 1 if crit or any(w["strength"] == "Must" for w in ws) else 0
     spec = read_template(a.setup)
     if a.cmd == "check":
-        probs = derive(spec)
+        import copy
+        from . import checks
         from .solver import Problem
-        P = Problem(spec)
+        raw = copy.deepcopy(spec) if spec.get("choices") else None   # for the sums down the give-way list: findings() works the setup out in place
+        found = checks.findings(spec); P = Problem(spec)   # the sums of the app's step 7, Will it fit?: the same list, in the same words
         print(f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} blocks, "
               f"{len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students")
         print(f"{len(P.units)} units to place over {P.ND} days x {P.NP} periods")
-        for p in probs or ["No input problems found."]: print(" -", p)
-        from .spec import structure_vs_rules
-        for p in structure_vs_rules(spec): print(" ! Day structure and rules disagree:", p)
-        from .solver import fixed_clashes, rule_label, rule_problems
-        for p in fixed_clashes(spec, P): print(" ! Fixed lessons clash:", p)
-        for i, p in rule_problems(spec, P): print(f" ! Rule {rule_label(spec['rules'][i])}: {p}")
+        crit = [f for f in found if f["level"] == checks.CRITICAL]; warn = [f for f in found if f["level"] != checks.CRITICAL]
+        print(f"Critical ({len(crit)}): no timetable can be made until these are fixed")   # both headings always, so new scripts can be told from old
+        for f in crit: print(f" - [{f['area']}] {f['text']}")
+        stop = bool(crit)
+        if crit and raw is not None:   # second choices: do the critical items go once the committee's list is given way on, in its order?
+            fb = checks.with_fallbacks(raw); k = fb["pass_at"]
+            if k: print(f"Giving way in the committee's order, nothing is critical after choice {k}: {'; '.join(fb['items'][:k])}."); stop = False
+            elif k is None: m = fb["critical"][-1]; print(f"Even after every second choice ({len(fb['items'])}), {m} thing{'' if m == 1 else 's'} will not fit.")
+        print(f"Warnings ({len(warn)}): a timetable can still be made; a person should check these")
+        for f in warn: print(f" - [{f['area']}] {f['text']}")
         from .spec import typed_rules, typed_label
         for num, _, r in typed_rules(spec): print(" * For the agent to honour:", typed_label(num, r))
         from . import choices
@@ -83,7 +89,7 @@ def main(argv=None):
         for n, (i, c) in enumerate(choices.ordered(spec), start=1):
             print(f" * Second choice {n}: {choices.item_label(spec, c)} — {choices.first_text(spec, c)} → {choices.second_text(spec, c)}")
             if i in bad: print(f" ! Second choice {n}: {bad[i]}")
-        return 0
+        return 1 if stop else 0   # critical, and no step of the second choices clears it
     from .solver import solve
     from .report import write_timetable
     from . import choices
