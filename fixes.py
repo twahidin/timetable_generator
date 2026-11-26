@@ -330,20 +330,20 @@ class Busy:
         return None, None
 
     def whys(self, rows, d, p, n, ignore=(), name=None):
-        """every collision of these rows in periods p .. p+n-1 of day d, the lessons with ids in ignore set aside -> [dict(kind, text)],
+        """every collision of these rows in periods p .. p+n-1 of day d, the lessons with ids in ignore set aside -> [dict(kind, text, ids)],
         kind "teacher", "class", "students" or "room", in _why's order of kinds and finding what it finds: empty exactly when clash is
         None, and what clash names first is in the first line. One line a teacher and lesson, a lesson in the way (all the classes it
         shares, named by name(lesson id); default what() of its first row), and a room. _why's walk is repeated here, collecting
-        instead of returning, so that _why and its sentences (the judgement and the forcing rest on them) stay as they are"""
+        instead of returning, each line with ids, the sorted ids of the lessons in the way (no repeats; a room line: the lessons in the room and those whose wet-weather room it is), so that _why and its sentences (the judgement and the forcing rest on them) stay as they are"""
         ignore, Q, out = set(ignore), range(p, p + n), []; name = name or (lambda i: what(self.ids[i][0]))
         every = lambda key: [y for y in self.at.get(key, ()) if y["id"] not in ignore]
-        line = lambda kind, text: out.append(dict(kind=kind, text=text))
+        line = lambda kind, text, ids: out.append(dict(kind=kind, text=text, ids=sorted(set(ids))))
         seen = set()
         for x in rows if d not in (self.m.get("double") or ()) else ():   # a day the setup lets a teacher take two lessons at once
             for t in x["teachers"]:
                 for q in Q:
                     for y in every(("t", t, d, q)):
-                        if (t, y["id"]) not in seen: seen.add((t, y["id"])); line("teacher", f"{t} is teaching {what(y)} then.")
+                        if (t, y["id"]) not in seen: seen.add((t, y["id"])); line("teacher", f"{t} is teaching {what(y)} then.", [y["id"]])
         cls = {}   # a lesson in the way -> the classes it shares with the rows, in the order met
         for x in rows:
             for c in x["classes"]:
@@ -352,12 +352,12 @@ class Busy:
                         got = cls.setdefault(y["id"], [])
                         if c not in got: got.append(c)
         for i, cs in cls.items():
-            line("class", f"{cs[0]} has {name(i)} then." if len(cs) == 1 else f"{', '.join(cs[:-1])} and {cs[-1]} have {name(i)} then.")
+            line("class", f"{cs[0]} has {name(i)} then." if len(cs) == 1 else f"{', '.join(cs[:-1])} and {cs[-1]} have {name(i)} then.", [i])
         named = set(cls)
         if hit := self.band_clash(rows, d, p, n, ignore | named):
-            line("students", f"{hit[0]} has the {block_label(hit[1]['block'], hit[1]['level'])} band then, and every student of {hit[0]} is in one of the two."); named.add(hit[1]["id"])
+            line("students", f"{hit[0]} has the {block_label(hit[1]['block'], hit[1]['level'])} band then, and every student of {hit[0]} is in one of the two.", [hit[1]["id"]]); named.add(hit[1]["id"])
         def students(k, who, y):
-            if y["id"] not in named: named.add(y["id"]); line("students", _students(k, who, y))
+            if y["id"] not in named: named.add(y["id"]); line("students", _students(k, who, y), [y["id"]])
         for x in rows:
             pairs = [(c, g, k) for c in x["classes"] for g, k in self.cgroups.get(c, {}).items()] if x["group"] == ENTIRE else \
                 [(x["group"], g, k) for g, k in self.share.get(x["group"], {}).items()]
@@ -378,7 +378,9 @@ class Busy:
         for x in rows:
             for h in _split_list(x.get("rain")):
                 if h != "TBC" and h not in rooms and any(s in own or any(every(("r", s, d, q)) for q in Q) for s in self.rooms(h)): rooms.append(h)
-        for room in rooms: line("room", f"{room} is in use then.")
+        for room in rooms:
+            ids = [y["id"] for s in self.rooms(room) for q in Q for key in (("r", s, d, q), ("h", s, d, q)) for y in every(key)]
+            line("room", f"{room} is in use then.", ids)
         return out
 
     def clash(self, rows, d, p, n, ignore=()):
@@ -559,7 +561,7 @@ LEAVE = "That would leave "   # how the sentence of a period count away from ste
 
 def _pick(j, *keys): return {k: j[k] for k in ("state", "why") + keys}
 
-def _placer(m, spec, days, lesson_id, pool, extras, ctx):
+def _placer(m, spec, days, lesson_id, pool, extras, ctx, red=False):
     """(the lesson's rows, a function (d, p) -> the slot there) for slots and place; extras: see slots"""
     c = _ctx(m, ctx); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
     sh = lambda s: (m["subjects"].get(s) or {}).get("short") or s; name = lambda i: named(b.ids[i], sh)
@@ -572,6 +574,7 @@ def _placer(m, spec, days, lesson_id, pool, extras, ctx):
         if ids and extras is True:
             push = dict(**judged(out=ids), out=[listed(i) for i in ids]); beside = judged()
             clashes = b.whys([dict(x) for x in rows], d, p, n, ignore={lesson_id}, name=name)   # every collision of the plain move or place, the others left there
+        elif red and extras is True: clashes = b.whys([dict(x) for x in rows], d, p, n, ignore={lesson_id}, name=name) or None   # place only: a place with no lesson of the class there lists its collisions too
         more = dict(push=push, beside=beside, clashes=clashes) if extras is True else dict(there=[listed(i) for i in ids] if ids else None) if extras == "who" else {}
         if mine and ids and extras == "who": return dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more)
         if mine or not there: return dict(d=d, p=p, **(beside or judged()), swap=None, also=[], **more)
@@ -591,7 +594,7 @@ def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
     it (a band by its band's name), classes all its classes, groups how many rows; None where there are none. beside:
     where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
     None where there are none. clashes: where other lessons of its classes are, every collision of that plain move or place,
-    Busy.whys' [dict(kind, text)] with lessons named as push.out names them; None where there are none. extras=False (draft.options, the helper, the typed request: they read only state, why, swap and also)
+    Busy.whys' [dict(kind, text, ids)] (ids: the lessons in the way) with lessons named as push.out names them; None where there are none (slots leaves a place with none of them as None; place lists the collisions of a red place too). extras=False (draft.options, the helper, the typed request: they read only state, why, swap and also)
     leaves push, beside and clashes out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). extras="who" (the
     board's): the keys of False and there: None where no other lesson of its classes is, else those lessons as push.out lists them,
     and no push or beside judged (see place); a lesson in the pool is "na" ("Another lesson is there.") where there is one. ctx: see judge"""
@@ -600,9 +603,9 @@ def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
 
 def place(m, spec, days, lesson_id, d, p, pool=(), ctx=None):
     """the one slot at (d, p) with everything slots(extras=True) gives it -> dict(d, p, state, why, swap, also, push, beside, clashes);
-    push, beside and clashes are None where no other lesson of the lesson's classes is. ValueError for an unknown lesson, or a place outside the days or periods"""
+    push and beside are None where no other lesson of the lesson's classes is, and so is clashes unless the place collides with something else (a teacher, a room, a band): then clashes lists those lines, each with ids. ValueError for an unknown lesson, or a place outside the days or periods"""
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (d, p)) or not 0 <= d < len(days) or not 0 <= p < m["NP"]: raise ValueError("That is outside the day.")
-    return _placer(m, spec, days, lesson_id, pool, True, ctx)[2](d, p)
+    return _placer(m, spec, days, lesson_id, pool, True, ctx, red=True)[2](d, p)
 
 def marks(busy, rows, pool=False):
     """the critical mistakes of one lesson (its rows) as busy sees the timetable, in the order "notplaced", "noteacher", "break",

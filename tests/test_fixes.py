@@ -540,7 +540,7 @@ WHO = {"d", "p", "state", "why", "swap", "also", "there"}
 
 @t
 def test_who_is_at_each_place_and_place_judges_the_one_dropped_on():
-    L = _thirty(); pool = [lesson(40, 0, 2, 2, [A], "Music", ENTIRE, [T[7]], level=LV)]; m, sp = model_with(L); seen = 0
+    L = _thirty(); pool = [lesson(40, 0, 2, 2, [A], "Music", ENTIRE, [T[7]], level=LV)]; m, sp = model_with(L); seen = listed = 0
     for lid in list(range(1, 31)) + [40]:
         mine = [x for x in pool if x["id"] == lid]; pl = pool
         full = fixes.slots(m, sp, DAYS, lid, pl); who = fixes.slots(m, sp, DAYS, lid, pl, extras="who"); plain = fixes.slots(m, sp, DAYS, lid, pl, extras=False)
@@ -552,8 +552,13 @@ def test_who_is_at_each_place_and_place_judges_the_one_dropped_on():
             if mine and w["there"] is not None: assert (w["state"], w["why"], w["swap"], w["also"]) == ("na", "Another lesson is there.", None, []), w
             elif mine: assert {k: w[k] for k in q} == q == bare(s)
             else: assert {k: w[k] for k in q} == q   # a lesson on the timetable: exactly as without the extras
-            assert fixes.place(m, sp, DAYS, lid, s["d"], s["p"], pl) == s, (lid, s["d"], s["p"])
-    assert seen > 100, seen   # the places with a lesson of the same classes were really there
+            got = fixes.place(m, sp, DAYS, lid, s["d"], s["p"], pl); assert {k: v for k, v in got.items() if k != "clashes"} == {k: v for k, v in s.items() if k != "clashes"}, (lid, s["d"], s["p"])
+            if s["clashes"] is not None: assert got["clashes"] == s["clashes"], (lid, s["d"], s["p"])
+            else:
+                assert got["clashes"] is None or got["clashes"], (lid, s["d"], s["p"])
+                listed += got["clashes"] is not None
+    assert seen > 100, seen
+    assert listed > 0, listed   # the places with a lesson of the same classes were really there, and red places without one are listed
 
 @t
 def test_place_of_a_free_place_has_no_push_and_no_beside_and_outside_the_day_is_refused():
@@ -697,7 +702,10 @@ def test_whys_agree_with_the_first_reason():
             for p in range(NP):
                 got, why = b.whys(rows, d, p, nn, (i,)), b.clash(rows, d, p, nn, (i,))
                 assert bool(got) == bool(why), (i, d, p, got, why)
-                assert all(set(x) == {"kind", "text"} and x["kind"] in ("teacher", "class", "students", "room") for x in got), got
+                assert all(set(x) == {"kind", "text", "ids"} and x["kind"] in ("teacher", "class", "students", "room") for x in got), got
+                for x in got:
+                    assert all(type(j) is int and j != i and any(y["d"] == d and y["p"] < p + nn and p < y["p"] + y["n"] for y in b.ids[j]) for j in x["ids"]), (i, d, p, x)
+                    if x["kind"] != "room": assert len(x["ids"]) == 1, x
                 if why: assert _named_first(why) in got[0]["text"], (i, d, p, why, got)
                 kinds.update(x["kind"] for x in got)
     assert set(kinds) == {"teacher", "class", "students", "room"}, kinds   # the model reaches every kind
@@ -715,14 +723,41 @@ def test_whys_names_a_band_once():
     L = [lesson(1, 0, 2, 1, [A, B], SUBJ, ENTIRE, [T[5]], level=LV)] + [lesson(7, 1, 2, 1, [A, B], "Art", g, [T[k]], level=LV, block="BX") for g, k in (("X1", 1), ("X2", 2), ("X3", 3))]
     m, sp = model_with(L, students=[dict(id="S1", name="Ann Lee", level=LV, groups=["X1"], **{"class": A}), dict(id="S2", name="Ben Tan", level=LV, groups=["X2"], **{"class": B})])
     b = fixes.Busy(m); nm = lambda i: fixes.named(b.ids[i]); got = b.whys(b.ids[1], 1, 2, 1, (1,), name=nm)
-    assert got == [dict(kind="class", text=f"{A} and {B} have {nm(7)} then.")], got
+    assert got == [dict(kind="class", text=f"{A} and {B} have {nm(7)} then.", ids=[7])], got
     assert nm(7).startswith("the ") and nm(7).endswith(" band")
 
 @t
 def test_whys_one_line_a_teacher_and_lesson():
     L = [lesson(1, 0, 2, 2, [A], SUBJ, ENTIRE, [T[0]], level=LV), lesson(2, 1, 2, 2, [B], "Science", ENTIRE, [T[0]], level=LV)]
     m, sp = model_with(L); b = fixes.Busy(m)
-    assert b.whys(b.ids[1], 1, 2, 2, (1,)) == [dict(kind="teacher", text=f"{T[0]} is teaching Science for {B} then.")]
+    assert b.whys(b.ids[1], 1, 2, 2, (1,)) == [dict(kind="teacher", text=f"{T[0]} is teaching Science for {B} then.", ids=[2])]
+
+@t
+def test_whys_lines_carry_the_ids_of_the_lessons_in_the_way():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 1, 2, 1, [B], "Science", ENTIRE, [T[0]], level=LV),
+         lesson(3, 1, 2, 1, [A], "Art", ENTIRE, [T[1]], level=LV), lesson(4, 1, 2, 1, [C3], "Music", ENTIRE, [T[2]], room=ROOM, level=LV)]
+    m, sp = model_with(L); b = fixes.Busy(m); got = b.whys(b.ids[1], 1, 2, 1, (1,))
+    assert [(x["kind"], x["ids"]) for x in got] == [("teacher", [2]), ("class", [3]), ("room", [4])], got
+    assert all(set(x) == {"kind", "text", "ids"} for x in got)
+
+@t
+def test_whys_room_line_names_the_lessons_in_the_room_and_those_whose_wet_weather_room_it_is():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[1]], room=ROOM, level=LV),
+         dict(lesson(3, 1, 2, 1, [C3], "Music", ENTIRE, [T[2]], level=LV), rain=ROOM)]
+    m, sp = model_with(L); b = fixes.Busy(m)
+    assert b.whys(b.ids[1], 1, 2, 1, (1,)) == [dict(kind="room", text=f"{ROOM} is in use then.", ids=[2, 3])]
+    L = [dict(lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV), rain=ROOM), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[1]], room=ROOM, level=LV)]
+    m, sp = model_with(L); b = fixes.Busy(m)   # the rows' own wet-weather room: the lessons in it
+    assert b.whys(b.ids[1], 1, 2, 1, (1,)) == [dict(kind="room", text=f"{ROOM} is in use then.", ids=[2])]
+
+@t
+def test_place_lists_the_collisions_of_a_red_place_with_no_lesson_of_the_class_there():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[0]], level=LV)]
+    m, sp = model_with(L); s = fixes.place(m, sp, DAYS, 1, 1, 2)
+    assert s["push"] is None and s["beside"] is None and s["state"] == "no"
+    assert s["clashes"] == [dict(kind="teacher", text=f"{T[0]} is teaching Art for {B} then.", ids=[2])], s["clashes"]
+    assert fixes.place(m, sp, DAYS, 1, 2, 2)["clashes"] is None   # nothing collides there
+    red = next(x for x in fixes.slots(m, sp, DAYS, 1) if (x["d"], x["p"]) == (1, 2)); assert red["clashes"] is None   # the slots are as before
 
 @t
 def test_whys_on_a_double_day():
@@ -736,7 +771,7 @@ def test_whys_on_a_double_day():
 def test_place_lists_every_collision_where_another_lesson_is():
     L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 1, 2, 1, [A], "Art", ENTIRE, [T[0]], room=ROOM, level=LV)]
     m, sp = model_with(L); s = fixes.place(m, sp, DAYS, 1, 1, 2)
-    assert s["push"] is not None and s["clashes"] == [dict(kind="teacher", text=f"{T[0]} is teaching Art for {A} then."), dict(kind="class", text=f"{A} has Art for {A} then."), dict(kind="room", text=f"{ROOM} is in use then.")], s["clashes"]
+    assert s["push"] is not None and s["clashes"] == [dict(kind="teacher", text=f"{T[0]} is teaching Art for {A} then.", ids=[2]), dict(kind="class", text=f"{A} has Art for {A} then.", ids=[2]), dict(kind="room", text=f"{ROOM} is in use then.", ids=[2])], s["clashes"]
     free = fixes.place(m, sp, DAYS, 1, 2, 2); assert free["push"] is None and free["clashes"] is None
     assert all("clashes" not in x for x in fixes.slots(m, sp, DAYS, 1, extras=False) + fixes.slots(m, sp, DAYS, 1, extras="who"))
 
