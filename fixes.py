@@ -379,7 +379,8 @@ class Busy:
             for h in _split_list(x.get("rain")):
                 if h != "TBC" and h not in rooms and any(s in own or any(every(("r", s, d, q)) for q in Q) for s in self.rooms(h)): rooms.append(h)
         for room in rooms:
-            ids = [y["id"] for s in self.rooms(room) for q in Q for key in (("r", s, d, q), ("h", s, d, q)) for y in every(key)]
+            kinds = ("r", "h") if room in mine else ("r",)   # a room the rows are in: lessons in it and those whose wet-weather room it is; only a wet-weather room of the rows: the lessons in it
+            ids = [y["id"] for s in self.rooms(room) for q in Q for k in kinds for y in every((k, s, d, q))]
             line("room", f"{room} is in use then.", ids)
         return out
 

@@ -749,6 +749,10 @@ def test_whys_room_line_names_the_lessons_in_the_room_and_those_whose_wet_weathe
     L = [dict(lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV), rain=ROOM), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[1]], room=ROOM, level=LV)]
     m, sp = model_with(L); b = fixes.Busy(m)   # the rows' own wet-weather room: the lessons in it
     assert b.whys(b.ids[1], 1, 2, 1, (1,)) == [dict(kind="room", text=f"{ROOM} is in use then.", ids=[2])]
+    L = [dict(lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV), rain=ROOM), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[1]], room=ROOM, level=LV),
+         dict(lesson(3, 1, 2, 1, [C3], "Music", ENTIRE, [T[2]], level=LV), rain=ROOM)]
+    m, sp = model_with(L); b = fixes.Busy(m)   # a lesson that only shares the wet-weather room is not in the way
+    assert b.whys(b.ids[1], 1, 2, 1, (1,)) == [dict(kind="room", text=f"{ROOM} is in use then.", ids=[2])]
 
 @t
 def test_place_lists_the_collisions_of_a_red_place_with_no_lesson_of_the_class_there():
