@@ -726,4 +726,58 @@ t("roomsMeet: a venue meets its own rooms and itself, not its neighbour's", () =
   assert.strictEqual(Board.roomsMeet({ constructor: ["A", "B"] }, "constructor", "A"), true);
 });
 
+t("panels: three entries, a class once, unknown classes emptied, none left is null", () => {
+  const all = ["1A", "1B", "2A"];
+  assert.deepStrictEqual(Board.panels(["1A", "1B", "2A"], all), ["1A", "1B", "2A"]);
+  assert.deepStrictEqual(Board.panels(["1A", "9Z", "1A", "2A"], all), ["1A", "", ""]);
+  assert.deepStrictEqual(Board.panels(["", "2A"], all), ["", "2A", ""]);
+  [null, undefined, "1A", {}, [], ["", "", ""], ["9Z"], [1, null, {}]].forEach(x => assert.strictEqual(Board.panels(x, all), null));
+});
+t("panelsFor: what Four panels opens", () => {
+  const lv = board([]).levels;   // Sec 1: 1A, 1B; Sec 2: 2A
+  assert.deepStrictEqual(Board.panelsFor(["2A", "", "1B"], lv, "", ""), ["2A", "", "1B"]);
+  assert.deepStrictEqual(Board.panelsFor(null, lv, "", "Sec 2"), ["2A", "", ""]);
+  assert.deepStrictEqual(Board.panelsFor(["9Z"], lv, "", "No such level"), ["1A", "1B", ""]);
+  assert.deepStrictEqual(Board.panelsFor(["2A", "", "1B"], lv, "1B", ""), ["2A", "", "1B"]);
+  assert.deepStrictEqual(Board.panelsFor(["2A", "", ""], lv, "1B", ""), ["1B", "", ""]);
+  assert.deepStrictEqual(Board.panelsFor(null, [{ level: "S", classes: [] }, { level: "T", classes: ["a", "b", "c", "d"] }], "", ""), ["a", "b", "c"]);
+  assert.strictEqual(Board.panelsFor(null, [], "", ""), null); assert.strictEqual(Board.panelsFor(["1A"], [{ level: "S", classes: [] }], "", ""), null);
+});
+t("panelSet: a panel's class changed or emptied", () => {
+  assert.deepStrictEqual(Board.panelSet(["1A", "", ""], 1, "1B"), ["1A", "1B", ""]);
+  assert.deepStrictEqual(Board.panelSet(["1A", "1B", ""], 0, ""), ["", "1B", ""]);
+  assert.deepStrictEqual(Board.panelSet(["1A", "", ""], 0, ""), ["1A", "", ""]);         // the last class stays
+  assert.deepStrictEqual(Board.panelSet(["1A", "1B", ""], 2, "1A"), ["1A", "1B", ""]);   // a class is never shown twice
+  assert.deepStrictEqual(Board.panelSet(["1A", "1B", ""], 7, "2A"), ["1A", "1B", ""]);
+});
+t("panelPut and panelShow: a class into the first empty panel", () => {
+  assert.deepStrictEqual(Board.panelPut(["1A", "", "2A"], "1B"), ["1A", "1B", "2A"]);
+  assert.deepStrictEqual(Board.panelPut(["1A", "", "2A"], "2A"), ["1A", "", "2A"]);
+  assert.strictEqual(Board.panelPut(["1A", "1B", "2A"], "3C"), null);
+  assert.deepStrictEqual(Board.panelShow(["1A", "", ""], ["2A", "1A"]), { panels: ["1A", "", ""], cls: "1A" });
+  assert.deepStrictEqual(Board.panelShow(["1A", "", ""], ["2A", "1B"]), { panels: ["1A", "2A", ""], cls: "2A" });
+  assert.strictEqual(Board.panelShow(["1A", "1B", "2A"], ["3C"]), null); assert.strictEqual(Board.panelShow(["1A", "", ""], []), null);
+});
+t("panes: a panel a class, row keys that never collide, a lesson of two shown classes in both", () => {
+  const weeks = [{ name: "", days: [{ i: 0, label: "Mon" }, { i: 1, label: "Tue" }] }];
+  const band = card(5, 0, 0, 2, ["1A", "2A"], { band: "MT" }), b = board([band, card(6, 1, 0, 1, ["1B"])]);
+  const ps = Board.panes(b, ["1A", "", "2A"], weeks), keys = [].concat(...ps.map(p => [].concat(...p.groups.map(g => g.rows.map(r => r.key)))));
+  assert.deepStrictEqual(ps.map(p => p.cls), ["1A", "", "2A"]); assert.deepStrictEqual(ps[1].groups, []);
+  assert.deepStrictEqual(keys, ["1A|0", "1A|1", "2A|0", "2A|1"]);
+  assert.strictEqual(ps[0].groups[0].rows[0].cards[0].card, band); assert.strictEqual(ps[2].groups[0].rows[0].cards[0].card, band);
+  const one = Board.groups(b, { kind: "cycle", cls: "1A" }, weeks)[0].rows[0];
+  assert.deepStrictEqual(Object.assign({}, ps[0].groups[0].rows[0], { key: one.key }), one);   // but for its key, the row of the one-class cycle
+});
+t("lane: the rows share the panel's height, between 16 and 60", () => {
+  assert.strictEqual(Board.lane(331, 71, 10), 26); assert.strictEqual(Board.lane(331, 71, 12), 21);
+  assert.strictEqual(Board.lane(200, 71, 10), 16); assert.strictEqual(Board.lane(2000, 71, 10), 60);
+  assert.strictEqual(Board.lane(0, 0, 0), 16); assert.strictEqual(Board.lane(NaN, 71, 10), 16); assert.strictEqual(Board.lane(331, 71, -3), 60);
+});
+t("ownRows: whose rows a lesson can go on", () => {
+  assert.strictEqual(Board.ownRows(card(1, 0, 0, 1, ["1A"])), "This lesson is 1A's. It can only go on 1A's rows.");
+  assert.strictEqual(Board.ownRows(card(1, 0, 0, 1, ["1A", "1B"])), "This lesson is 1A and 1B's. It can only go on their rows.");
+  assert.strictEqual(Board.ownRows(card(1, 0, 0, 1, ["1A", "1B", "1C"])), "This lesson is 1A, 1B and 1C's. It can only go on their rows.");
+  assert.strictEqual(Board.ownRows(card(1, 0, 0, 1, [])), "");
+});
+
 console.log(`${n} cases passed`);

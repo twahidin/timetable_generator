@@ -574,11 +574,87 @@ var Board = (function () {
     return out;
   }
 
+  /* the three panels made from a list: each a known class or "", a class shown once; null when it is no list or shows no class */
+  function panels(list, classes) {
+    if (!Array.isArray(list)) return null;
+    var out = [], any = false;
+    for (var i = 0; i < 3; i++) {
+      var c = list[i];
+      if (typeof c === "string" && c !== "" && classes.indexOf(c) >= 0 && out.indexOf(c) < 0) { out.push(c); any = true; } else out.push("");
+    }
+    return any ? out : null;
+  }
+
+  /* the panels Four panels opens: the stored ones (holding cls when one is given), else cls alone, else the first classes of a level */
+  function panelsFor(stored, levels, cls, level) {
+    var all = [];
+    (levels || []).forEach(function (lv) { lv.classes.forEach(function (c) { all.push(c); }); });
+    var kept = panels(stored, all);
+    if (cls) return kept && kept.indexOf(cls) >= 0 ? kept : [cls, "", ""];
+    if (kept) return kept;
+    var pick = null;
+    (levels || []).forEach(function (lv) { if (pick === null && lv.level === level && lv.classes.length) pick = lv; });
+    (levels || []).forEach(function (lv) { if (pick === null && lv.classes.length) pick = lv; });
+    return pick ? panels(pick.classes.slice(0, 3), pick.classes) : null;
+  }
+
+  /* the panels with panel i showing cls ("" empties it); unchanged when that is not allowed */
+  function panelSet(list, i, cls) {
+    var out = list.slice();
+    if (i !== 0 && i !== 1 && i !== 2) return out;
+    if (cls !== "" && out.indexOf(cls) >= 0) return out;
+    out[i] = cls;
+    return out.some(function (c) { return c !== ""; }) ? out : list.slice();
+  }
+
+  /* cls put into the first empty panel; the same panels when it is shown already; null when no panel is empty */
+  function panelPut(list, cls) {
+    var out = list.slice();
+    if (out.indexOf(cls) >= 0) return out;
+    var i = out.indexOf("");
+    if (i < 0) return null;
+    out[i] = cls;
+    return out;
+  }
+
+  /* for showing a lesson of these classes: the first one already in a panel, else the first put into an empty panel; null if neither */
+  function panelShow(list, classes) {
+    for (var i = 0; i < classes.length; i++) if (list.indexOf(classes[i]) >= 0) return { panels: list.slice(), cls: classes[i] };
+    var put = classes.length ? panelPut(list, classes[0]) : null;
+    return put ? { panels: put, cls: classes[0] } : null;
+  }
+
+  /* the three panels' rows: a class's cycle each (rows keyed class|day), an empty panel has none */
+  function panes(board, list, weeks) {
+    return list.map(function (cls) {
+      if (cls === "") return { cls: "", groups: [] };
+      var gs = groups(board, { kind: "cycle", cls: cls }, weeks);
+      gs.forEach(function (g) { g.rows.forEach(function (r) { r.key = cls + "|" + r.d; }); });
+      return { cls: cls, groups: gs };
+    });
+  }
+
+  /* how high a row is when the rows share H less F, L of them, kept between 16 and 60 */
+  function lane(H, F, L) {
+    if (typeof L !== "number" || !(L >= 1)) L = 1;
+    var n = Math.floor((H - F) / L);
+    return typeof n !== "number" || n !== n ? 16 : Math.max(16, Math.min(60, n));
+  }
+
+  /* the sentence telling whose rows a lesson can go on; "" for a lesson with no class */
+  function ownRows(card) {
+    var c = (card && card.classes) || [];
+    if (!c.length) return "";
+    if (c.length === 1) return "This lesson is " + c[0] + "'s. It can only go on " + c[0] + "'s rows.";
+    return "This lesson is " + c.slice(0, -1).join(", ") + " and " + c[c.length - 1] + "'s. It can only go on their rows.";
+  }
+
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, CLASH: CLASH, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
-           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet };
+           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet,
+           panels: panels, panelsFor: panelsFor, panelSet: panelSet, panelPut: panelPut, panelShow: panelShow, panes: panes, lane: lane, ownRows: ownRows };
 })();
 if (typeof module !== "undefined") module.exports = Board;
