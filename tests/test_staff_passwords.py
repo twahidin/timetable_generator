@@ -1,5 +1,5 @@
 """Plain-assert tests for staff signing in with a username and password: .venv/bin/python tests/test_staff_passwords.py"""
-import contextlib, datetime, glob, io, json, os, pickle, secrets, sys, tempfile, time
+import contextlib, datetime, glob, io, json, os, pickle, re, secrets, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 KEY = secrets.token_hex(16)
@@ -166,6 +166,132 @@ def waiting_counts_staff_without_a_chosen_password():
     c = admin()
     r = c.get("/api/admin/ways").get_json(); assert r["staff_codes"]["waiting"] == 3, r["staff_codes"]
     assert r["staff_codes"]["off"] is None
+
+# ---- making accounts and printing slips ----
+import base64, csv as _csv
+from accounts import slips as SL
+
+NO_SLIPS = "Everyone has chosen their own password: there is no slip to print."
+NOT_STAFF = "{} is not on the published timetable or the staff list."
+THREE = [dict(name=ALICE, dept="Science"), dict(name=BEN, dept="Mathematics"), dict(name=ERIC, dept="Science", role="HOD")]
+
+def slip_school(teachers=THREE):
+    """a clean accounts file, the teachers published, an admin signed in who has chosen a password -> the client"""
+    P.update(lambda d: d["people"].clear()); publish(teachers); return admin()
+
+def slips(c, names=None, preview=False): return c.post("/api/admin/staff-slips", json={"names": names, "preview": preview})
+
+def make(c, names=None):
+    """make the slips -> (the answer, the CSV rows as dicts); every temporary password goes to SECRETS"""
+    r = slips(c, names); assert r.status_code == 200, r.data
+    j = r.get_json(); rows = list(_csv.DictReader(io.StringIO(j["csv"].lstrip("\ufeff"))))
+    for x in rows: SECRETS.append(x["Temporary password"])
+    return j, rows
+
+@t
+def usernames_from_names():
+    mk = SL.make_username
+    assert mk("Ms Alice Tan", [], set()) == "alicetan"
+    for title in ("Mr", "mrs", "MS.", "Mdm", "miss", "Dr.", "Mx"): assert mk(f"{title} Alice Tan", [], set()) == "alicetan", title
+    assert mk("Dr Ng", ["Science"], set()) == "ngs"
+    u = mk("Dr Ng", [], set()); assert u == "ngstaff" and 3 <= len(u) <= 40, u
+    assert mk("Mdm Siti Nur'aini", [], set()) == "sitinuraini"
+    assert mk("Ms Zo\u00eb Lim", [], set()) == "zoelim"
+    assert mk("Ms Alice Tan", [], {"alicetan"}) == "alicetan2"
+    assert mk("Ms Alice Tan", [], {"alicetan", "alicetan2"}) == "alicetan3"
+    long = "Ms " + "abcdefghij" * 6
+    u = mk(long, [], set()); assert len(u) == 40, len(u)
+    u2 = mk(long, [], {u}); assert len(u2) <= 40 and u2 != u and u2.endswith("2"), u2
+    assert all(re.fullmatch(r"[a-z0-9._-]{3,40}", x) for x in (u, u2, mk("Dr Ng", ["Science"], set())))
+
+def ready_four():
+    """ALICE has no record, BEN a username and no password, ERIC a temporary password, the admin a chosen one"""
+    c = slip_school()
+    person(BEN, username="ben.ong"); person(ERIC, username="eric.goh", pw=PW.hash_pw(secret()), must_change=True)
+    return c
+
+@t
+def the_preview_counts_and_changes_nothing():
+    c = ready_four(); before = open(P.PATH, "rb").read()
+    j = slips(c, None, True).get_json(); assert j["count"] == 3, j
+    assert j["lines"] == ["2 staff have no account yet: each gets a username made from their name and a temporary password.",
+                          f"1 has a temporary password from an admin that they have not used yet ({ERIC}): they get a new one on this slip.",
+                          "1 already chose their own password: no slip."], j["lines"]
+    assert open(P.PATH, "rb").read() == before
+
+@t
+def making_slips_makes_accounts():
+    c = ready_four(); ada_before = rec("Ms Ada Lim")
+    r = slips(c); assert r.headers["Cache-Control"] == "no-store"
+    j, rows = make(c); assert j["count"] == 3 and len(rows) == 3, j["count"]
+    assert base64.b64decode(j["pdf"])[:4] == b"%PDF"
+    assert j["csv"].startswith("\ufeff") and j["csv"].lstrip("\ufeff").splitlines()[0] == "Name,Department,Username,Temporary password"
+    for x in rows:
+        rc = rec(x["Name"]); assert rc["username"] == x["Username"] and rc["must_change"] is True
+        assert PW.check_pw(rc["pw"], x["Temporary password"])
+    assert {x["Name"] for x in rows} == {ALICE, BEN, ERIC}
+    assert rec(BEN)["username"] == "ben.ong" and rec(ERIC)["username"] == "eric.goh"
+    ada = rec("Ms Ada Lim"); assert ada["pw"] == ada_before["pw"] and ada["n"] == ada_before["n"]
+
+@t
+def a_slip_password_signs_in_and_asks_for_a_new_one():
+    c = ready_four(); j, rows = make(c)
+    x = next(r for r in rows if r["Name"] == ALICE)
+    c2, r = pw_in(x["Username"], x["Temporary password"]); assert went(r, "/account/password"), (r.status_code, r.headers.get("Location"))
+
+@t
+def printing_twice():
+    c = ready_four(); c2, r = code_in(staff_code(ALICE)); assert went(r, "/home")
+    j, rows = make(c); first = next(r for r in rows if r["Name"] == ALICE)
+    j, rows = make(c); second = next(r for r in rows if r["Name"] == ALICE)
+    c3, r = pw_in(first["Username"], first["Temporary password"]); assert NO_MATCH in r.data.decode()
+    c4, r = pw_in(second["Username"], second["Temporary password"]); assert went(r, "/account/password")
+    assert c2.get("/home").status_code == 200
+
+@t
+def ticked_people_with_a_chosen_password_are_named_and_signed_out():
+    c = slip_school(TEACHERS); user, pw = account(CARA, group="teacher")
+    c2, r = pw_in(user, pw); assert went(r, "/home"); assert c2.get("/home").status_code == 200
+    n0 = rec(CARA)["n"]
+    j = slips(c, [CARA], True).get_json()
+    assert j["count"] == 1 and f"{CARA} has chosen a password: their slip gives a new temporary one and their old password stops working." in j["lines"], j
+    make(c, [CARA])
+    assert rec(CARA)["n"] == n0 + 1
+    c3, r = pw_in(user, pw); assert NO_MATCH in r.data.decode()
+    assert went(c2.get("/home"), "/login")
+
+@t
+def nothing_to_print():
+    c = slip_school([dict(name=ALICE, dept="Science")]); account(ALICE, group="teacher")
+    j = slips(c, None, True).get_json(); assert j["count"] == 0 and j["lines"] == [NO_SLIPS], j
+    r = slips(c); assert r.status_code == 400 and r.get_json()["error"] == NO_SLIPS
+
+@t
+def unknown_and_switched_off_names():
+    c = slip_school()
+    r = slips(c, ["Mr Who Dat"]); assert r.status_code == 400 and r.get_json()["error"] == NOT_STAFF.format("Mr Who Dat")
+    person(ALICE, off=True)
+    j = slips(c, [ALICE, BEN], True).get_json()
+    assert j["count"] == 1 and f"{ALICE} is switched off: no slip." in j["lines"], j
+    j, rows = make(c, [ALICE, BEN]); assert [x["Name"] for x in rows] == [BEN]
+    assert not rec(ALICE)["pw"]
+    r = slips(c, [f"Mr P{i}" for i in range(201)]); assert r.status_code == 400 and "at most 200" in r.get_json()["error"]
+
+@t
+def only_an_admin_prints():
+    slip_school(); c, r = code_in(staff_code(ALICE)); assert went(r, "/home")
+    r = slips(c); assert r.status_code == 401 and not rec(ALICE)["pw"]
+
+@t
+def the_history_says_how_many_and_never_a_password():
+    c = ready_four(); make(c)
+    es = [e for e in H.read(kinds=["account"], limit=50) if e.get("what") == "slips"]   # the newest first; earlier tests left theirs
+    assert es[0]["text"] == "Printed sign-in slips for 3 staff: 2 new accounts", es
+    assert set(es[0]["people"]) == {ALICE, BEN, ERIC}
+    user, pw = account(CARA, group="teacher"); publish(TEACHERS)
+    make(c, [CARA])
+    e = [e for e in H.read(kinds=["account"], limit=50) if e.get("what") == "slips"][0]
+    assert e["text"] == "Printed sign-in slips for 1 staff: 0 new accounts; 1 had chosen a password", e
 
 @t
 def nothing_typed_reaches_the_history():

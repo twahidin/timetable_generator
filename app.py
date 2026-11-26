@@ -5,7 +5,7 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, datetime, gzip, hmac, io, json, os, re, secrets, shutil, sys, tempfile, threading, time, traceback, urllib.parse, zipfile
+import base64, copy, datetime, gzip, hmac, io, json, os, re, secrets, shutil, sys, tempfile, threading, time, traceback, urllib.parse, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -14,7 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, compare, draft, history, putback, refit, refit_plan, store, students, sync, typed, versions
-from accounts import passwords, people, renames, rights as rights_table
+from accounts import passwords, people, renames, rights as rights_table, slips as account_slips
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 from relief import links as relief_links
@@ -2545,6 +2545,87 @@ def admin_reset():
     lockout.clear(u)
     _account_entry("reset", [name], out, f"{name}: a new one-time password" + (f"; username {u}" if out else ""), by_=by_)
     r = jsonify(once=once); r.headers["Cache-Control"] = "no-store"
+    return r
+
+NO_SLIPS = "Everyone has chosen their own password: there is no slip to print."
+SLIPS_AT_ONCE = "Print slips for at most 200 people at a time."
+
+def _slip_plan(pub, d, names):
+    """who gets a slip, in the listing's order -> (the people [{name, depts, kind}], the preview's lines); kind is
+    "none" (no password yet), "temp" (an admin's temporary one, not yet used) or "chosen" (their own, ticked by name)"""
+    staff = {p["name"]: p for p in people.staff(pub, d)}
+    order = {p["name"]: i for i, p in enumerate(people.listing(pub, d))}
+    kind = lambda n: (lambda r: "none" if not r["pw"] else "temp" if r["must_change"] else "chosen")(people.record(d, n))
+    off, chosen_skipped = [], 0
+    if names is None:
+        picked = []
+        for n in staff:
+            if staff[n]["off"]: continue
+            if kind(n) == "chosen": chosen_skipped += 1
+            else: picked.append(n)
+    else:
+        picked = []
+        for n in dict.fromkeys(names):
+            if n not in staff: raise Refused(NOT_STAFF.format(n))
+            (off if staff[n]["off"] else picked).append(n)
+    picked.sort(key=lambda n: order.get(n, len(order)))
+    todo = [dict(name=n, depts=list(staff[n]["depts"]), kind=kind(n)) for n in picked]
+    none, temp = [t for t in todo if t["kind"] == "none"], [t for t in todo if t["kind"] == "temp"]
+    lines = []
+    if none: lines.append(f"{len(none)} staff have no account yet: each gets a username made from their name and a temporary password." if len(none) > 1 else "1 staff has no account yet: they get a username made from their name and a temporary password.")
+    if temp:
+        who = ", ".join(t["name"] for t in temp)
+        lines.append(f"{len(temp)} have a temporary password from an admin that they have not used yet ({who}): each gets a new one on their slip." if len(temp) > 1
+                     else f"1 has a temporary password from an admin that they have not used yet ({who}): they get a new one on this slip.")
+    lines += [f"{t['name']} has chosen a password: their slip gives a new temporary one and their old password stops working." for t in todo if t["kind"] == "chosen"]
+    if chosen_skipped: lines.append(f"{chosen_skipped} already chose their own password: no slip.")
+    lines += [f"{n} is switched off: no slip." for n in off]
+    return todo, ([NO_SLIPS] if not todo else lines)
+
+@app.post("/api/admin/staff-slips")
+@need("admin")
+def admin_staff_slips():
+    """preview who would get a slip, or make the accounts and answer with the slips (a PDF and a CSV): the temporary
+    passwords exist only in that answer"""
+    stop = _admin_off()
+    if stop: return stop
+    me, by_, pub = who()["name"], by(), store.published()
+    try:
+        b = _body()
+        names, preview = b.get("names"), b.get("preview")
+        if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)): raise Refused(UNREAD_CHANGE)
+        if not isinstance(preview, bool): raise Refused(UNREAD_CHANGE)
+        if names is not None and len(names) > 200: raise Refused(SLIPS_AT_ONCE)
+        todo, lines = _slip_plan(pub, people.load(), names)
+        if preview: return jsonify(lines=lines, count=len(todo))
+        if not todo: raise Refused(NO_SLIPS)
+        once = {t["name"]: passwords.one_time() for t in todo}
+        hashed = {n: passwords.hash_pw(v) for n, v in once.items()}
+        def change(d):
+            got, _ = _slip_plan(pub, d, names)
+            if any(t["name"] not in hashed for t in got): raise Refused(UNREAD_CHANGE)
+            taken = {str(r.get("username") or "").lower() for r in d["people"].values() if isinstance(r, dict)}
+            rows, changes = [], []
+            for t in got:
+                r = people.record(d, t["name"]); u = r["username"]
+                if not u:
+                    u = account_slips.make_username(t["name"], t["depts"], taken); taken.add(u)
+                    changes.append(dict(name=t["name"], field="username", was="", now=u))
+                r.update(username=u, pw=hashed[t["name"]], must_change=True, n=r["n"] + (1 if t["kind"] == "chosen" else 0))
+                d["people"][t["name"]] = r
+                rows.append(dict(name=t["name"], depts=t["depts"], username=u, password=once[t["name"]], kind=t["kind"]))
+            return rows, changes
+        rows, changes = _update_as(me, change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    for r in rows: lockout.clear(r["username"])
+    new, chosen = sum(r["kind"] == "none" for r in rows), sum(r["kind"] == "chosen" for r in rows)
+    text = f"Printed sign-in slips for {len(rows)} staff: {new} new account{'' if new == 1 else 's'}" + (f"; {chosen} had chosen a password" if chosen else "")
+    _account_entry("slips", [r["name"] for r in rows], changes, text, by_=by_)
+    buf = io.BytesIO()
+    account_slips.slips_pdf(school_name(), rows, request.host_url.rstrip("/"), buf)
+    r = jsonify(pdf=base64.b64encode(buf.getvalue()).decode("ascii"), csv=account_slips.slips_csv(rows), count=len(rows))
+    r.headers["Cache-Control"] = "no-store"
     return r
 
 @app.get("/api/admin/ways")
