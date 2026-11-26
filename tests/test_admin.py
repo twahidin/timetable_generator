@@ -376,7 +376,7 @@ def a_password_session_ends_when_the_record_has_no_password():
 def the_ways_in():
     c = admin()
     j = c.get("/api/admin/ways").get_json()
-    assert list(j) == ["secret_key", "personal_codes", "password_accounts", "shared", "recovery_set", "recovery_short", "recovery_warn"], j
+    assert list(j) == ["secret_key", "personal_codes", "password_accounts", "staff_codes", "shared", "recovery_set", "recovery_short", "recovery_warn"], j
     assert j["recovery_short"] is False and j["recovery_warn"] is None
     have = sum(1 for n in P.load()["people"] if rec(n)["username"] and rec(n)["pw"])
     assert (j["secret_key"], j["personal_codes"], j["password_accounts"], j["recovery_set"]) == (True, True, have, False), j

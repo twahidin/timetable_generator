@@ -70,6 +70,7 @@ def _check():
         v = session.get("via", "code")
         if not isinstance(name, str) or v not in ("code", "password") or r not in (None, "staff"): return _end()
         exp = session.get("exp")
+        if v == "code" and people.readable() and people.staff_codes_off(people.load()): return _end()   # staff codes turned off
         if v == "password" and not (isinstance(exp, (int, float)) and time.time() < exp): return _end()
         if not people.readable(): return _end()    # the records cannot be read: no one is let in by name (shared codes still work)
         data, pub = people.load(), store.published()
@@ -210,6 +211,8 @@ WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
 SWITCHED_OFF = "This account is switched off. Ask the timetable committee."
 NO_ACCOUNTS = "Accounts need SECRET_KEY in Railway variables."
+STAFF_USE_PASSWORD = "Staff now sign in with a username and password. Ask the timetable committee for your slip."
+STAFF_CODES_OFF = "Staff codes are off: staff sign in with a username and password."
 NO_MATCH = "That username and password do not match."
 LOCKED = "Too many wrong tries. Wait 15 minutes and try again."
 TOO_MANY = "Too many wrong tries. Wait ten minutes and try again."
@@ -336,6 +339,9 @@ def login():
         limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return _code_page(WRONG_CODE), 401
     if not r:
         limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return _code_page(WRONG_CODE), 401
+    if r == "staff" and people.staff_codes_off(data):   # a staff code is a wrong code once staff codes are off
+        limiter.fail(addr); _record_signin(False, "code", reason="staff code after staff codes were turned off")
+        return _code_page(STAFF_USE_PASSWORD), 401
     if r == "staff":
         if not people.readable():   # the right code, but the records cannot be read: refused, and no strike
             _record_signin(False, "code", val, reason="accounts file unreadable"); return _code_page(PERSON_OFF), 403
@@ -1717,6 +1723,7 @@ def _relief_codes_refused():
     """the answer that refuses the staff codes to whoever is signed in, or None (the routes check what is published)"""
     if not has("codes"): return {"error": ONLY_CODES}, 403
     if not access.personal_codes_on(): return NO_PERSONAL_STAFF, 409
+    if people.staff_codes_off(people.load()): return {"error": STAFF_CODES_OFF}, 409
     return None
 
 @app.get("/api/relief/codes.csv")
@@ -2051,7 +2058,11 @@ def _bulk(d, pub, b, today):
 def _ways():
     data, (have, _) = people.load(), access.configured()
     recs = [people.record(data, n) for n in data["people"]]
+    pub = store.published()
+    waiting = sum(1 for p in people.staff(pub, data) if not p["off"]   # not yet on a password of their own choosing
+                  and (lambda r: not r["pw"] or r["must_change"])(people.record(data, p["name"])))
     return dict(secret_key=accounts_on(), personal_codes=access.personal_codes_on(), password_accounts=sum(1 for r in recs if r["username"] and r["pw"]),
+                staff_codes=dict(off=data["ways"]["staff_off"], waiting=waiting),
                 shared=[dict(code=x, set=bool(have.get(x)), off=data["ways"]["off"].get(x), used_week=history.uses(kind="signin", via="shared", shared=x, ok=True))
                         for x in people.SHARED],
                 recovery_set=bool(recovery_code()), recovery_short=recovery_too_short(),
@@ -2566,6 +2577,29 @@ def admin_shared_off():
         label = SHARED_AS[r]
         _account_entry("shared-off", [], [dict(name=label, field="off", was=was, now=now)],
                        f"Turned {'off' if off else 'on'} the {label[0].lower() + label[1:]}", by_=by_, shared=r)
+    return jsonify(_ways())
+
+@app.post("/api/admin/staff-codes")
+@need("admin")
+def admin_staff_codes():
+    """turn the staff's personal codes off (open code sessions of staff end at their next request) or on again -> the ways in"""
+    stop = _admin_off()
+    if stop: return stop
+    by_ = by()
+    try:
+        off = _body().get("off")
+        if not isinstance(off, bool): raise Refused(UNREAD_CHANGE)
+        at = time.time()
+        def change(d):
+            was = d["ways"]["staff_off"]
+            d["ways"]["staff_off"] = now = (was if was is not None else at) if off else None
+            return was, now
+        was, now = people.update(change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if (was is None) != (now is None):
+        _account_entry("staff-codes", [], [dict(name="Staff codes", field="off", was=was, now=now)],
+                       "Staff codes turned off" if off else "Staff codes turned on", by_=by_)
     return jsonify(_ways())
 
 @app.get("/api/admin/students")
