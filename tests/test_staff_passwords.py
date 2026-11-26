@@ -523,6 +523,18 @@ def exams_for_a_plain_teacher_are_their_own_duties_and_the_classes():
         assert e == PB.day(F.sample_pub(), F.CAL, [s], "2026-10-05", True)["exams"], "staff codes on: as today"
 
 @t
+def the_ways_count_students_staff_and_chosen_passwords():
+    P.update(lambda d: d["people"].clear())
+    account(ALICE, group="teacher"); account(BEN, group="teacher", must_change=True)
+    person(CARA, off=True)
+    c = admin()   # the admin has chosen a password too
+    w = c.get("/api/admin/ways").get_json()
+    assert (w["students"], w["staff"], w["staff_chosen"]) == (1, 4, 2), w   # Alice, Ben, Eric and the admin; Cara is off
+    assert w["staff"] - w["staff_chosen"] == w["staff_codes"]["waiting"], w
+    unpublish()
+    w = c.get("/api/admin/ways").get_json(); assert w["students"] == 0 and w["staff"] >= 1, w
+
+@t
 def nothing_typed_reaches_the_history():
     text = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(H.DIR, "*.jsonl")))
     assert text.count('"kind": "signin"') > 10, text.count('"kind": "signin"')

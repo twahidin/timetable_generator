@@ -2096,10 +2096,11 @@ def _ways():
     data, (have, _) = people.load(), access.configured()
     recs = [people.record(data, n) for n in data["people"]]
     pub = store.published()
-    waiting = sum(1 for p in people.staff(pub, data) if not p["off"]   # not yet on a password of their own choosing
-                  and (lambda r: not r["pw"] or r["must_change"])(people.record(data, p["name"])))
+    on = [people.record(data, p["name"]) for p in people.staff(pub, data) if not p["off"]]   # the staff not switched off
+    chosen = sum(1 for r in on if r["pw"] and not r["must_change"])   # on a password of their own choosing
     return dict(secret_key=accounts_on(), personal_codes=access.personal_codes_on(), password_accounts=sum(1 for r in recs if r["username"] and r["pw"]),
-                staff_codes=dict(off=data["ways"]["staff_off"], waiting=waiting),
+                staff_codes=dict(off=data["ways"]["staff_off"], waiting=len(on) - chosen),
+                students=len(((pub or {}).get("model") or {}).get("students") or []), staff=len(on), staff_chosen=chosen,
                 shared=[dict(code=x, set=bool(have.get(x)), off=data["ways"]["off"].get(x), used_week=history.uses(kind="signin", via="shared", shared=x, ok=True))
                         for x in people.SHARED],
                 recovery_set=bool(recovery_code()), recovery_short=recovery_too_short(),
