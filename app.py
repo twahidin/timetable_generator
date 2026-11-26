@@ -345,26 +345,26 @@ def student_page(): return _code_page(student=True)
 @app.post("/student")
 def student(): return _sign_in_with_code(lambda msg: _code_page(msg, student=True))
 
-def _sign_in_with_code(_code_page):
-    """the code POST shared by /login and /student; _code_page draws the page an error shows on"""
+def _sign_in_with_code(page_fn):
+    """the code POST shared by /login and /student; page_fn draws the page an error shows on"""
     addr = request.remote_addr or "?"
     if limiter.blocked(addr):
-        _record_locked(("addr", addr), "code"); return _code_page(TOO_MANY_CODES), 429
+        _record_locked(("addr", addr), "code"); return page_fn(TOO_MANY_CODES), 429
     pub, data = store.published(), people.load()
     r, val = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(people.staff(pub, data)))
     if r in people.SHARED and data["ways"]["off"].get(r) is not None:   # a shared code turned off is a wrong code
-        limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return _code_page(WRONG_CODE), 401
+        limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return page_fn(WRONG_CODE), 401
     if not r:
-        limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return _code_page(WRONG_CODE), 401
+        limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return page_fn(WRONG_CODE), 401
     if r == "staff" and people.staff_codes_off(data):   # a staff code is a wrong code once staff codes are off
         limiter.fail(addr); _record_signin(False, "code", reason="staff code after staff codes were turned off")
-        return _code_page(STAFF_USE_PASSWORD), 401
+        return page_fn(STAFF_USE_PASSWORD), 401
     if r == "staff":
         if not people.readable():   # the right code, but the records cannot be read: refused, and no strike
-            _record_signin(False, "code", val, reason="accounts file unreadable"); return _code_page(PERSON_OFF), 403
+            _record_signin(False, "code", val, reason="accounts file unreadable"); return page_fn(PERSON_OFF), 403
         rec = people.record(data, val)
         if rec["off"]:   # the right code: not a guess, so no strike
-            _record_signin(False, "code", val, reason="switched off"); return _code_page(SWITCHED_OFF), 403
+            _record_signin(False, "code", val, reason="switched off"); return page_fn(SWITCHED_OFF), 403
         _note_signin(val); _start(who=val, via="code", n=rec["n"]); _record_signin(True, "code", val)
         return redirect("/home")
     if r == "personal":
@@ -1530,12 +1530,27 @@ def code_slips():
     return send_file(buf, as_attachment=True, download_name="timetable code slips.pdf", mimetype="application/pdf")
 
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
-TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"])
+TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"],
+            staff=["classes", "teachers", "exams"])   # staff: a teacher's own timetable (the teachers tab, as My timetable) and the classes
 
 def files_for(r):
     if r == "committee": return [["Excel (all)", "/files/excel"], ["PDFs (zip)", "/files/zip"]]
     if r == "teacher": return [["Class PDFs", "/files/book/classes"], ["Teacher PDFs", "/files/book/teachers"]]
+    if r == "staff": return [["Class PDFs", "/files/book/classes"]]
     return []
+
+def _narrow():
+    """the narrow published timetable (their own and the classes): only once staff codes are off, never for the committee;
+    for a person signed in by name whom rights.sees_all leaves out, and for the shared teacher code (it cannot be anyone's own)"""
+    if has("committee") or not _staff_codes_off(): return False
+    p = who()
+    if p is not None: return not rights_table.sees_all(p)
+    return shared() == "teacher"
+
+def _my_teacher():
+    """the signed-in person's name when it is a teacher on the published timetable, else None (an executive, a shared code)"""
+    p, pub = who(), store.published()
+    return p["name"] if p is not None and pub and p["name"] in pub["model"]["teacher_ix"] else None
 
 @app.get("/timetable")
 @need("timetable")
@@ -1551,11 +1566,15 @@ def timetable():
     elif who() is None: r, home, label = "teacher", None, None
     elif _relief_stage_1() and has("relief"): r, home, label = "teacher", "/relief", "Relief"
     else: r, home, label = "teacher", "/home", "Home"
-    key = ("view", r, home)
+    me, tabs = None, TABS[r]
+    if r == "teacher" and _narrow():   # staff codes off: a teacher's own timetable and the classes, the way back as a teacher's
+        r = "staff"; me = _my_teacher(); tabs = [x for x in TABS[r] if x != "teachers" or me]
+    key = ("view", r, home, me) if r == "staff" else ("view", r, home)   # each teacher's page is their own
     if key not in pub["views"]:
-        view = "student" if r == "student" else "full"
-        app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
+        view = {"student": "student", "staff": "staff"}.get(r, "full")
+        app_cfg = dict(mode=r, tabs=tabs, pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
                        placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
+        if r == "staff": app_cfg["me"] = me
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
     return Response(pub["views"][key], mimetype="text/html")
 
@@ -1612,6 +1631,7 @@ def pdf_one(kind, key):
     if not pub: abort(404)
     m = pub["model"]
     if shared() == "student" and kind != "classes": abort(403)   # the shared student code: class timetables only
+    if _narrow() and kind != "classes" and not (kind == "teachers" and key == _my_teacher()): abort(403)   # a teacher: the classes and their own
     if kind == "classes" and key in m["class_ix"]: return _pdf(class_view(m, key), f"Class {key}")
     if kind == "teachers" and key in m["teacher_ix"]: return _pdf(teacher_view(m, key), key)
     if kind == "rooms" and key in m["room_ix"]: return _pdf(room_view(m, key), f"Room {key}")
@@ -1626,9 +1646,9 @@ def pdf_one(kind, key):
 def files(what, kind=None):
     pub = store.published()
     if not pub: abort(404)
-    f = pub["meta"].get("files", {}); r = "committee" if has("committee") else "teacher"
+    f = pub["meta"].get("files", {}); r = "committee" if has("committee") else "staff" if _narrow() else "teacher"
     if what == "book":
-        allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms")}[r]
+        allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms"), "staff": ("classes",)}[r]
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
         return send_file(os.path.join(store.PUB, f["books"][kind]), as_attachment=True, download_name=os.path.basename(f["books"][kind]))
     if r != "committee": abort(403)

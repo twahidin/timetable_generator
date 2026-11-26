@@ -995,7 +995,8 @@ def write_excel(m, path, log=print):
 # ----------------------------------------------------------------------------------------------- HTML
 def html_data(m, view="full", student_id=None, app=None):
     """data for the finder page. view: full (committee/teacher: everything), student (class timetables and the
-    builder, no student list), personal (one student's own lessons only). Filtering happens here, on the server."""
+    builder, no student list), staff (a teacher's own timetable and the classes: as student, the page shows only app["me"]
+    of the teachers), personal (one student's own lessons only). Filtering happens here, on the server."""
     pal = [[t, a] for t, a in PALETTE]
     d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
              classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
@@ -1006,12 +1007,12 @@ def html_data(m, view="full", student_id=None, app=None):
                       for x in m["lessons"]],
              students=[[s["id"], s["name"], s["cls"], s["groups"]] for s in m["students"]],
              checks=dict(ok=m["checks"]["ok"], problems=m["checks"]["problems"], after=m["checks"]["after_school"], notes=m["notes"]), app=app)
-    if view in ("student", "personal"):
+    if view in ("student", "staff", "personal"):
         d["teachers"] = [[t[0], t[1], "", ""] for t in d["teachers"]]
         d["subjects"] = {k: [v[0], v[1], ""] for k, v in d["subjects"].items()}   # a student's page has no Lessons tab: the department stays behind
         d["checks"] = dict(ok=m["checks"]["ok"], problems=[], after=[], notes=[])
         d["rooms"] = []
-    if view == "student":
+    if view in ("student", "staff"):
         d["students"] = []
     if view == "personal":
         s = next(x for x in m["students"] if x["id"] == student_id); gs = set(s["groups"])

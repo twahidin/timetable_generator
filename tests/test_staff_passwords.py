@@ -389,6 +389,113 @@ def post_login_still_takes_codes_when_off():
     sc = access.personal_code("S001"); SECRETS.append(sc)
     c, r = code_in(sc); assert went(r, "/me"), r.status_code
 
+# ---- the published timetable for a teacher, once staff codes are off ----
+from accounts import rights as RT
+
+def publish_real():
+    """a published timetable the real page is drawn from: the sample school with the four teachers, a lesson each in 1A,
+    one student, two books on disk, and no page made yet"""
+    from ttgen import export as X, reader
+    from ttgen.samples import secondary
+    sp = secondary()
+    sp["teachers"] += [dict(name=x["name"], short=x["name"].split()[1], dept=x["dept"], allowance=20, provisional="No") for x in TEACHERS]
+    reader.derive(sp)
+    lv = sp["school"]["levels"][0]; days = list(sp["day_structure"][lv].keys()); p0 = sp["day_structure"][lv][days[0]].index("L")
+    L = [dict(id=i + 1, d=i, p=p0, n=1, level=lv, block="", classes=["1A"], subject=sp["lessons"][0]["subject"], group=X.ENTIRE, teachers=[x["name"]],
+              room=sp["venues"][0]["room"], ext=False, rain="") for i, x in enumerate(TEACHERS)]
+    m = X._model(sp, days, L); m["students"] = [dict(id="S001", name="Sam Student", cls="1A", level=lv, groups=[])]
+    os.makedirs(store.PUB, exist_ok=True)
+    for b in ("classes", "teachers"):
+        with open(os.path.join(store.PUB, f"{b}.pdf"), "wb") as f: f.write(b"%PDF-1.4 " + b.encode())
+    with open(os.path.join(store.PUB, "model.pkl"), "wb") as f: pickle.dump(m, f)
+    store.write_json(os.path.join(store.PUB, "meta.json"), dict(school="Sample School", published_at="1 Nov 2026, 09:00", ok=True,
+                                                                files=dict(books=dict(classes="classes.pdf", teachers="teachers.pdf"))))
+    store._cache.update(stamp=None, value=None)
+    assert store.published()["views"] == {}
+
+def page_data(c):
+    r = c.get("/timetable"); assert r.status_code == 200, r.status_code
+    m = re.search(r"<script>const DATA = (.*?);</script>", r.data.decode(), re.S); assert m, "no DATA on the page"
+    return json.loads(m.group(1))
+
+def signed_in(name, group="teacher", **fields):
+    """a password account (earlier tests' slips and switches undone), signed in -> the client"""
+    user, pw = account(name, group=group, **dict(dict(must_change=False, off=False, extras={}), **fields)); c, r = pw_in(user, pw); assert went(r, "/home"), r.status_code
+    return c
+
+@t
+def sees_all_rules():
+    today = datetime.date(2026, 11, 26)
+    assert RT.sees_all(None, today) is False
+    assert RT.sees_all(dict(group="teacher", extras={}), today) is False
+    assert RT.sees_all(dict(group="executive", extras={"timetable": False, "relief": False, "exams": None, "admin": False}), today) is False
+    for g in ("leader", "hod", "sh"): assert RT.sees_all(dict(group=g, extras={}), today) is True, g
+    assert RT.sees_all(dict(group="teacher", extras={"exams": "2026-11-25"}), today) is False
+    assert RT.sees_all(dict(group="teacher", extras={"exams": "2026-11-26"}), today) is True
+    for x in ("timetable", "relief", "admin"): assert RT.sees_all(dict(group="teacher", extras={x: True}), today) is True, x
+
+@t
+def nothing_narrows_while_staff_codes_are_on():
+    c = signed_in(ALICE)
+    r = c.get("/timetable"); assert r.data == b"the person page", r.data[:80]   # the cached ("view", "teacher", "/home"), as today
+
+@t
+def a_teacher_sees_their_own_and_the_classes():
+    staff_off(admin()); publish_real(); c = signed_in(ALICE)
+    d = page_data(c); a = d["app"]
+    assert a["mode"] == "staff" and a["tabs"] == ["classes", "teachers", "exams"] and a["me"] == ALICE, a
+    assert a["files"] == [["Class PDFs", "/files/book/classes"]] and a["home"] == "/home", a
+    assert d["students"] == [] and d["rooms"] == [] and d["teachers"], (len(d["students"]), len(d["rooms"]))
+    assert all(t[2] == "" and t[3] == "" for t in d["teachers"]), d["teachers"][:3]
+    assert {t[0] for t in d["teachers"]} >= {ALICE, BEN} and d["checks"]["problems"] == []
+    assert ("view", "staff", "/home", ALICE) in store.published()["views"]
+    from urllib.parse import quote
+    assert c.get(f"/pdf/teachers/{quote(ALICE)}").status_code == 200
+    for url in (f"/pdf/teachers/{quote(BEN)}", f"/pdf/rooms/{quote(store.published()['model']['rooms'][0]['name'])}", "/pdf/students/S001"):
+        assert c.get(url).status_code == 403, url
+    r = c.get("/pdf/classes/1A"); assert r.status_code == 200 and r.data[:4] == b"%PDF"
+    assert c.get("/files/book/teachers").status_code == 404
+    r = c.get("/files/book/classes"); assert r.status_code == 200 and r.data == b"%PDF-1.4 classes"
+    assert c.get("/files/excel").status_code == 403
+
+@t
+def two_teachers_in_a_row():
+    staff_off(admin()); publish_real()
+    a, b = signed_in(ALICE), signed_in(BEN)
+    assert page_data(a)["app"]["me"] == ALICE
+    assert page_data(b)["app"]["me"] == BEN
+    assert page_data(a)["app"]["me"] == ALICE
+
+@t
+def an_executive_has_no_my_timetable():
+    staff_off(admin()); publish_real(); c = signed_in("Mr Ivan Ng", group="executive")
+    a = page_data(c)["app"]; assert a["mode"] == "staff" and a["tabs"] == ["classes", "exams"] and a.get("me") is None, a
+    from urllib.parse import quote
+    for n in (ALICE, BEN, "Mr Ivan Ng"): assert c.get(f"/pdf/teachers/{quote(n)}").status_code == 403, n
+    assert c.get("/pdf/classes/1A").status_code == 200
+
+@t
+def management_and_committees_see_all():
+    staff_off(admin()); publish_real()
+    for c in (signed_in(ERIC, group="hod"), signed_in(CARA, extras={"relief": True})):
+        d = page_data(c); a = d["app"]
+        assert a["mode"] == "teacher" and a["tabs"] == A.TABS["teacher"] and "me" not in a, a
+        assert d["students"] and d["rooms"]
+        from urllib.parse import quote
+        assert c.get(f"/pdf/teachers/{quote(BEN)}").status_code == 200
+
+@t
+def the_shared_teacher_code_is_narrow_when_staff_codes_are_off():
+    staff_off(admin()); publish_real()
+    P.update(lambda d: d["ways"]["off"].update(teacher=None))   # turned on again (it is on in this suite's blank file)
+    c, r = code_in(CODES["TEACHER_CODE"]); assert went(r, "/timetable"), r.status_code
+    a = page_data(c)["app"]; assert a["mode"] == "staff" and a["tabs"] == ["classes", "exams"] and a.get("me") is None, a
+    from urllib.parse import quote
+    assert c.get(f"/pdf/teachers/{quote(ALICE)}").status_code == 403 and c.get("/pdf/classes/1A").status_code == 200
+    assert c.get("/files/book/teachers").status_code == 404
+    P.update(lambda d: d["ways"].update(staff_off=None))
+    a = page_data(c)["app"]; assert a["mode"] == "teacher" and a["tabs"] == A.TABS["teacher"], a   # staff codes on: as today
+
 @t
 def nothing_typed_reaches_the_history():
     text = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(H.DIR, "*.jsonl")))

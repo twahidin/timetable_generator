@@ -337,14 +337,15 @@ function pdfLink(v) {
 
 // ------------------------------------------------------------------ state, tabs, lists
 const APP_TABS = APP && APP.tabs ? APP.tabs : null;
-const TABS_ALL = [["classes", "Classes", CLS.filter(c => busyClasses.has(c.name)).length], ["teachers", "Teachers", busyTeachers.size], ["rooms", "Rooms", busyRooms.size],
+const TABS_ALL = [["classes", "Classes", CLS.filter(c => busyClasses.has(c.name)).length], ["teachers", MODE === "staff" ? "My timetable" : "Teachers", MODE === "staff" ? "" : busyTeachers.size], ["rooms", "Rooms", busyRooms.size],
   ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ...(EXAMS ? [["exams", "Exams and events", ""]] : []), ["checks", "Checks", ""]];
-const TABS = TABS_ALL.filter(t => !APP_TABS || APP_TABS.includes(t[0]));
+const MINE = t => MODE === "staff" ? t.name === APP.me : busyTeachers.has(t.name);   /* staff mode: a teacher's own page, so of the teachers only APP.me is listed (the class timetables still name each lesson's teacher) */
+const TABS = (MODE === "staff" ? [...TABS_ALL.filter(t => t[0] === "teachers"), ...TABS_ALL.filter(t => t[0] !== "teachers")] : TABS_ALL).filter(t => !APP_TABS || APP_TABS.includes(t[0]));   /* staff mode: My timetable first, and opened first */
 const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false, lview: "grids", on: null, onWant: "" };   // lview: how the Lessons tab shows what the filter finds; on: /api/day's answer for the chosen date (null: the usual timetable)
 const LVIEWS = [["grids", "Class grids"], ["page", "One page"], ["table", "Table"]];
 function listItems(tab) {
   if (tab === "classes") return CLS.filter(c => busyClasses.has(c.name)).map(c => ({ key: c.name, label: c.name, small: c.home, group: c.level }));
-  if (tab === "teachers") return TCH.filter(t => busyTeachers.has(t.name)).sort((a, b) => String(a.dept || "~").localeCompare(String(b.dept || "~")) || a.name.localeCompare(b.name)).map(t => ({ key: t.name, label: t.name, small: t.short !== t.name ? t.short : "", group: t.dept || "Other" }));
+  if (tab === "teachers") return TCH.filter(MINE).sort((a, b) => String(a.dept || "~").localeCompare(String(b.dept || "~")) || a.name.localeCompare(b.name)).map(t => ({ key: t.name, label: t.name, small: t.short !== t.name ? t.short : "", group: t.dept || "Other" }));
   if (tab === "rooms") return ROOMS.filter(r => busyRooms.has(r.name)).map((r, i) => [r, i]).sort((a, b) => String(a[0].kind).localeCompare(String(b[0].kind)) || a[1] - b[1]).map(([r]) => r).map(r => ({ key: r.name, label: r.name, small: "", group: r.kind || "Other" }));
   if (tab === "students") return STU.map(s => ({ key: s.id, label: s.name, small: s.id, group: s.cls }));
   return [];
@@ -366,6 +367,7 @@ function show(tab, key, opts = {}) {
   if (MODE === "personal") return showPersonal();
   clearTimeout(S.lt);   // a redraw of the Lessons tab that was waiting for typing to pause
   if (!TABS.some(t => t[0] === tab)) { tab = TABS[0][0]; key = null; }
+  if (MODE === "staff" && tab === "teachers" && key !== APP.me) key = null;   /* a link to another teacher opens their own */
   S.tab = tab; S.key = key; renderTabs(); const wide = ["lessons", "free", "checks", "exams"].includes(tab); $("#main").classList.toggle("wide", wide);
   if (!wide) renderList();
   if (tab === "lessons") { if (opts.filters) { S.lf = opts.filters; S.showAll = false; } return renderLessons(); }
@@ -616,7 +618,7 @@ function lessonDialog(id) {
 }
 const INDEX = [
   ...CLS.filter(c => busyClasses.has(c.name)).map(c => ({ t: "classes", k: c.name, label: c.name, s: `${c.name} ${c.level}`, type: "Class" })),
-  ...TCH.filter(t => busyTeachers.has(t.name)).map(t => ({ t: "teachers", k: t.name, label: t.name, s: `${t.name} ${t.short} ${t.dept}`, type: "Teacher" })),
+  ...TCH.filter(MINE).map(t => ({ t: "teachers", k: t.name, label: t.name, s: `${t.name} ${t.short} ${t.dept}`, type: "Teacher" })),
   ...ROOMS.filter(r => busyRooms.has(r.name)).map(r => ({ t: "rooms", k: r.name, label: r.name, s: `${r.name} ${r.kind}`, type: "Room" })),
   ...STU.map(s => ({ t: "students", k: s.id, label: `${s.name} (${s.id})`, s: `${s.name} ${s.id} ${s.cls}`, type: "Student" })),
   ...uniq(L.map(x => x.subject)).map(s => ({ t: "lessons", f: { subject: s }, label: s, s: `${s} ${short(s)}`, type: "Subject" })),

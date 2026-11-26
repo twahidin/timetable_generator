@@ -112,6 +112,7 @@ function boot(answers, app) {
 const APP = { mode: "teacher", tabs: ["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], pdf: true, logout: "/logout", files: [], dates: true, exams: true, published_at: STAMP };
 const LIST = [200, { schedules: [], banner: null }];
 const count = (s, w) => s.split(w).length - 1;
+const keys = h => [...h.matchAll(/data-key="([^"]+)"/g)].map(m => m[1]).join(",");
 const names = (v, from, to) => [...v.split(from)[1].split(to)[0].matchAll(/data-key="([^"]+)"/g)].map(m => m[1]);
 let n = 0; const t = async (name, f) => { await f(); n++; };
 
@@ -244,5 +245,25 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const N = boot({ "/api/me/exams": [200, { schedules: [Object.assign({}, trip, { days: [] })] }] }, ME);
     await N.tick();
     assert(!N.view().includes("myexams"), "an event with no day for this class shows nothing");
+  });
+
+  await t("a teacher's own page (staff mode): My timetable opens first and lists only them; the classes are all there", async () => {
+    const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong", files: [["Class PDFs", "/files/book/classes"]] });
+    const P = boot({ "/api/published/exams": LIST }, STAFF);
+    await P.tick();
+    const tabs = P.el("tabs").innerHTML;
+    assert(tabs.includes('data-tab="teachers">My timetable</button>') && !tabs.includes(">Teachers<"), tabs);
+    assert(tabs.indexOf('data-tab="teachers"') < tabs.indexOf('data-tab="classes"'), "My timetable comes first: " + tabs);
+    assert.strictEqual(P.run("location.hash"), "#teachers/Mr%20Ben%20Ong");
+    assert(P.view().includes("Mr Ben Ong") && count(P.view(), 'class="row') === 10, P.view());
+    assert.strictEqual(keys(P.el("list").innerHTML), "Mr Ben Ong");
+    P.run('show("teachers", "Ms Grace Yeo")');
+    assert.strictEqual(P.run("S.key"), "Mr Ben Ong", "another teacher's timetable is not shown");
+    P.run('show("classes", null)');
+    assert.strictEqual(keys(P.el("list").innerHTML), "3A,3B,4A");
+    assert.strictEqual(P.run('INDEX_OK.filter(e => e.t === "teachers").map(e => e.k).join(",")'), "Mr Ben Ong", "the search finds only them");
+    const X = boot({ "/api/published/exams": LIST }, Object.assign({}, STAFF, { tabs: ["classes", "exams"], me: null }));
+    await X.tick();
+    assert(!X.el("tabs").innerHTML.includes('data-tab="teachers"') && X.run("S.tab") === "classes", X.el("tabs").innerHTML);
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });
