@@ -334,6 +334,7 @@
       if (GONE.test(e.message) && await barGone(e.message)) return;
       m.busy = false; m.fail = e.message;
       if (S.menu === m) previewMenu();
+      else note(e.message, true);   /* the menu was replaced meanwhile: the failure still reaches the message line */
       return;
     }
     if (S.menu === m) { S.menu = null; S.ticked.clear(); S.token++; }

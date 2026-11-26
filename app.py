@@ -246,25 +246,28 @@ def _staff_codes_off():
     try: return people.staff_codes_off(people.load())
     except Exception: return False
 
-def _code_label():
+def _code_label(roles=None):
     """the code box's words: the plain ones people already know while any shared code is set and not turned off (a teacher
     with the shared teacher code is not told they need a personal one); "personal code" once every shared code is off.
+    roles: the shared codes that count (every one unless given; /student counts the shared student code alone).
     Accounts that cannot be read count as on, as the sign-in does (a turned-off code works again then)"""
     have, _ = access.configured()
     try: off = people.load()["ways"]["off"]
     except Exception: off = {}
-    return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in people.SHARED) else CODE_LABEL
+    return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in (roles or people.SHARED)) else CODE_LABEL
 
 def _code_page(msg="", student=False):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(CODE_LABEL if student else _code_label())}</label>
+<div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(_code_label(("student",)) if student else _code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
 <button type="submit">Open</button></form>{err}
 <p class="way"><a href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
 
-def _form_page(title, form, msg="", hint="", back=("/login", "Sign in with a code"), tail=None):
-    """a small page with one form; tail: the HTML at its foot (the setup warnings unless given)"""
+def _form_page(title, form, msg="", hint="", back=None, tail=None):
+    """a small page with one form; back: its way back (the sign-in page, the student page once staff codes are off);
+    tail: the HTML at its foot (the setup warnings unless given)"""
+    if back is None: back = ("/student", TO_STUDENT) if _staff_codes_off() else ("/login", "Sign in with a code")
     err = f"<p class='err'>{esc(msg)}</p>" if msg else ""
     return page(title, f"""<main class="login"><p class="small"><a class="back" href="{back[0]}">&larr; {esc(back[1])}</a></p>
 <h1>{esc(title)}</h1><p class="muted">{esc(school_name())}</p>{form}{err}{f'<p class="muted small">{esc(hint)}</p>' if hint else ""}{_warnings() if tail is None else tail}</main>""")
@@ -276,8 +279,7 @@ def _field(name, label, kind="password", auto="off", focus=False):
 def _password_page(msg=""):
     form = f"""<form method="post" action="/login/password">{_field("username", "Username", "text", "username", True)}
 {_field("password", "Password", auto="current-password")}<button type="submit">Sign in</button></form>""" if accounts_on() and people.readable() else ""
-    kw = {"back": ("/student", TO_STUDENT)} if _staff_codes_off() else {}
-    return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.", **kw)
+    return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.")
 
 def _change_page(p, msg="", form=True):
     first = "<p>Choose your own password before you go on.</p>" if p.get("must_change") else ""
@@ -357,8 +359,8 @@ def _sign_in_with_code(page_fn):
     if not r:
         limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return page_fn(WRONG_CODE), 401
     if r == "staff" and people.staff_codes_off(data):   # a staff code is a wrong code once staff codes are off
-        limiter.fail(addr); _record_signin(False, "code", reason="staff code after staff codes were turned off")
-        return page_fn(STAFF_USE_PASSWORD), 401
+        # a real staff code, not a guess: no strike (the limiter is per address, and a school behind one address would lock out every sign-in)
+        _record_signin(False, "code", reason="staff code after staff codes were turned off"); return page_fn(STAFF_USE_PASSWORD), 401
     if r == "staff":
         if not people.readable():   # the right code, but the records cannot be read: refused, and no strike
             _record_signin(False, "code", val, reason="accounts file unreadable"); return page_fn(PERSON_OFF), 403
@@ -605,7 +607,7 @@ def tidy_once_a_day():
         print(f"WARNING: the daily tidy of the accounts and the history failed ({type(e).__name__})", file=sys.stderr, flush=True)
     return None
 
-_OPEN = {"/login", "/login/password", "/login/recover", "/logout", "/account/password", "/healthz"}
+_OPEN = {"/login", "/login/password", "/login/recover", "/logout", "/account/password", "/student", "/healthz"}
 
 @app.before_request
 def password_first():
@@ -1547,6 +1549,8 @@ def _narrow():
     if p is not None: return not rights_table.sees_all(p)
     return shared() == "teacher"
 
+_ME = "__the viewer's own name__"   # in the cached staff page, in place of the teacher's name
+
 def _my_teacher():
     """the signed-in person's name when it is a teacher on the published timetable, else None (an executive, a shared code)"""
     p, pub = who(), store.published()
@@ -1569,14 +1573,20 @@ def timetable():
     me, tabs = None, TABS[r]
     if r == "teacher" and _narrow():   # staff codes off: a teacher's own timetable and the classes, the way back as a teacher's
         r = "staff"; me = _my_teacher(); tabs = [x for x in TABS[r] if x != "teachers" or me]
-    key = ("view", r, home, me) if r == "staff" else ("view", r, home)   # each teacher's page is their own
+    # one staff page for each way back and whether it has a My timetable; the viewer's name is put in as it is served
+    key = ("view", r, home, me is not None) if r == "staff" else ("view", r, home)
     if key not in pub["views"]:
         view = {"student": "student", "staff": "staff"}.get(r, "full")
         app_cfg = dict(mode=r, tabs=tabs, pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
                        placeholder="Search a class" if r in ("student", "staff") else None, home=home, homeLabel=label)
-        if r == "staff": app_cfg["me"] = me
+        if r == "staff": app_cfg["me"] = _ME if me is not None else None
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
-    return Response(pub["views"][key], mimetype="text/html")
+    text = pub["views"][key]
+    if r == "staff" and me is not None:   # escaped as render_html escapes the page's data
+        mark = '"me":' + json.dumps(_ME)
+        if text.count(mark) != 1: abort(500)
+        text = text.replace(mark, '"me":' + json.dumps(me, ensure_ascii=False).replace("</", "<\\/"))
+    return Response(text, mimetype="text/html")
 
 @app.get("/draft/preview")
 @need("committee")
@@ -2589,6 +2599,7 @@ NO_SLIPS = "Everyone has chosen their own password: there is no slip to print."
 SLIPS_AT_ONCE = "Print slips for at most 200 people at a time."
 SLIPS_STALE = "Someone ticked has just chosen their own password. Look at the list again before printing."
 SLIPS_FAILED = "The slips could not be made, so nothing was changed."
+SELF_SLIP = "You cannot print a slip for yourself. Change your own password with Change password instead."
 
 class _Stale(Refused):
     """the list the admin looked at is out of date: refused with 409"""
@@ -2639,13 +2650,14 @@ def admin_staff_slips():
         if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)): raise Refused(UNREAD_CHANGE)
         if not isinstance(preview, bool): raise Refused(UNREAD_CHANGE)
         if names is not None and len(names) > 200: raise Refused(SLIPS_AT_ONCE)
+        if names is not None and me in names: raise Refused(SELF_SLIP)   # a failed save would leave them only the recovery code
         if not people.readable(): raise people.Unreadable(people.UNREADABLE)
         todo, lines = _slip_plan(pub, people.load(), names)
         if preview: return jsonify(lines=lines, count=len(todo), chosen=[t["name"] for t in todo if t["kind"] == "chosen"])
         if not todo: raise Refused(NO_SLIPS)
         sent = b.get("chosen", [])
         if not (isinstance(sent, list) and all(isinstance(n, str) for n in sent)): raise Refused(UNREAD_CHANGE)
-        school, url = school_name(), request.host_url.rstrip("/")
+        school, url = school_name(), request.host_url.rstrip("/") + "/login/password"   # works before and after the switch
         once = {t["name"]: passwords.one_time() for t in todo}
         hashed = {n: passwords.hash_pw(v) for n, v in once.items()}
         def change(d):

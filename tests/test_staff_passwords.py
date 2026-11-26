@@ -117,7 +117,7 @@ def turning_staff_codes_off_refuses_a_staff_code():
     assert isinstance(r.get_json()["staff_codes"]["off"], (int, float))
     n = strikes()
     c, r = code_in(staff_code(ALICE)); assert r.status_code == 401 and STAFF_USE_PASSWORD in r.data.decode()
-    assert strikes() == n + 1
+    assert strikes() == n   # a real staff code is not a guess: no strike on the address (a school behind one address)
     e = last(); assert e["ok"] is False and e["reason"] == "staff code after staff codes were turned off"
 
 @t
@@ -133,6 +133,15 @@ def an_open_staff_code_session_ends_when_staff_codes_are_turned_off():
     staff_off(admin())
     r = c.get("/home"); assert went(r, "/login"), r.status_code
     r = c.get("/api/exams/my-duties"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
+
+@t
+def a_relief_stage_1_session_ends_when_staff_codes_are_turned_off():
+    c = A.app.test_client()
+    with c.session_transaction() as s: s.update(role="staff", who=ALICE, n=rec(ALICE)["n"])   # started before accounts
+    assert c.get("/home").status_code == 200
+    staff_off(admin())
+    r = c.get("/home"); assert went(r, "/login"), r.status_code
+    assert "who" not in kept(c)
 
 @t
 def turning_them_on_again_lets_a_staff_code_in():
@@ -178,6 +187,8 @@ THREE = [dict(name=ALICE, dept="Science"), dict(name=BEN, dept="Mathematics"), d
 def slip_school(teachers=THREE):
     """a clean accounts file, the teachers published, an admin signed in who has chosen a password -> the client"""
     P.update(lambda d: d["people"].clear()); publish(teachers); return admin()
+
+SELF_SLIP = "You cannot print a slip for yourself. Change your own password with Change password instead."
 
 def slips(c, names=None, preview=False): return c.post("/api/admin/staff-slips", json={"names": names, "preview": preview})
 
@@ -232,6 +243,23 @@ def making_slips_makes_accounts():
     assert {x["Name"] for x in rows} == {ALICE, BEN, ERIC}
     assert rec(BEN)["username"] == "ben.ong" and rec(ERIC)["username"] == "eric.goh"
     ada = rec("Ms Ada Lim"); assert ada["pw"] == ada_before["pw"] and ada["n"] == ada_before["n"]
+
+@t
+def the_slip_sends_people_to_the_username_page():
+    c = ready_four(); seen = []; real = SL.slips_pdf
+    def spy(school, rows, url, out): seen.append(url); return real(school, rows, url, out)
+    SL.slips_pdf = spy
+    try: make(c)
+    finally: SL.slips_pdf = real
+    assert seen == ["http://localhost/login/password"], seen
+
+@t
+def an_admin_cannot_print_a_slip_for_themselves():
+    c = slip_school(); before = open(P.PATH, "rb").read()
+    for preview in (True, False):
+        r = slips(c, [ALICE, "Ms Ada Lim"], preview)
+        assert r.status_code == 400 and r.get_json()["error"] == SELF_SLIP, (r.status_code, r.data)
+    assert open(P.PATH, "rb").read() == before
 
 @t
 def a_slip_password_signs_in_and_asks_for_a_new_one():
@@ -342,6 +370,7 @@ def the_history_says_how_many_and_never_a_password():
 TO_STUDENT = "Students: sign in with your code"
 TO_STAFF = "Staff: sign in with your username"
 STUDENT_LABEL = "Your personal code (on the slip from the school)"
+SHARED_LABEL = "Your code (the one the school gave you)"
 
 @t
 def while_staff_codes_are_on_the_front_page_is_as_today():
@@ -358,7 +387,10 @@ def when_staff_codes_are_off_the_front_page_is_the_username_page():
 @t
 def the_student_page():
     c = A.app.test_client(); h = c.get("/student").data.decode()
-    assert 'name="code"' in h and STUDENT_LABEL in h and 'action="/student"' in h
+    assert 'name="code"' in h and SHARED_LABEL in h and 'action="/student"' in h   # the shared student code is on
+    P.update(lambda d: d["ways"]["off"].update(student=time.time()))
+    try: assert STUDENT_LABEL in A.app.test_client().get("/student").data.decode()   # only personal codes open it now
+    finally: P.update(lambda d: d["ways"]["off"].update(student=None))
     assert f'href="/login/password">{TO_STAFF}' in h, h
     sc = access.personal_code("S001"); SECRETS.append(sc)
     r = c.post("/student", data=dict(code=sc)); assert went(r, "/me"), r.status_code
@@ -369,8 +401,26 @@ def the_student_page():
     assert f'href="/login">{TO_STAFF}' in h, h
     n = strikes()
     r = A.app.test_client().post("/student", data=dict(code=staff_code(ALICE))); h = r.data.decode()
-    assert r.status_code == 401 and STAFF_USE_PASSWORD in h and 'action="/student"' in h and strikes() == n + 1
+    assert r.status_code == 401 and STAFF_USE_PASSWORD in h and 'action="/student"' in h and strikes() == n
     assert last()["reason"] == "staff code after staff codes were turned off"
+
+@t
+def a_one_time_password_session_can_still_open_the_student_page():
+    user, pw = account("Mr Gil Ho", group="teacher", must_change=True); c, r = pw_in(user, pw); assert went(r, "/account/password")
+    assert went(c.get("/home"), "/account/password")
+    r = c.get("/student"); assert r.status_code == 200 and 'action="/student"' in r.data.decode(), r.status_code
+    sc = access.personal_code("S001"); SECRETS.append(sc)
+    r = c.post("/student", data=dict(code=sc)); assert went(r, "/me"), (r.status_code, r.headers.get("Location"))
+
+@t
+def the_recovery_page_links_back_to_the_right_sign_in():
+    os.environ["ADMIN_RECOVERY_CODE"] = secret()   # the page is there only while the variable is set
+    try:
+        h = A.app.test_client().get("/login/recover").data.decode()
+        assert 'href="/login">&larr; Sign in with a code' in h and 'href="/student"' not in h, h
+        staff_off(admin()); h = A.app.test_client().get("/login/recover").data.decode()
+        assert f'href="/student">&larr; {TO_STUDENT}' in h, h
+    finally: os.environ.pop("ADMIN_RECOVERY_CODE", None)
 
 @t
 def student_slips_print_the_student_page():
@@ -392,17 +442,17 @@ def post_login_still_takes_codes_when_off():
 # ---- the published timetable for a teacher, once staff codes are off ----
 from accounts import rights as RT
 
-def publish_real():
+def publish_real(teachers=TEACHERS):
     """a published timetable the real page is drawn from: the sample school with the four teachers, a lesson each in 1A,
     one student, two books on disk, and no page made yet"""
     from ttgen import export as X, reader
     from ttgen.samples import secondary
     sp = secondary()
-    sp["teachers"] += [dict(name=x["name"], short=x["name"].split()[1], dept=x["dept"], allowance=20, provisional="No") for x in TEACHERS]
+    sp["teachers"] += [dict(name=x["name"], short=x["name"].split()[1], dept=x["dept"], allowance=20, provisional="No") for x in teachers]
     reader.derive(sp)
     lv = sp["school"]["levels"][0]; days = list(sp["day_structure"][lv].keys()); p0 = sp["day_structure"][lv][days[0]].index("L")
     L = [dict(id=i + 1, d=i, p=p0, n=1, level=lv, block="", classes=["1A"], subject=sp["lessons"][0]["subject"], group=X.ENTIRE, teachers=[x["name"]],
-              room=sp["venues"][0]["room"], ext=False, rain="") for i, x in enumerate(TEACHERS)]
+              room=sp["venues"][0]["room"], ext=False, rain="") for i, x in enumerate(teachers)]
     m = X._model(sp, days, L); m["students"] = [dict(id="S001", name="Sam Student", cls="1A", level=lv, groups=[])]
     os.makedirs(store.PUB, exist_ok=True)
     for b in ("classes", "teachers"):
@@ -448,7 +498,7 @@ def a_teacher_sees_their_own_and_the_classes():
     assert d["students"] == [] and d["rooms"] == [] and d["teachers"], (len(d["students"]), len(d["rooms"]))
     assert all(t[2] == "" and t[3] == "" for t in d["teachers"]), d["teachers"][:3]
     assert {t[0] for t in d["teachers"]} >= {ALICE, BEN} and d["checks"]["problems"] == []
-    assert ("view", "staff", "/home", ALICE) in store.published()["views"]
+    assert ("view", "staff", "/home", True) in store.published()["views"]
     from urllib.parse import quote
     assert c.get(f"/pdf/teachers/{quote(ALICE)}").status_code == 200
     for url in (f"/pdf/teachers/{quote(BEN)}", f"/pdf/rooms/{quote(store.published()['model']['rooms'][0]['name'])}", "/pdf/students/S001"):
@@ -465,6 +515,18 @@ def two_teachers_in_a_row():
     assert page_data(a)["app"]["me"] == ALICE
     assert page_data(b)["app"]["me"] == BEN
     assert page_data(a)["app"]["me"] == ALICE
+    assert [k for k in store.published()["views"] if k[1] == "staff"] == [("view", "staff", "/home", True)], list(store.published()["views"])
+
+@t
+def a_name_with_a_quote_and_a_closing_tag_is_safe_on_the_page():
+    odd = 'Ms Jo "Q" O\'Neil </script><b>'
+    staff_off(admin()); publish_real(TEACHERS + [dict(name=odd, dept="Science")])
+    pw = secret(); person(odd, group="teacher", username="jo.oneil", pw=PW.hash_pw(pw), must_change=False, off=False, extras={})
+    c, r = pw_in("jo.oneil", pw); assert went(r, "/home"), r.status_code
+    h = c.get("/timetable").data.decode()
+    assert "</script><b>" not in h and h.count("</script>") == h.count("<script"), "a closing tag reached the page"
+    a = page_data(c)["app"]; assert a["me"] == odd and a["tabs"] == ["classes", "teachers", "exams"], a
+    assert page_data(signed_in(ALICE))["app"]["me"] == ALICE
 
 @t
 def an_executive_has_no_my_timetable():
@@ -544,5 +606,16 @@ def nothing_typed_reaches_the_history():
     with open(P.PATH, encoding="utf-8") as f: kept_file = f.read()
     for s in SECRETS:
         assert not any(x in kept_file for x in {s, s.upper(), s.lower(), access.norm(s)}), "a password, code or recovery value is in the accounts file"
+    c = admin("Ms Zara Koh"); answers = []
+    for url in ("/api/admin/people", "/api/admin/ways"):
+        r = c.get(url); assert r.status_code == 200, (url, r.status_code); answers.append((url, r.get_data(as_text=True)))
+    files = []
+    for top, _, names in os.walk(DATA):
+        for n in names:
+            with open(os.path.join(top, n), "rb") as f: files.append((os.path.relpath(os.path.join(top, n), DATA), f.read().decode("utf-8", "replace")))
+    assert len(files) > 3, len(files)
+    for where, body in answers + files:
+        for s in SECRETS:
+            assert not any(x in body for x in {s, s.upper(), s.lower(), access.norm(s)}), f"a password, code or recovery value is in {where}"
 
 print(f"{COUNT} staff password tests passed")
