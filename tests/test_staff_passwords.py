@@ -300,8 +300,11 @@ def a_failed_pdf_changes_nothing():
     real = SL.slips_pdf
     def boom(*a, **k): raise RuntimeError("no pdf")
     SL.slips_pdf = boom
-    try: r = c.post("/api/admin/staff-slips", json={"names": None, "preview": False})
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err): r = c.post("/api/admin/staff-slips", json={"names": None, "preview": False})
     finally: SL.slips_pdf = real
+    assert "WARNING: sign-in slips could not be made (RuntimeError)" in err.getvalue(), err.getvalue()
     assert r.status_code == 500 and "nothing was changed" in r.get_json()["error"], r.status_code
     assert open(P.PATH, "rb").read() == before
     assert n == len([e for e in H.read(kinds=["account"], limit=200) if e.get("what") == "slips"])

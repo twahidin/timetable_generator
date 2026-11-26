@@ -167,6 +167,8 @@ GUARDS = {
     "admin_reset": ('admin',),
     "admin_remove": ('admin',),
     "admin_shared_off": ('admin',),
+    "admin_staff_codes": ('admin',),
+    "admin_staff_slips": ('admin',),
     "admin_students": ('admin',),
     "admin_ways": ('admin',),
     "api_blank": ('committee',),
@@ -433,7 +435,7 @@ PLAN_ENDPOINTS = ("plan_web.page", "plan_web.start", "plan_web.talks", "plan_web
 
 # every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
 # admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)
-ADMIN_ENDPOINTS = ("admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_remove", "admin_ways", "admin_shared_off", "admin_students")
+ADMIN_ENDPOINTS = ("admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_remove", "admin_ways", "admin_shared_off", "admin_students", "admin_staff_codes", "admin_staff_slips")
 
 @t
 def the_guards_are_the_brief_s_table():
