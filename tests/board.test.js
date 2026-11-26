@@ -780,4 +780,21 @@ t("ownRows: whose rows a lesson can go on", () => {
   assert.strictEqual(Board.ownRows(card(1, 0, 0, 1, [])), "");
 });
 
+t("tied: the same teacher, else a room that meets, else nothing", () => {
+  const mk = (id, teachers, room, more) => card(id, 0, 0, 1, ["1A"], { rows: [{ group: "G", subject: "Maths", teachers: teachers, room: room }].concat(more || []) });
+  const a = mk(1, ["Mr Tan", "Ms Lee"], "Lab 1&2"), parts = { "Lab 1&2": ["Lab 1", "Lab 2"] };
+  assert.strictEqual(Board.tied(a, mk(2, ["Ms Lee"], "R9"), parts), "teacher");
+  assert.strictEqual(Board.tied(a, mk(3, ["Mr Ong"], "R9", [{ group: "H", subject: "Art", teachers: ["Mr Tan"], room: "" }]), parts), "teacher");   // any row
+  assert.strictEqual(Board.tied(a, mk(4, ["Mr Ong"], "Lab 2"), parts), "room");      // a combined venue meets its rooms
+  assert.strictEqual(Board.tied(a, mk(5, ["Ms Lee"], "Lab 1"), parts), "teacher");   // the teacher comes first
+  assert.strictEqual(Board.tied(a, mk(6, ["Mr Ong"], "R9"), parts), "");
+  assert.strictEqual(Board.tied(a, a, parts), ""); assert.strictEqual(Board.tied(a, mk(1, ["Mr Tan"], "Lab 1"), parts), "");   // itself, by id
+  assert.strictEqual(Board.tied(mk(7, [], ""), mk(9, [], ""), parts), ""); assert.strictEqual(Board.tied(mk(8, [], "TBC"), mk(10, [], "TBC"), undefined), "");
+  assert.strictEqual(Board.tied({ id: 11 }, { id: 12 }, parts), "");   // cards with no rows
+});
+t("blockers: the ids a judged place names, each once, in order", () => {
+  assert.deepStrictEqual(Board.blockers({ clashes: [{ kind: "teacher", text: "x", ids: [7] }, { kind: "room", text: "y", ids: [3, 7, 9] }, { kind: "room", text: "z", ids: [] }] }), [3, 7, 9]);
+  [null, undefined, {}, { clashes: null }, { clashes: "x" }, { clashes: [{ kind: "class", text: "from an older server" }] }].forEach(s => assert.deepStrictEqual(Board.blockers(s), []));
+});
+
 console.log(`${n} cases passed`);

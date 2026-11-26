@@ -641,6 +641,34 @@ var Board = (function () {
     return typeof n !== "number" || n !== n ? 16 : Math.max(16, Math.min(60, n));
   }
 
+  /* how other is tied to card: "teacher" when a row of each shares a teacher, else "room" when a row of each has rooms that meet
+     ("" and "TBC" meet nothing), else ""; a card is never tied to itself (by id) */
+  function tied(card, other, parts) {
+    if (!card || !other || card.id === other.id) return "";
+    var ra = card.rows || [], rb = other.rows || [];
+    var ta = [], i, j;
+    ra.forEach(function (r) { (r.teachers || []).forEach(function (x) { if (x) ta.push(x); }); });
+    for (i = 0; i < rb.length; i++) {
+      var tb = rb[i].teachers || [];
+      for (j = 0; j < tb.length; j++) if (tb[j] && ta.indexOf(tb[j]) >= 0) return "teacher";
+    }
+    var real = function (x) { return !!x && x !== "TBC"; };
+    for (i = 0; i < ra.length; i++) {
+      if (!real(ra[i].room)) continue;
+      for (j = 0; j < rb.length; j++) if (real(rb[j].room) && roomsMeet(parts, ra[i].room, rb[j].room)) return "room";
+    }
+    return "";
+  }
+
+  /* the ids of the lessons a judged place names in its clashes, each once, lowest first; [] for no answer or an older server's lines */
+  function blockers(slot) {
+    var all = slot && Array.isArray(slot.clashes) ? slot.clashes : [], out = [];
+    all.forEach(function (c) {
+      ((c && Array.isArray(c.ids)) ? c.ids : []).forEach(function (id) { if (typeof id === "number" && out.indexOf(id) < 0) out.push(id); });
+    });
+    return out.sort(function (a, b) { return a - b; });
+  }
+
   /* the sentence telling whose rows a lesson can go on; "" for a lesson with no class */
   function ownRows(card) {
     var c = (card && card.classes) || [];
@@ -655,6 +683,7 @@ var Board = (function () {
            lands: lands, forced: forced, asks: asks, CLASH: CLASH, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
            teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet,
-           panels: panels, panelsFor: panelsFor, panelSet: panelSet, panelPut: panelPut, panelShow: panelShow, panes: panes, lane: lane, ownRows: ownRows };
+           panels: panels, panelsFor: panelsFor, panelSet: panelSet, panelPut: panelPut, panelShow: panelShow, panes: panes, lane: lane, ownRows: ownRows,
+           tied: tied, blockers: blockers };
 })();
 if (typeof module !== "undefined") module.exports = Board;
