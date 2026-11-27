@@ -115,7 +115,7 @@ step 5's comparison would report it as a lesson nobody planned.
   (`all_views` in `ttgen/export.py`; the page's teacher list).
 - The `staff` view's page is made once and kept for all staff; only the viewer's name is put in when it is served
   (`app.py`, about lines 1553 to 1588). A teacher's own exam duties reach that page by a request of their own
-  (`/api/me/exams`).
+  (`/api/exams/my-duties`).
 - A rule warning on step 8 is not critical. It does not stop publishing.
 - The setup workbook has a sheet "Teacher availability" (Teacher, Week, Day, From, To, Reason), written by
   `ttgen/template.py` from `spec.split_rules(...)["availability"]` and read back by `ttgen/reader.py`. The agent's skill
@@ -131,7 +131,8 @@ step 5's comparison would report it as a lesson nobody planned.
   server for the `student`, `staff` (a teacher's own timetable and the classes) and `personal` views.
 - The published page's "Who's free" (`renderFree`) reads lessons, and on a chosen date also exam and event items. It
   reads no rule, so a teacher with a block-out shows as free there today.
-- Step 8's board gets a teacher's week from `draft._payload(m, "teacher", name)`: lessons only.
+- Step 8's board gets its rows from `draft.board()` (`/api/draft/board`), drawn by `static/board.js` and `bdRowHTML` in
+  `static/app.js`: lessons only. Rows can be by teacher; the four panels are for classes only.
 - A teacher renamed on step 4 is followed in every rule whose `scope` is "Teacher"
   (`2026-11-24-teacher-rename-design.md`), with a toast that counts what followed.
 - A teacher has a department and may have a second one (`dept`, `dept2`).
@@ -266,7 +267,7 @@ Never: a class's timetable, a student's timetable, the Lessons tab, the rooms' a
 In the `student` and `personal` views the data sent to the browser holds no teacher-only period at all. In the `staff`
 view a signed-in teacher's browser receives only that teacher's own periods. The `staff` page is one page kept for all
 staff, so they cannot be inside it: they come by a request of the teacher's own, as the exam duties do
-(`/api/me/exams`), or by another way the builder chooses that keeps the rule.
+(`/api/exams/my-duties`), or by another way the builder chooses that keeps the rule.
 
 ## The hand-over to the agent
 
