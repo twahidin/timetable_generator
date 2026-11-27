@@ -304,4 +304,51 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const F = boot({ "/api/published/exams": LIST }, APP);
     await F.tick(); assert(!F.fetched.includes("/api/exams/my-duties"), "only staff mode asks");
   });
+  await t("the clock sums: times in minutes, breaks kept only before a later lesson, the page's span and hour marks", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick();
+    assert.strictEqual(P.run('clk(480) + " " + clk(780) + " " + clk(760)'), "8.00 1.00 12.40");
+    /* 3A: English at p0 n2 on Odd Mon */
+    assert.strictEqual(P.run('JSON.stringify(classView("3A").cells.filter(c => c.d === 0).map(c => [c.a, c.b, cellTime(c)]))'),
+      JSON.stringify([[460, 500, "7.40–8.20"], [580, 640, "9.40–10.40"]]));
+    assert.strictEqual(P.run('cellTime({ a: 740, b: 760 })'), "12.20");   /* under 40 minutes: the start alone */
+    /* recess (9.00–9.20) has the science band after it; lunch (11.00–11.40) has nothing after it */
+    assert.strictEqual(P.run('JSON.stringify(bandsOf(classView("3A"), 0))'), JSON.stringify([{ a: 540, b: 560, name: "Recess" }]));
+    assert.strictEqual(P.run('JSON.stringify(bandsOf(classView("3A"), 1))'), "[]");   /* a day with no lessons: no bands */
+    assert.strictEqual(P.run('JSON.stringify(spanOf(classView("3A")))'), "[460,640]");
+    assert.strictEqual(P.run('spanOf({ cells: [], codes: null })'), null);
+    assert.strictEqual(P.run('JSON.stringify(bandsOf({ cells: [], codes: null }, 0))'), "[]");
+    assert.strictEqual(P.run('JSON.stringify(hourMarks(460, 800).map(h => h.text + (h.sub ? " " + h.sub : "")))'),
+      JSON.stringify(["8 am", "9", "10", "11", "12 noon", "1 pm"]));
+    assert.strictEqual(P.run('JSON.stringify(hourMarks(790, 900).map(h => h.text + (h.sub ? " " + h.sub : "")))'), JSON.stringify(["2 pm", "3"]));
+    assert.strictEqual(P.run('JSON.stringify(hourMarks(460, 800).map(h => h.m))'), JSON.stringify([480, 540, 600, 660, 720, 780]));
+    /* lanes: lessons that overlap in time share a row, the rest do not */
+    assert.strictEqual(P.run('const ls = lanes([{ d: 0, a: 460, b: 500, p: 0, n: 2 }, { d: 0, a: 480, b: 540, p: 1, n: 3 }, { d: 0, a: 540, b: 560, p: 4, n: 1 }]); JSON.stringify([...ls.values()])'),
+      JSON.stringify([[0, 2], [1, 2], [0, 1]]));
+  });
+
+  await t("the clock sums on a school of 35-minute periods, and on one with no start time", async () => {
+    const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padStart(2, "0")}`;
+    const A = boot({ "/api/published/exams": LIST }, APP, d => {
+      d.school.period_minutes = 35; d.school.start_time = "07:30";
+      d.times = d.times.map((_, p) => [clock(450 + 35 * p), clock(485 + 35 * p)]);
+    });
+    await A.tick();
+    assert.strictEqual(A.run('JSON.stringify(hourMarks(450, 660).map(h => h.m))'), JSON.stringify([480, 540, 600, 660]));
+    assert.strictEqual(A.run('JSON.stringify(classView("4A").cells.filter(c => c.p === 1).map(cellTime))'), JSON.stringify(["8.05–9.15"]));
+    const B = boot({ "/api/published/exams": LIST }, APP, d => { delete d.school.start_time; delete d.school.period_minutes; d.lessons.push([4, 0, 20, 1, "Sec 4", "", ["4A"], "English", "Entire Class", ["Mr Ben Ong"], "LT2", 0]); });
+    await B.tick();
+    assert.strictEqual(B.run('classView("3A").cells[0].a'), 460, "the fallback reads the times");
+    assert.strictEqual(B.run('classView("4A").cells.filter(c => c.p === 20)[0].a'), 860, "after noon the minutes go on past 720");
+  });
+
+  await t("the date view's span: the whole page's, widened by that day's exam, event or duty", async () => {
+    const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await P.tick();
+    P.run('show("classes", "3A")'); await P.pick("2026-10-05");
+    assert.strictEqual(P.run("JSON.stringify(S.current.span)"), "[460,640]");
+    assert.strictEqual(P.run("JSON.stringify(S.current.cells.filter(c => c.exam).map(c => [c.a, c.b]))"), "[[470,530]]");
+    P.run('show("teachers", "Ms Aisha Rahman")'); await P.tick();
+    assert.strictEqual(P.run("S.current.span[0]"), 455);
+  });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });

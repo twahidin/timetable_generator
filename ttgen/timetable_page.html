@@ -175,6 +175,31 @@ const PB = (() => {
   let last = -1, add = 0;
   return D.times.map(two => two.map(t => { let v = mins(t); if (v === null) return last; v += add; while (v < last) { add += 720; v += 720; } last = v; return v; }));
 })();
+/* the clock sums: a lesson is placed by its start and end in minutes (a, b), not by period number */
+const clk = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padStart(2, "0")}`;   /* minutes after midnight as the school writes a time: 480 is "8.00", 780 is "1.00" */
+const edge = (p, n) => { const hi = PB.length - 1, i = q => Math.max(0, Math.min(hi, Math.floor(q))); return [PB[i(p)][0], PB[i(Math.ceil(p + n) - 1)][1]]; };   /* p held inside the day as time() holds it */
+const cellTime = c => c.b - c.a < 40 ? clk(c.a) : `${clk(c.a)}–${clk(c.b)}`;
+/* the runs of assembly, recess and lunch on day d, in minutes, kept only when a lesson (or exam, event) of that day starts at or after the run's end */
+function bandsOf(v, d) {
+  const row = v.codes ? v.codes[d] : null, out = [];
+  if (!row) return out;
+  for (let p = 0; p < NP;) { const ch = row[p]; let q = p; while (q + 1 < NP && row[q + 1] === ch) q++;
+    if (BREAK[ch]) { const a = PB[p][0], b = PB[q][1]; if (v.cells.some(c => c.d === d && c.a >= b)) out.push({ a, b, name: BREAK[ch] }); } p = q + 1; }
+  return out;
+}
+/* the page's length: the earliest start of a lesson or kept band to the latest end of a lesson, over all days; null when nothing is drawn */
+function spanOf(v) {
+  if (!v.cells.length) return null;
+  let a0 = Math.min(...v.cells.map(c => c.a)), b1 = Math.max(...v.cells.map(c => c.b));
+  for (let d = 0; d < ND; d++) bandsOf(v, d).forEach(x => { a0 = Math.min(a0, x.a); });
+  return [a0, b1];
+}
+/* a mark for each whole hour in a0..b1: "8 am" first, then "9", "12 noon", "1 pm", "2" */
+function hourMarks(a0, b1) {
+  const out = [];
+  for (let h = Math.ceil(a0 / 60); h * 60 <= b1; h++) out.push({ m: h * 60, text: String(((h + 11) % 12) + 1), sub: h === 12 ? "noon" : h === 13 ? "pm" : out.length ? "" : h < 12 ? "am" : "pm" });
+  return out;
+}
 function weekDay(n) { const p = String(n).split(" "); return p.length > 1 ? [p[0], p[p.length - 1]] : ["", p[0]]; }
 function compact(cs) {
   cs = [...cs].sort((a, b) => a.length - b.length || a.localeCompare(b));
@@ -195,7 +220,7 @@ function codesFor(levels) {
 }
 
 // ------------------------------------------------------------------ views
-function cellOf(xs, title, lines) { const x0 = xs[0]; return { d: x0.d, p: x0.p, n: x0.n, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id, ix: xs.map(x => x.i) }; }
+function cellOf(xs, title, lines) { const x0 = xs[0], [a, b] = edge(x0.p, x0.n); return { d: x0.d, p: x0.p, n: x0.n, a, b, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id, ix: xs.map(x => x.i) }; }
 function classView(c) {
   const info = cIx.get(c), rows = L.filter(x => x.classes.includes(c)), bg = {};
   rows.forEach(x => { if (x.block) (bg[x.block] = bg[x.block] || new Set()).add(x.group); });
@@ -263,6 +288,7 @@ const relatedRooms = r => uniq([r, ...ROOMS.filter(x => x.parts.includes(r)).map
    times it still runs, and the exams and events of the class (a student: their class), the teacher (with an event duty) or the room. The PDF, CSV and legend stay the usual timetable */
 function dated(v) {
   const on = S.on, ex = on.exams || {}, nd = niceDate(on.date);
+  v.span = spanOf(v);   /* over all days, before the cells are cut to the day */
   if (!on.day) { v.noday = `${nd} is outside the terms or a holiday in the school calendar.`; v.cells = []; return v; }
   const only = DAYS.indexOf(on.day), stop = new Set(ex.stopped || []), runs = new Map();
   (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push(`${a}–${b}`); });
@@ -280,8 +306,10 @@ function dated(v) {
   (items || []).forEach(it => {
     const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : it.kind === "event" ? "Event" : "Exam";
     const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), v.kind === "teacher" ? it.duty : "", it.via ? `in ${it.via}` : ""];
-    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
+    const s0 = mins(it.start), e0 = mins(it.end), [a, b] = s0 !== null && e0 !== null ? [s0, e0] : edge(+it.p || 0, +it.n || 0);
+    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, a, b, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
   });
+  if (v.span) v.span = [Math.min(v.span[0], ...v.cells.map(c => c.a)), Math.max(v.span[1], ...v.cells.map(c => c.b))];
   v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams, tests or events. This is the usual ${on.day} timetable.`;
   return v;
 }
@@ -290,9 +318,9 @@ function dated(v) {
 function lanes(cells) {
   const out = new Map();
   for (let d = 0; d < ND; d++) {
-    const cs = cells.filter(c => c.d === d).sort((a, b) => a.p - b.p || b.n - a.n); let cl = [], end = -1;
-    const flush = () => { const ln = []; cl.forEach(c => { let i = ln.findIndex(e => e <= c.p); if (i < 0) { ln.push(0); i = ln.length - 1; } ln[i] = c.p + c.n; out.set(c, [i, 0]); }); cl.forEach(c => out.get(c)[1] = ln.length); };
-    for (const c of cs) { if (cl.length && c.p >= end) { flush(); cl = []; end = -1; } cl.push(c); end = Math.max(end, c.p + c.n); }
+    const cs = cells.filter(c => c.d === d).sort((a, b) => a.a - b.a || b.b - a.b); let cl = [], end = -1;
+    const flush = () => { const ln = []; cl.forEach(c => { let i = ln.findIndex(e => e <= c.a); if (i < 0) { ln.push(0); i = ln.length - 1; } ln[i] = c.b; out.set(c, [i, 0]); }); cl.forEach(c => out.get(c)[1] = ln.length); };
+    for (const c of cs) { if (cl.length && c.a >= end) { flush(); cl = []; end = -1; } cl.push(c); end = Math.max(end, c.b); }
     if (cl.length) flush();
   }
   return out;
