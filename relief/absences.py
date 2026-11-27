@@ -536,7 +536,7 @@ def _started(pub, x, now):
 
 def _may_choose(r, x, by):
     """the planner may choose for lesson x: while nobody is approved for it, or on a planned absence while it is still by's own
-    choice (on a teacher's own absence, which took a head's choice over from a backup, the relief team changes it on Today)"""
+    choice (on a teacher's own absence, which took a head's choice over from a backup, the relief team changes it on Today's Relief Assignments)"""
     return _cover.state(r, x, x) in ("open", "waiting") or (r.get("how") == "planned" and _cover.planned_by(x) == by)
 
 

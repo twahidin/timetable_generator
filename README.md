@@ -38,6 +38,7 @@ Stage 3 is the relief team's module and everyone's cover list:
   AI's pick by the school's rules, or the app's own order when there is no AI. The team can **Approve**, **Approve all
   waiting**, **Change** the pick, **Split** a lesson into parts (each with its own relief teacher) and **Join again**,
   **Keep** the relief when a teacher asks to change it, or **Fill now** to pick at once.
+- **Planned Relief Assignments** (the relief team): read-only. Every relief on the school days after today, by date, for the next two weeks or the rest of the term. **Open this day** goes to Today's Relief Assignments on that date. The tab does not work out again who is free, so a warning such as "no longer free then" shows only after **Open this day**.
 - **Reliefs I'm covering** (every teacher): the reliefs sent out to them (below), with **Acknowledge** or **Request to
   change**, the work and its files.
 - **Term Relief Report** (the relief team): how many relief periods each teacher has this week and this term, by department, with a
@@ -610,6 +611,7 @@ node tests/relief_today.test.js         # relief: Today's Relief Assignments, wh
 node tests/relief_settings.test.js      # relief: the Telegram card in Relief settings
 node tests/relief_summary.test.js       # relief: the weekly summary
 node tests/relief_inbox.test.js         # relief: All Relief Requests, how an absence was asked for
+node tests/relief_ahead.test.js         # relief: Planned Relief Assignments, the days after today
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
 .venv/bin/python tests/test_combined.py # venues made of two or more rooms (add --full for the solve)
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
@@ -642,7 +644,7 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `app.py` | routes: sign-in, the committee's editor, the downloads, check and publish, the timetable pages, PDFs |
 | `access.py` | access codes (committee, heads, teachers, students), personal codes, wrong-code limit (10 per 10 minutes per address) |
 | `relief/` | relief: the people it knows (the published teachers and other staff), personal teacher codes, the settings, the school calendar; a teacher's lessons on a date, the free-then list, absence records, work files and the request routes (`web.py`); on Telegram: `tg.py` (the one place that calls Telegram), `tgdb.py` (its file on the volume), `links.py` (who is linked), `outbox.py` (the queue and the sender), `tell.py` (what there is to tell), `bot.py` and `asking.py` (what people press and type, `/relief`), `report.py` and `summary.py` (the reports and the week), `tgweb.py` (its routes) |
-| `static/relief.html`, `static/relief-settings.html` | the Relief home (`relief.js`: My absences, Ask for relief; `relief-plan.js`: Relief Planning, Planned by me; `relief-inbox.js`: All Relief Requests; `relief-telegram.js`: Link Telegram; `relief-summary.js`: Weekly summary; `relief-form.js`: shared) and the Relief settings page, with their scripts |
+| `static/relief.html`, `static/relief-settings.html` | the Relief home (`relief.js`: My absences, Ask for relief; `relief-plan.js`: Relief Planning, Planned by me; `relief-inbox.js`: All Relief Requests; `relief-ahead.js`: Planned Relief Assignments; `relief-telegram.js`: Link Telegram; `relief-summary.js`: Weekly summary; `relief-form.js`: shared) and the Relief settings page, with their scripts |
 | `tests/test_relief.py` | relief: codes, people, calendar, settings and the routes |
 | `tests/test_relief_requests.py` | relief requests: lessons, the free-then list, absences, files and their routes |
 | `tests/test_relief_telegram.py` | relief on Telegram, on the server: no network, and never a real token |

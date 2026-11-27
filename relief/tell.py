@@ -716,7 +716,7 @@ def due(pub, settings, records, now, reach, told, since, team=(), base="", short
     return [i for i in out if not _there(told, i["key"]) and _may(i, now, settings, pub)]
 
 
-# ---- what has been said of a relief (the report, Remind, and Today's page)
+# ---- what has been said of a relief (the report, Remind, and the page of Today's Relief Assignments)
 def key_of(told, r, c, ckey):
     """the key of the relief message of cover c as it is approved now"""
     return _relief_key_for(told, dict(absent=r["teacher"], ckey=ckey, approved_at=c["approved"].get("at"), who=c["relief"]))

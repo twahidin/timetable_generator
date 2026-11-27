@@ -1673,6 +1673,19 @@ def rt(f):
 ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
        "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out", "asked_after", "planned_by", "away"}
 
+class app_logged:
+    """the records the app's logger gets in a block"""
+    def __enter__(s):
+        s.got = []
+        class Keep(logging.Handler):
+            def emit(h, rec): s.got.append(rec)
+        s.keep, s.level, s.propagate = Keep(), A.app.logger.level, A.app.logger.propagate
+        s.handlers = A.app.logger.handlers[:]                                        # taken before this block's own handler is added
+        A.app.logger.setLevel(logging.ERROR); A.app.logger.propagate = False         # nothing reaches the screen or a root handler
+        A.app.logger.handlers[:] = [s.keep]
+        return s.got
+    def __exit__(s, *a): A.app.logger.handlers[:] = s.handlers; A.app.logger.setLevel(s.level); A.app.logger.propagate = s.propagate
+
 @rt
 def today_lists_covers_in_time_order_with_counts_and_no_reason():
     fresh()
@@ -2101,8 +2114,9 @@ def unacked_lists_each_part_of_a_split_lesson_and_reads_cover_by_cover():
         assert len(un(i)) == 2 and un(i)[0]["p"] < un(i)[1]["p"], "each part with its own p and n, in period order"
         CV.change(i, K5, MAYA, TEAMER, PUB, ST); CV.send_out(i, K5, MAYA, TEAMER, PUB, ST)
         r = AB.load(i); [x for x in r["lessons"] if x["key"] == K2][0]["parts"][0]["sent_out"]["at"] = "not a time"; AB._save(r)   # a part changed by hand: it cannot be read
-        got = un(i)
+        with app_logged() as lines: got = un(i)
         assert [u["who"] for u in got] == [FLEX, MAYA], got
+        assert len(lines) == 1 and "ValueError" in lines[0].getMessage() and "not a time" not in lines[0].getMessage() and SAM not in lines[0].getMessage(), [g.getMessage() for g in lines]
         AB.cancel(i, "Better", EVE); assert un(i) == [], "a cancelled absence lists none"
 
 @rt
@@ -2581,18 +2595,6 @@ def ahead_includes_the_last_day_and_not_the_day_after():
     with at("2026-10-15T09:00:00+08:00"):                                        # Thu 15 + 14 = Thu 29: Fri 30 is the day after
         j = ok(team.get("/api/relief/ahead")); assert (j["until"], j["days"]) == ("2026-10-29", []), j
 
-class app_logged:
-    """the records the app's logger gets in a block"""
-    def __enter__(s):
-        s.got = []
-        class Keep(logging.Handler):
-            def emit(h, rec): s.got.append(rec)
-        s.keep, s.level = Keep(), A.app.logger.level
-        A.app.logger.addHandler(s.keep); A.app.logger.setLevel(logging.ERROR)
-        s.handlers = A.app.logger.handlers[:]; A.app.logger.handlers[:] = [s.keep]       # nothing reaches the screen
-        return s.got
-    def __exit__(s, *a): A.app.logger.handlers[:] = s.handlers; A.app.logger.setLevel(s.level)
-
 @rt
 def ahead_passes_over_a_record_it_cannot_read():
     fresh(); team = staff(TEAMER)
@@ -2616,10 +2618,12 @@ def ahead_passes_over_a_record_it_cannot_read():
             assert len(got) == 1, [g.getMessage() for g in got]
             r = AB.load(k); r["lessons"] = 5; AB._save(r)
             got.clear(); j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13"], "lessons that are not a list"
+            assert len(got) == 1 and "TypeError" in got[0].getMessage() and MAYA not in got[0].getMessage(), [g.getMessage() for g in got]
         with open(os.path.join(ADIR, "bad.json"), "w") as f: f.write("[1, 2]")      # a record file that is not a dict
-        with app_logged():
+        with app_logged() as got:
             assert dates(ok(team.get("/api/relief/ahead"))) == ["2026-10-13"]
             assert ok(team.get("/api/relief/ahead?span=term"))["span"] == "term"
+            assert len(got) == 2 and all(g.getMessage().endswith("(KeyError, TypeError)") for g in got), [g.getMessage() for g in got]   # one line per request, from the two records still unreadable: the file that is not a record is skipped by the store and adds none
 
 @rt
 def ahead_gives_each_part_of_a_split_lesson_its_own_row():

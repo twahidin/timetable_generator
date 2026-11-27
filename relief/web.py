@@ -801,7 +801,7 @@ def planned_csv():
     return Response("﻿" + buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-# ---- the relief team (relief stage 3): Today, approving, changing, splitting, Fill now
+# ---- the relief team (relief stage 3): Today's Relief Assignments, approving, changing, splitting, Fill now
 def _date_in(v):
     """a date sent in a body as YYYY-MM-DD; anything else is WRONG (never fromisoformat's own words)"""
     if not isinstance(v, str): raise ValueError(_absences.WRONG)
@@ -1020,7 +1020,7 @@ def ahead():
                         by_day.setdefault(x["date"], []).append(row)         # a date is made only by a row
                 except Exception as e: bad.add(type(e).__name__)             # a record changed by hand: passed over, never the page's failure
         except Exception as e: bad.add(type(e).__name__)
-    if bad: current_app.logger.error("relief: a lesson to come could not be read and was passed over (%s)", ", ".join(sorted(bad)))
+    if bad: current_app.logger.error("relief: a lesson or record to come could not be read and was passed over (%s)", ", ".join(sorted(bad)))
     days = []
     for date in sorted(by_day):
         rows = sorted(by_day[date], key=lambda v: (v["p"], v["absent"], v["ckey"]))

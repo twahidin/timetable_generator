@@ -565,7 +565,7 @@ t("a relief whose teacher is away: named above the new pick, or above an open ro
 });
 
 /* ---- Send-out, final fix wave ---- */
-t("past the cut-off, on the next day: how many of today are still to arrange, and show today shows today", async () => {
+t("past the cut-off, on the next day: how many of today are still to arrange, and the page shows today", async () => {
   const flat = el => el.kids.map(k => (typeof k === "string" ? k : flat(k))).join("");   /* the line as it reads, its button in it */
   const past = (left, more) => day([], Object.assign({ date: "2026-10-14", hours: Object.assign({}, HOURS, { past_cut_off: true, today_left: left }) }, more));
   const p = await today(past(1));
