@@ -1533,6 +1533,54 @@ def code_slips():
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="timetable code slips.pdf", mimetype="application/pdf")
 
+# ------------------------------------------------------------------------------------------------ staff: a student's forgotten code
+CODES_HINT = "Pick the class, then press Show code beside the student. Each look-up is recorded."
+CODES_NOT_PUBLISHED = "The timetable is not published yet, so there are no student codes."
+CODES_EMPTY_CLASS = "This class has no students on the published timetable."
+CODES_NO_STUDENT = "That student is not on the published timetable."
+
+def _codes_page(cls=None, shown=None, msg=""):
+    """the Student codes page: the classes; a picked class with its students; shown: the one student whose code is open"""
+    back = ("/home", "Back")
+    if not access.personal_codes_on(): return _form_page("Student codes", "", NO_PERSONAL, back=back, tail="")
+    pub = store.published()
+    if not pub: return _form_page("Student codes", "", CODES_NOT_PUBLISHED, back=back, tail="")
+    students = pub["model"].get("students") or []
+    classes = sorted({str(x.get("cls", "")) for x in students})
+    box = ""
+    if shown:
+        box = f"""<div class="notes"><p><strong>{esc(shown["name"])}</strong> ({esc(shown["cls"])})</p>
+<p>Code: <strong>{esc(access.personal_code(shown["id"]))}</strong></p></div>"""
+    links = " ".join(f'<a class="btn" href="/student-codes?cls={urllib.parse.quote(c, safe="")}">{esc(c)}</a>' for c in classes)
+    rows = ""
+    if cls is not None:
+        mine = sorted((x for x in students if str(x.get("cls", "")) == cls), key=lambda x: (str(x.get("name", "")).lower(), str(x.get("id", ""))))
+        if not mine: msg = msg or CODES_EMPTY_CLASS
+        rows = "".join(f"""<form method="post" action="/student-codes"><p>{esc(x.get("name", ""))} <input type="hidden" name="id" value="{esc(x.get("id", ""))}">
+<button type="submit">Show code</button></p></form>""" for x in mine)
+    return _form_page("Student codes", f"{box}<p>{links}</p>{rows}", msg, CODES_HINT, back=back, tail="")
+
+@app.get("/student-codes")
+@need("codes.look")
+def student_codes_page():
+    r = Response(_codes_page(request.args.get("cls")), mimetype="text/html"); r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.post("/student-codes")
+@need("codes.look")
+def student_codes_show():
+    pub = store.published()
+    sid = request.form.get("id", "")
+    st = next((x for x in (pub["model"].get("students") or []) if str(x.get("id")) == sid), None) if pub and access.personal_codes_on() else None
+    if not st:
+        r = Response(_codes_page(msg=CODES_NO_STUDENT) if pub and access.personal_codes_on() else _codes_page(), status=404 if pub and access.personal_codes_on() else 200, mimetype="text/html")
+    else:
+        try: history.add({"kind": "look", "where": "Student codes", "text": f"Looked up the code of {st['name']} ({st['cls']})", "people": [], **by()})
+        except Exception as e: print(f"WARNING: a code look-up could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+        r = Response(_codes_page(str(st["cls"]), st), mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
 TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"],
             staff=["classes", "teachers", "exams"])   # staff: a teacher's own timetable (the teachers tab, as My timetable) and the classes

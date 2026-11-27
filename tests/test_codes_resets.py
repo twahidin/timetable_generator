@@ -144,6 +144,53 @@ def the_admin_page_lines():
     assert "Student codes: looks up a student's forgotten code." in texts
     assert "Passwords: gives staff in their departments a new temporary password." in texts
 
+CODES_HINT = "Pick the class, then press Show code beside the student. Each look-up is recorded."
+CODES_NOT_PUBLISHED = "The timetable is not published yet, so there are no student codes."
+CODES_EMPTY_CLASS = "This class has no students on the published timetable."
+CODES_NO_STUDENT = "That student is not on the published timetable."
+
+def pub_students(students):
+    """rewrite the published students (the rest of the published model stays) and drop the cache, as publish() does"""
+    p = os.path.join(store.PUB, "model.pkl")
+    with open(p, "rb") as f: model = pickle.load(f)
+    model["students"] = students
+    with open(p, "wb") as f: pickle.dump(model, f)
+    store._cache.update(stamp=None, value=None)
+
+@t
+def student_codes_by_class():
+    publish(); pub_students([dict(id="S001", name="Sam Student", cls="1A"), dict(id="S/2 'x'", name="Kim <b>", cls="1A"), dict(id="S003", name="Lee", cls="2B")])
+    c = signed_in(ALICE)
+    h = c.get("/student-codes").data.decode()
+    assert CODES_HINT in h and ">1A<" in h and ">2B<" in h and access.personal_code("S001") not in h
+    h = c.get("/student-codes?cls=1A").data.decode()
+    assert "Sam Student" in h and "Kim &lt;b&gt;" in h and "Lee" not in h and access.personal_code("S001") not in h
+    n = len(H.read(kinds=["look"], limit=100))
+    r = c.post("/student-codes", data=dict(id="S001")); h = r.data.decode()
+    code = access.personal_code("S001"); SECRETS.append(code)
+    assert r.status_code == 200 and code in h and r.headers["Cache-Control"] == "no-store"
+    assert access.personal_code("S/2 'x'") not in h                # only the one asked for
+    e = H.read(kinds=["look"], limit=1)[0]
+    assert len(H.read(kinds=["look"], limit=100)) == n + 1 and e["text"] == "Looked up the code of Sam Student (1A)" and e["who"] == ALICE
+    r = c.post("/student-codes", data=dict(id="S/2 'x'")); assert r.status_code == 200 and access.personal_code("S/2 'x'") in r.data.decode()
+    SECRETS.append(access.personal_code("S/2 'x'"))
+
+@t
+def student_codes_refusals():
+    c = signed_in(ALICE)
+    r = c.post("/student-codes", data=dict(id="NOPE")); assert r.status_code == 404 and CODES_NO_STUDENT in r.data.decode()
+    assert A.app.test_client().get("/student-codes").status_code == 302          # nobody signed in
+    sc = access.personal_code("S001"); SECRETS.append(sc)
+    s = A.app.test_client(); s.post("/student", data=dict(code=sc))
+    assert s.get("/student-codes").status_code in (302, 401) and s.post("/student-codes", data=dict(id="S001")).status_code in (302, 401)
+    h = signed_in(ALICE).get("/student-codes?cls=9Z").data.decode(); assert CODES_EMPTY_CLASS in h
+    unpublish(); assert CODES_NOT_PUBLISHED in signed_in(ALICE).get("/student-codes").data.decode(); publish()
+
+@t
+def student_codes_by_staff_code():
+    c, _ = code_in(staff_code(BEN))                # staff codes on: a staff code session is staff
+    assert c.get("/student-codes").status_code == 200
+
 @t
 def nothing_typed_reaches_the_history():
     text = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(H.DIR, "*.jsonl")))
