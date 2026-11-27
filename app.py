@@ -143,7 +143,7 @@ def _must_change_first():
 
 # every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
 RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "history.dept", "history.own", "codes", "admin", "own", "exams",
-                    "relief", "relief.plan", "relief.settings", "relief.save", "relief.team"})
+                    "relief", "relief.plan", "relief.settings", "relief.save", "relief.team", "codes.look", "staff.reset"})
 
 def need(*names):
     """the route needs one of these rights: the server decides, from the records, on every request. Without one, the
@@ -480,12 +480,14 @@ def logout():
 TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("setup",)),
          ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
+         ("Student codes", "Look up a student's forgotten code", "/student-codes", ("codes.look",)),
+         ("Reset a password", "A new temporary password for staff in your department", "/staff-reset", ("staff.reset",)),
          ("Exams and events", "", "/exams", ("exams", "committee")),
          ("Plan with AI", "Plan an exam or a common test by talking it through", "/plan", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
 OWN_HISTORY = "Your own changes"
-GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
+GREYED = ("Committee page", "Admin", "Reset a password")   # signed in with a code, these wait for the password
 DUTIES_TILE = ("My exam and event duties", "Your duties, your events and the lessons that don't happen")   # in place of Exams and events for everyone else
 TO_PASSWORD = "Sign in with your password to open this."
 _HOW = {"code": "Signed in with your code", "password": "Signed in with your password"}
