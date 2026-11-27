@@ -204,11 +204,11 @@ def page(title, body):
 <link rel="stylesheet" href="/static/login.css"></head><body>{body}</body></html>"""
 
 # ------------------------------------------------------------------------------------------------ signing in
-CODE_LABEL = "Your personal code (on the slip from the school)"
-CODE_LABEL_SHARED = "Your code (the one the school gave you)"   # while a shared code still opens the site
+CODE_LABEL = "Please enter your personal code to access your timetable."
+CODE_LABEL_SHARED = "Please enter your code to access your timetable."   # while a shared code still opens the site
 TO_STUDENT = "Students: sign in with your code"
-TO_STAFF = "Staff: sign in with your username"
-TO_USERNAME = "Committee and management: sign in with your username"
+TO_STAFF = "Staff Sign In"
+TO_USERNAME = "Staff Sign In"   # the same button while staff codes are on
 WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
 SWITCHED_OFF = "This account is switched off. Ask the timetable committee."
@@ -259,10 +259,10 @@ def _code_label(roles=None):
 def _code_page(msg="", student=False):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(_code_label(("student",)) if student else _code_label())}</label>
+<div class="logins"><div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(_code_label(("student",)) if student else _code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
-<button type="submit">Open</button></form>{err}
-<p class="way"><a href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
+<button type="submit" class="open">Open</button></form>{err}</div>
+<div class="login one other"><a class="btn" href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></div></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
 
 def _form_page(title, form, msg="", hint="", back=None, tail=None):
     """a small page with one form; back: its way back (the sign-in page, the student page once staff codes are off);
