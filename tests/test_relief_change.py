@@ -515,6 +515,39 @@ def every_kind_of_line_reads_as_it_should():
     finally: LS.today, AB._now = old_today, old_now
 
 @rt
+def an_added_lesson_held_by_a_backup_says_it_moves_in():
+    fresh()
+    lessons16 = [dict(x, date=x["date"].isoformat()) for x in LS.on_date(PUB, CAL, EVE, D16)]
+    b = AB.from_exams(EVE, lessons16, dict(id="s1", kind="exam"), "Exams committee", "Invigilating: X", None)   # as an_added_lesson_held_by_a_backup_moves_in
+    i = absent()["id"]
+    team, eve = staff(TEAMER), staff(EVE)
+    assert lines(preview(team, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover"]        # nobody chosen there yet
+    AB.choose(b["id"], KF, SAM, GRACE, PUB)
+    assert lines(preview(team, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with Mr Sam Tan (approved)"]
+    assert lines(preview(eve, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with a relief teacher (approved)"]
+    CV.acknowledge(b["id"], KF, SAM)
+    assert lines(preview(eve, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with Mr Sam Tan (acknowledged)"]
+    CV.ask_change(b["id"], KF, "A parents' meeting", SAM)
+    assert lines(preview(team, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with Mr Sam Tan (asked to change)"]
+    assert lines(preview(eve, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with a relief teacher (asked to change)"]
+    fresh()
+    b = AB.from_exams(EVE, lessons16, dict(id="s1", kind="exam"), "Exams committee", "Invigilating: X", None)
+    waiting_choice(b["id"], KF, SAM, GRACE)
+    i = absent()["id"]
+    assert lines(preview(team, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with Mr Sam Tan (waiting for approval)"]
+    assert lines(preview(eve, i, ["2026-10-13", "2026-10-16"]), "added") == ["moves in from the exam or event cover with a relief teacher (waiting for approval)"]
+
+@rt
+def a_preview_reads_the_clock_once():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    grace, calls, old = staff(GRACE), [], AB._now
+    AB._now = lambda: calls.append(1) or NOW
+    try: got = preview(grace, i, ["2026-10-13", "2026-10-16"], [0, 6])
+    finally: AB._now = old
+    assert len(got["kept"]) == 2 and len(got["gone"]) == 1 and len(calls) == 1, (calls, got)
+
+@rt
 def saving_answers_the_record_and_writes_one_history_entry():
     fresh()
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]

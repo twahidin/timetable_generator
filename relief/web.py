@@ -189,12 +189,13 @@ def _links_or_none(pub, cal):
         return None
 
 
-def _reached(pub):
-    """cover.reached for this request, as a callable (record, lesson, cover) -> bool: the settings read once, now at each call. A
-    cover whose sending out cannot be worked out (a record changed by hand) has not reached its teacher, logged by its kind"""
+def _reached(pub, now=None):
+    """cover.reached for this request, as a callable (record, lesson, cover) -> bool: the settings read once, now at each call
+    (or the now given, a school-time date-time: one clock for the request). A cover whose sending out cannot be worked out (a
+    record changed by hand) has not reached its teacher, logged by its kind"""
     settings = _settings.load(pub)
     def reached(r, x, c):
-        try: return _cover.reached(r, x, c, _absences._now(), settings, pub)
+        try: return _cover.reached(r, x, c, now if now is not None else _absences._now(), settings, pub)
         except Exception as e:
             current_app.logger.error("relief: whether a relief has reached its teacher could not be worked out (%s)", type(e).__name__)
             return False
@@ -724,11 +725,19 @@ def _work_set(x):
     return bool((w.get("text") or "").strip() or (w.get("link") or "").strip() or w.get("files"))
 
 
-def _change_line(kind, r, x, pub, reached, hide):
+STAYS = dict(waiting="waiting for approval", approved="approved", acknowledged="acknowledged", change="asked to change")   # a cover's state, as a line says it
+
+
+def _change_line(kind, r, x, pub, reached, hide, now):
     """what a change does to lesson x of record r, in a plain line: kind "kept" (it stays), "added" (a lesson of the plan's added,
-    new to the record) or "gone" (it leaves the record); reached: as _reached(pub) gives; hide: the caller is only the absent
-    teacher (as _out decides), who sees a relief teacher's name only once that teacher has acknowledged"""
+    new to the record; with backup_cover when it moves in from one of the teacher's exam or event covers) or "gone" (it leaves
+    the record); reached: as _reached(pub) gives; hide: the caller is only the absent teacher (as _out decides), who sees a
+    relief teacher's name only once that teacher has acknowledged; now: the request's school time (fill._when), for whether a lesson is under way"""
     if kind == "added":
+        b = x.get("backup_cover")
+        if isinstance(b, dict):
+            line = "moves in from the exam or event cover"
+            return f"{line} with {_who(b, b.get('state'), hide)} ({STAYS[b['state']]})" if b.get("relief") and b.get("state") in STAYS else line
         return f"{' and '.join(x.get('others') or [])} is there: no relief needed" if not x.get("needed") else "a relief teacher will be picked"
     if kind == "gone":
         said = []
@@ -745,16 +754,14 @@ def _change_line(kind, r, x, pub, reached, hide):
     elif x.get("parts"): line = f"split into {len(x['parts'])} parts: each keeps its relief teacher"
     else:
         s = _cover.state(r, x, x)
-        line = dict(open="no relief teacher yet", waiting=f"{_who(x, s, hide)} stays (waiting for approval)",
-                    approved=f"{_who(x, s, hide)} stays (approved)", acknowledged=f"{_who(x, s, hide)} stays (acknowledged)",
-                    change=f"{_who(x, s, hide)} stays (asked to change)").get(s, "relief not needed")
+        line = f"{_who(x, s, hide)} stays ({STAYS[s]})" if s in STAYS else "no relief teacher yet" if s == "open" else "relief not needed"
     if x.get("needed") and _work_set(x): line += ", the work set stays"
-    return ("under way · " if _absences._started(pub, x, _fill._when(_absences._now())) else "") + line
+    return ("under way · " if _absences._started(pub, x, now) else "") + line
 
 
-def _change_item(kind, r, x, pub, reached, hide):
+def _change_item(kind, r, x, pub, reached, hide, now):
     return dict(key=x["key"], date=str(x["date"]), p=int(x["p"]), n=int(x.get("n") or 1), title=_class_group(x), periods=_periods_text(x),
-                line=_change_line(kind, r, x, pub, reached, hide))
+                line=_change_line(kind, r, x, pub, reached, hide, now))
 
 
 def _change_data(b):
@@ -773,10 +780,10 @@ def change_preview(id):
     err = _may_change(r, me)
     if err: return err
     try:
-        p = _absences.plan_change(r, _change_data(_body()), pub, _absences.all_records(), _links_or_none(pub, _cal(pub)),
-                                  _fill._when(_absences._now()))
-        reached, hide = _reached(pub), me == r.get("teacher") and not _sees_all()
-        out = {k: [_change_item(k, r, x, pub, reached, hide) for x in p[k]] for k in ("kept", "added", "gone")}
+        now = _fill._when(_absences._now())                    # one clock for the whole preview
+        p = _absences.plan_change(r, _change_data(_body()), pub, _absences.all_records(), _links_or_none(pub, _cal(pub)), now)
+        reached, hide = _reached(pub, now), me == r.get("teacher") and not _sees_all()
+        out = {k: [_change_item(k, r, x, pub, reached, hide, now) for x in p[k]] for k in ("kept", "added", "gone")}
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "previewing a change")
     return jsonify(dict(out, earlier=p["earlier"], dates=p["dates"], periods=p["periods"], unchanged=p["unchanged"], day_periods=_periods(pub)))
