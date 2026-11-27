@@ -310,6 +310,8 @@ GUARDS = {
     # are checked inside the routes, with their own sentences, and pinned in RELIEF_INSIDE further down
     "relief_web.acknowledge": ('relief',),
     "relief_web.cancel": ('relief',),
+    "relief_web.change_preview": ('relief',),
+    "relief_web.change_request": ('relief',),
     "relief_web.create": ('relief',),
     "relief_web.download": ('relief',),
     "relief_web.free": ('relief',),

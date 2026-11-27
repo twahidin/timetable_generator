@@ -343,4 +343,206 @@ def the_old_gone_still_writes_app():
     assert r["gone"][0]["history"][-1]["by"] == "app" and r["gone"][0]["gone"]["why"] == "The duty changed.", r["gone"]
 
 
+# ---- Task 3: the routes to preview and save a change, and their plain lines ----
+import access, history as H  # noqa: E402
+from relief import cover as CV  # noqa: E402
+from relief import web as W  # noqa: E402
+# who plans and who is on the team: the accounts. Grace is a school leader (relief.plan); Mr Team Lee has the Relief team extra
+AP.update(lambda d: d["people"].update({GRACE: dict(group="leader"), TEAMER: dict(extras=dict(relief=True, exams=None, admin=False))}))
+SIGN_IN = "Please sign in again."
+NOT_OPEN = "This absence is not yours to open."          # web.NOT_YOURS: _record, for someone who may not open the absence at all
+
+def ok(r, code=200):
+    assert r.status_code == code, (r.status_code, r.get_data(as_text=True)[:400])
+    return r.get_json()
+
+def no(r, code, text):
+    assert r.status_code == code, (code, r.status_code, r.get_data(as_text=True)[:400])
+    assert r.get_json() == {"error": text}, r.get_json()
+
+def staff(name):
+    """a client signed in by name with the person's own code"""
+    c = A.app.test_client()
+    r = c.post("/login", data={"code": access.staff_code(name)}); assert r.status_code == 302, (name, r.status_code)
+    return c
+
+def notes():
+    """every relief history entry so far, oldest first: (what, who, text)"""
+    return [(e["what"], e["who"], e["text"]) for e in reversed(H.read(kinds=["relief"], limit=2000)) if e.get("where") == "Relief"]
+
+def rt(f):
+    """a route test: the published timetable is PUB"""
+    old = store.published; store.published = lambda: PUB
+    try: return t(f)
+    finally: store.published = old
+
+def preview_url(i): return f"/api/relief/absences/{i}/change/preview"
+def save_url(i): return f"/api/relief/absences/{i}/change"
+
+def preview(c, i, dates, periods=None, code=200):
+    """POST the preview; checks it wrote nothing -> the answer"""
+    before = snap()
+    got = c.post(preview_url(i), json=dict(dates=list(dates), periods=periods))
+    assert snap() == before, "the preview wrote something"
+    return ok(got, code)
+
+def lines(got, kind): return [x["line"] for x in got[kind]]
+def shown(got): return dict(added=keys(got["added"]), gone=keys(got["gone"]))
+
+@rt
+def the_preview_says_what_each_lesson_does():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # a head's choice: approved and sent out at once
+    x5 = AB._lesson(AB.load(i), K5)
+    assert x5["approved"] and CV.sent_out(x5), x5
+    got = preview(staff(GRACE), i, ["2026-10-13", "2026-10-16"], [5, 11])
+    assert set(got) == {"kept", "added", "gone", "earlier", "dates", "periods", "unchanged", "day_periods"}, got
+    assert lines(got, "kept") == ["Mr Sam Tan stays (approved)", "relief not needed"], got["kept"]     # K8: Mr Busy Chan is there
+    assert keys(got["kept"]) == [K5, K8] and got["added"] == [] and keys(got["gone"]) == [K2], got
+    assert lines(got, "gone") == ["nobody was approved yet"], got["gone"]
+    assert got["kept"][0] == dict(key=K5, date="2026-10-13", p=5, n=2, title="1A Science", periods="P6–P7", line="Mr Sam Tan stays (approved)"), got["kept"][0]
+    assert got["gone"][0] == dict(key=K2, date="2026-10-13", p=2, n=3, title="1C Science", periods="P3–P5", line="nobody was approved yet"), got["gone"][0]
+    assert got["dates"] == ["2026-10-13", "2026-10-16"] and got["periods"] == [5, 11] and got["earlier"] == 0 and got["unchanged"] is False, got
+    assert len(got["day_periods"]) == 12 and got["day_periods"][0] == dict(p=0, start="08:00", end="08:30"), got["day_periods"]
+    got = preview(staff(GRACE), i, ["2026-10-13", "2026-10-16"])
+    assert lines(got, "added") == ["a relief teacher will be picked"] and keys(got["added"]) == [KF], got["added"]
+    assert got["added"][0]["title"] == "1A Art" and got["added"][0]["periods"] == "P1–P2" and got["added"][0]["date"] == "2026-10-16", got["added"]
+    got = preview(staff(GRACE), i, ["2026-10-13"])
+    assert got["unchanged"] is True and got["added"] == got["gone"] == [], got
+    before = snap()
+    no(staff(GRACE).post(preview_url(i), json=dict(dates=[], periods=None)), 400, "Choose up to 20 school days, today or later.")
+    no(staff(GRACE).post(preview_url(i), json=dict(dates=["2026-10-13"], periods=[3, 1])), 400, "Choose the periods again.")
+    no(staff(GRACE).post(preview_url(i), data="nope", content_type="text/plain"), 400, "Choose up to 20 school days, today or later.")
+    assert snap() == before, "a refused preview wrote something"
+
+@rt
+def an_added_shared_lesson_says_who_is_there():
+    fresh()
+    i = absent(dates=("2026-10-16",))["id"]
+    got = preview(staff(EVE), i, ["2026-10-13", "2026-10-16"])
+    assert lines(got, "added") == ["a relief teacher will be picked", "a relief teacher will be picked", "Mr Busy Chan is there: no relief needed"], got["added"]
+    assert keys(got["added"]) == [K2, K5, K8], got["added"]
+
+@rt
+def the_absent_teacher_alone_sees_no_name_before_it_is_acknowledged():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    eve = staff(EVE)
+    got = preview(eve, i, ["2026-10-13", "2026-10-16"], [5, 11])
+    assert lines(got, "kept") == ["a relief teacher stays (approved)", "relief not needed"], got["kept"]
+    got = preview(eve, i, ["2026-10-13"], [0, 4])                              # K5 goes: its relief has reached Mr Sam Tan
+    assert lines(got, "gone") == ["a relief teacher is told the relief is no longer needed", "nobody was approved yet"], got["gone"]
+    assert SAM not in json.dumps(got), "no name anywhere in the answer"
+    assert lines(preview(staff(GRACE), i, ["2026-10-13"], [0, 4]), "gone")[0] == "Mr Sam Tan is told the relief is no longer needed"
+    CV.acknowledge(i, K5, SAM)
+    got = preview(eve, i, ["2026-10-13", "2026-10-16"], [5, 11])
+    assert lines(got, "kept") == ["Mr Sam Tan stays (acknowledged)", "relief not needed"], got["kept"]
+    assert lines(preview(eve, i, ["2026-10-13"], [0, 4]), "gone")[0] == "Mr Sam Tan is told the relief is no longer needed"
+
+@rt
+def every_kind_of_line_reads_as_it_should():
+    fresh()
+    i = absent_waiting(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]      # a choice waiting for the relief team
+    grace, eve = staff(GRACE), staff(EVE)
+    assert lines(preview(grace, i, ["2026-10-13"], [5, 11]), "kept")[0] == "Mr Sam Tan stays (waiting for approval)"
+    assert lines(preview(grace, i, ["2026-10-13"], [0, 4]), "gone")[0] == "the waiting pick (Mr Sam Tan) ends"
+    assert lines(preview(eve, i, ["2026-10-13"], [0, 4]), "gone")[0] == "the waiting pick (a relief teacher) ends"
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)                                          # approved, not sent out: not told yet
+    assert lines(preview(grace, i, ["2026-10-13"], [5, 11]), "kept")[0] == "Mr Sam Tan stays (approved)"
+    assert lines(preview(grace, i, ["2026-10-13"], [0, 4]), "gone")[0] == "Mr Sam Tan was approved, not told yet: the relief ends"
+    assert lines(preview(eve, i, ["2026-10-13"], [0, 4]), "gone")[0] == "a relief teacher was approved, not told yet: the relief ends"
+    CV.send_out(i, K5, SAM, TEAMER, PUB, ST)
+    CV.ask_change(i, K5, "A parents' meeting", SAM)
+    assert lines(preview(grace, i, ["2026-10-13"], [5, 11]), "kept")[0] == "Mr Sam Tan stays (asked to change)"
+    assert lines(preview(eve, i, ["2026-10-13"], [5, 11]), "kept")[0] == "a relief teacher stays (asked to change)"
+    AB.set_work(i, K5, dict(text="Read p.4", link="", files=[], known=[]), EVE)
+    AB.set_work(i, K8, dict(text="Draw", link="", files=[], known=[]), EVE)        # K8 is not needed: its work is not mentioned
+    assert lines(preview(grace, i, ["2026-10-13"], [5, 11]), "kept") == ["Mr Sam Tan stays (asked to change), the work set stays", "relief not needed"]
+    assert lines(preview(grace, i, ["2026-10-13"], [5, 11]), "gone") == ["nobody was approved yet"]
+    CV.split(i, K2, 3, TEAMER)
+    CV.change(i, K2 + "#0", FLEX, TEAMER, PUB, ST)
+    got = preview(grace, i, ["2026-10-13"], [0, 4])
+    assert lines(got, "kept") == ["split into 2 parts: each keeps its relief teacher"], got["kept"]
+    got = preview(grace, i, ["2026-10-13"], [5, 11])
+    assert lines(got, "gone") == ["Mr Flex Ng was approved, not told yet: the relief ends; nobody was approved yet"], got["gone"]
+    CV.send_out(i, K2 + "#0", FLEX, TEAMER, PUB, ST)
+    got = preview(grace, i, ["2026-10-13"], [5, 11])
+    assert lines(got, "gone") == ["Mr Flex Ng is told the relief is no longer needed; nobody was approved yet"], got["gone"]
+    assert lines(preview(eve, i, ["2026-10-13"], [5, 11]), "gone") == ["a relief teacher is told the relief is no longer needed; nobody was approved yet"]
+    # an exam or event stops a lesson
+    class Stops:
+        def stopped(s, x): return "5A is on Sec 1 Art Exam" if x.get("key") == K8 else ""
+        def busy(s, *a): return False
+        def duties(s, *a): return []
+    old = W._links_or_none; W._links_or_none = lambda pub, cal: Stops()
+    try: got = preview(grace, i, ["2026-10-13"], [5, 11])
+    finally: W._links_or_none = old
+    assert lines(got, "kept")[1] == "not happening: 5A is on Sec 1 Art Exam", got["kept"]
+    # a lesson under way
+    old_today, old_now = LS.today, AB._now
+    try:
+        LS.today = lambda: D13
+        AB._now = lambda: "2026-10-13T10:45:00+08:00"                            # K5 (10:30) has begun
+        got = preview(grace, i, ["2026-10-13"], [8, 11])                      # K2 and K5 have begun: they stay outside the new periods
+        assert lines(got, "kept") == ["under way · split into 2 parts: each keeps its relief teacher",
+                                      "under way · Mr Sam Tan stays (asked to change), the work set stays", "relief not needed"], got["kept"]
+    finally: LS.today, AB._now = old_today, old_now
+
+@rt
+def saving_answers_the_record_and_writes_one_history_entry():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    grace, team = staff(GRACE), staff(TEAMER)
+    seen_g = shown(preview(grace, i, ["2026-10-13"], [5, 11]))
+    seen_t = shown(preview(team, i, ["2026-10-13"], [2, 6]))
+    assert seen_g == dict(added=[], gone=[K2]) and seen_t == dict(added=[], gone=[K8]), (seen_g, seen_t)
+    n = len(notes())
+    got = ok(grace.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[5, 11], why="Back after the clinic", shown=seen_g)))
+    assert keys(got["lessons"]) == [K5, K8] and got["periods"] == [5, 11] and got["id"] == i, got
+    new = notes()[n:]
+    assert [(w, who) for w, who, _ in new] == [("changed", GRACE)], new
+    assert "changed to Tue 13 Oct (P6–P12): 0 added, 1 no longer needed" in new[0][2] and "clinic" not in new[0][2], new
+    assert new[0][2] == f"Relief for {EVE} on Tue 13 Oct: changed to Tue 13 Oct (P6–P12): 0 added, 1 no longer needed", new
+    before = snap()
+    no(team.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[2, 6], why="", shown=seen_t)), 400, AB.LOOKED)   # the other saved first
+    no(grace.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[5, 11], why="", shown=seen_g)), 400, AB.NOTHING)
+    no(grace.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[8, 11], why="")), 400, AB.WRONG)                # no look: no save
+    no(grace.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[8, 11], why="x" * 201, shown=dict(added=[], gone=[K5]))), 400, AB.WHY_LONG)
+    assert snap() == before and len(notes()) == n + 1, "a refused save wrote nothing"
+    got = ok(team.post(save_url(i), json=dict(dates=["2026-10-13", "2026-10-16"], periods=None, why="", shown=dict(added=sorted([K2, KF]), gone=[]))))
+    assert keys(got["lessons"]) == [K2, K5, K8, KF], got
+    assert notes()[-1] == ("changed", TEAMER, f"Relief for {EVE} on Tue 13 Oct, Fri 16 Oct: changed to Tue 13 Oct, Fri 16 Oct (whole day): 2 added, 0 no longer needed"), notes()[-1]
+
+@rt
+def the_absent_teacher_gets_her_own_view_from_a_save():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)], remarks="Quiet please")["id"]
+    eve = staff(EVE)
+    got = ok(eve.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[5, 11], why="", shown=shown(preview(eve, i, ["2026-10-13"], [5, 11])))))
+    assert "remarks" not in got and next(x for x in got["lessons"] if x["key"] == K5)["relief"] is None, got     # as _out sends it to her
+
+@rt
+def who_may_preview_and_save():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    a = absent(teacher=RUTH)["id"]                                               # asked by Ms Ruth Goh herself
+    body = dict(dates=["2026-10-13"], periods=[5, 11], why="", shown=dict(added=[], gone=[K2]))
+    before = snap()
+    sam, grace = staff(SAM), staff(GRACE)
+    for url in (preview_url(i), save_url(i)):
+        no(sam.post(url, json=body), 403, NOT_OPEN)                              # not hers to open at all
+        no(A.app.test_client().post(url, json=body), 401, SIGN_IN)
+    for url in (preview_url(a), save_url(a)):
+        no(grace.post(url, json=dict(body, dates=["2026-10-13"], periods=[6, 11], shown=dict(added=[], gone=[KR2]))), 403, AB.NOT_YOURS)   # relief.plan opens it, may not change it
+    no(staff(EVE).post(preview_url("abcdef123456"), json=body), 403, NOT_OPEN)
+    no(grace.post(preview_url("abcdef123456"), json=body), 404, "That absence is not there any more.")
+    assert snap() == before, "a refused call wrote something"
+    team = staff(TEAMER)
+    assert lines(preview(team, a, ["2026-10-13"], [6, 11]), "gone") == ["nobody was approved yet"]
+    got = ok(team.post(save_url(a), json=dict(dates=["2026-10-13"], periods=[6, 11], why="", shown=dict(added=[], gone=[KR2]))))
+    assert keys(got["lessons"]) == [KR6], got
+    store.published = lambda: None
+    no(team.post(preview_url(a), json=body), 409, "Publish the timetable first: relief reads the teachers from it.")
+
+
 print(f"{COUNT} relief change tests passed")

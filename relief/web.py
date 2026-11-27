@@ -22,7 +22,11 @@ reason, reason_text, remarks, reporting_officer, lessons=[{key, needed, relief, 
 {text, link, files: [{id, name}], known: [the file ids the page started from]} (a missing or other body is refused,
 never read as "no work"); POST …/not-needed and …/cancel take {why}; PUT …/relief takes {relief: a name, or
 null to take the choice off}; POST …/files takes one file in the multipart field "file"; POST /api/relief/absences/seen
-takes {at}: the as_of the All Relief Requests list answered (now when left out). Periods are 0-based, as in the records.
+takes {at}: the as_of the All Relief Requests list answered (now when left out); POST …/change/preview takes {dates, periods}
+and answers what the change would do, lesson by lesson ({kept, added, gone: [{key, date, p, n, title, periods, line}], earlier,
+dates, periods, unchanged, day_periods}), writing nothing; POST …/change takes {dates, periods, why, shown: the preview's
+{added, gone} lesson keys} and saves it (absences.LOOKED when the preview is out of date). Both are for the absent teacher, the
+head who planned it and the relief team (else 403 absences.NOT_YOURS). Periods are 0-based, as in the records.
 
 Stage 3 (relief/cover.py, pick.py, fill.py). A cover is a lesson, or one part of a split lesson, by its cover key (the
 lesson's key, or key#i for part i); every list of covers is sent in time order (by p). The relief team (relief.team,
@@ -622,17 +626,19 @@ def one(id):
     return jsonify(_out(r, pub, me))
 
 
-def _change(id, do, what, words, right=None, refused=None, gate=("relief", None), after=None, same_is_nothing=False):
+def _change(id, do, what, words, right=None, refused=None, gate=("relief", None), after=None, same_is_nothing=False, may=None):
     """gate (the relief team's routes: TEAM, asked before the absence is opened, so a teacher gets TEAM_ONLY whatever the
-    id), open the absence (403/404 as _record), check the right, do(record, me, pub, body) -> the saved record, then its
-    history entry: what, and words(the saved record); then after(the saved record, pub) and _tell_soon, the absences lock
-    released. same_is_nothing: when do answers the record as it was opened (nothing was saved), no history entry and no
-    sweep"""
+    id), open the absence (403/404 as _record), check the right, and may(record, me) -> the refusing answer or None, then
+    do(record, me, pub, body) -> the saved record, then its history entry: what, and words(the saved record); then
+    after(the saved record, pub) and _tell_soon, the absences lock released. same_is_nothing: when do answers the record
+    as it was opened (nothing was saved), no history entry and no sweep"""
     pub, me, err = _gate(*gate)
     if err: return err
     r, err = _record(id, me)
     if err: return err
     if right and not _has(right): return {"error": refused}, 403
+    err = may(r, me) if may else None
+    if err: return err
     opened = r
     try: r = do(r, me, pub, _body())
     except ValueError as e: return _refusal(e)
@@ -698,6 +704,108 @@ def cancel(id):
     what, words, after = STEPS["cancel"]
     return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")), what,
                    lambda r: words(r, None, None), after=after)
+
+
+# ---- changing a request's dates and times (relief piece 2)
+def _may_change(r, me):
+    """None when me may change absence r (its absent teacher, the head who planned it, the relief team), else the 403 answer:
+    absences.NOT_YOURS, the sentence absences.change itself refuses with"""
+    return None if _absences._owner(r, me) or _has("relief.team") else ({"error": _absences.NOT_YOURS}, 403)
+
+
+def _who(c, s, hide):
+    """the relief teacher of cover c (state s) as a line names them: 'a relief teacher' for the absent teacher alone (hide)
+    until they have acknowledged it"""
+    return "a relief teacher" if hide and s != "acknowledged" else c.get("relief")
+
+
+def _work_set(x):
+    w = x.get("work") or {}
+    return bool((w.get("text") or "").strip() or (w.get("link") or "").strip() or w.get("files"))
+
+
+def _change_line(kind, r, x, pub, reached, hide):
+    """what a change does to lesson x of record r, in a plain line: kind "kept" (it stays), "added" (a lesson of the plan's added,
+    new to the record) or "gone" (it leaves the record); reached: as _reached(pub) gives; hide: the caller is only the absent
+    teacher (as _out decides), who sees a relief teacher's name only once that teacher has acknowledged"""
+    if kind == "added":
+        return f"{' and '.join(x.get('others') or [])} is there: no relief needed" if not x.get("needed") else "a relief teacher will be picked"
+    if kind == "gone":
+        said = []
+        for c in sorted(_cover.covers(x), key=lambda c: int(c["p"])):
+            s = _cover.state(r, x, c)
+            if s in APPROVED and reached(r, x, c): said.append(f"{_who(c, s, hide)} is told the relief is no longer needed")
+            elif s in APPROVED: said.append(f"{_who(c, s, hide)} was approved, not told yet: the relief ends")
+            elif s == "waiting": said.append(f"the waiting pick ({_who(c, s, hide)}) ends")
+            else: said.append("nobody was approved yet")
+        return "; ".join(said)
+    why = _cover.stopped(_links_or_none(pub, _cal(pub)), x)
+    if why: line = f"not happening: {why}"
+    elif not x.get("needed"): line = "relief not needed"
+    elif x.get("parts"): line = f"split into {len(x['parts'])} parts: each keeps its relief teacher"
+    else:
+        s = _cover.state(r, x, x)
+        line = dict(open="no relief teacher yet", waiting=f"{_who(x, s, hide)} stays (waiting for approval)",
+                    approved=f"{_who(x, s, hide)} stays (approved)", acknowledged=f"{_who(x, s, hide)} stays (acknowledged)",
+                    change=f"{_who(x, s, hide)} stays (asked to change)").get(s, "relief not needed")
+    if x.get("needed") and _work_set(x): line += ", the work set stays"
+    return ("under way · " if _absences._started(pub, x, _fill._when(_absences._now())) else "") + line
+
+
+def _change_item(kind, r, x, pub, reached, hide):
+    return dict(key=x["key"], date=str(x["date"]), p=int(x["p"]), n=int(x.get("n") or 1), title=_class_group(x), periods=_periods_text(x),
+                line=_change_line(kind, r, x, pub, reached, hide))
+
+
+def _change_data(b):
+    return dict(dates=b.get("dates"), periods=b.get("periods"), why=b.get("why"))
+
+
+@bp.post("/api/relief/absences/<id>/change/preview")
+@need("relief")
+def change_preview(id):
+    """what changing the absence's dates and times to {dates, periods} would do, lesson by lesson (absences.plan_change), each
+    lesson with its plain line (_change_line); writes nothing. The same people as the save (_may_change)"""
+    pub, me, err = _gate()
+    if err: return err
+    r, err = _record(id, me)
+    if err: return err
+    err = _may_change(r, me)
+    if err: return err
+    try:
+        p = _absences.plan_change(r, _change_data(_body()), pub, _absences.all_records(), _links_or_none(pub, _cal(pub)),
+                                  _fill._when(_absences._now()))
+        reached, hide = _reached(pub), me == r.get("teacher") and not _sees_all()
+        out = {k: [_change_item(k, r, x, pub, reached, hide) for x in p[k]] for k in ("kept", "added", "gone")}
+    except ValueError as e: return _refusal(e)
+    except BAD_INPUT as e: return _odd(e, "previewing a change")
+    return jsonify(dict(out, earlier=p["earlier"], dates=p["dates"], periods=p["periods"], unchanged=p["unchanged"], day_periods=_periods(pub)))
+
+
+def _changed_words(r):
+    """'changed to Tue 13 Oct (P6–P12): 0 added, 1 no longer needed': the saved record's dates and times, the last change's counts"""
+    last = (r.get("changes") or [{}])[-1]
+    return f"changed to {_words.days(r)} ({_words.away(r)}): {len(last.get('added') or [])} added, {len(last.get('gone') or [])} no longer needed"
+
+
+def _save_change(r, me, pub, b):
+    """absences.change with the preview the person answered (shown: {added, gone}); a save without one is refused"""
+    if not isinstance(b.get("shown"), dict): raise ValueError(_absences.WRONG)
+    return _absences.change(r["id"], _change_data(b), me, pub, team=_has("relief.team"), links=_links_or_none(pub, _cal(pub)),
+                            shown=b["shown"])[0]
+
+
+def _after_change(r, pub):
+    """after a change: the backups back in step first (a lesson it drops goes to one again), then the picks"""
+    _sync_exams(pub)
+    _soon()
+
+
+@bp.post("/api/relief/absences/<id>/change")
+@need("relief")
+def change_request(id):
+    """change the absence's dates and times: {dates, periods, why, shown: the preview's {added, gone} keys} (absences.change)"""
+    return _change(id, _save_change, "changed", _changed_words, after=_after_change, may=_may_change)
 
 
 # ---- work files
