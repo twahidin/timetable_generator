@@ -3810,7 +3810,7 @@ def events_who(id):
 
 startup_log()
 move_relief_lists()
-try: students.resume_files()                                     # the files to download, if a restart found them behind a student change
+try: students.resume_files()                                     # the files to download, if a restart found them behind a student change or made by an older look of the printouts
 except Exception as e: print("warning: the files to download were not resumed (" + type(e).__name__ + ")", file=sys.stderr)
 
 if __name__ == "__main__":

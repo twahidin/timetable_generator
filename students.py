@@ -149,7 +149,8 @@ def files_now():
     return store.remake_files()
 
 def resume_files():
-    """at start: the files are made again when the published timetable says they are behind"""
+    """at start: the files are made again when the published timetable says they are behind a student change or were
+    made by an older look of the printouts (store.files_stale)"""
     pub = store.published()
     if pub and store.files_stale(pub["meta"]): schedule_files()
 

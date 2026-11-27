@@ -416,6 +416,23 @@ def the_thread_runs_after_the_wait_and_after_a_restart():
     finally: students.FILES_WAIT = 3600
 
 @t
+def a_restart_remakes_files_made_by_an_older_look():
+    fresh(); students.FILES_WAIT = 0
+    try:
+        mp = os.path.join(store.PUB, "meta.json"); meta = json.load(open(mp, encoding="utf-8"))
+        meta.pop("files_look", None); meta["files_behind"] = False; store.write_json(mp, meta)   # an older publish: no look written, no student change
+        with store._publishing: store.swap_model(store.published()["model"])                  # the cache reads the meta again
+        assert "files_look" not in store.published()["meta"] and store.files_stale(store.published()["meta"])
+        students.resume_files(); deadline = time.time() + 60
+        while (students._files["running"] or store.published()["meta"].get("files_look") != E.LOOK) and time.time() < deadline: time.sleep(0.2)
+        assert not students._files["running"]
+        meta = store.published()["meta"]
+        assert meta["files_look"] == E.LOOK and not store.files_stale(meta), meta
+    finally: students.FILES_WAIT = 3600
+    assert store.files_stale(dict(store.published()["meta"], files_look=E.LOOK - 1, files_behind=False))      # made by the look before this one
+    assert not store.files_stale(dict(store.published()["meta"], files_look=E.LOOK, files_behind=False))
+
+@t
 def the_skeleton_holds_what_the_screen_needs():
     fresh(); k = c.get("/api/students/skeleton").get_json(); m = store.published()["model"]
     assert k["stamp"] == students.stamp(store.published()) and k["stamp"].startswith(store.published()["meta"]["published_at"] + "|")

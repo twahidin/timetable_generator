@@ -698,10 +698,12 @@ def _box_lines(cell, w, h):
     if f:
         t, ti, de = 6.2 * f, 7.4 * f, 6.3 * f
         return [(time_at(t), B, t, SUB), (title, B, ti, INK)] + ([(detail, R, de, MUTED)] if detail else [])
-    f = shrink(False)   # the detail goes first: time and title as large as they fit
+    f = shrink(False)   # two lines fit: the time and the title share the first when the width allows, so the detail (which class, which room) stays
     if f:
         t, ti = 6.2 * f, 7.4 * f
-        return [(time_at(t), B, t, SUB), (title, B, ti, INK)]
+        if detail and stringWidth(f"{full} {title}", B, ti) <= w - 5.5:
+            return [(f"{full} {title}", B, ti, INK), (detail, R, min(6.3 * f, room / 1.16 - ti), MUTED)]
+        return [(time_at(t), B, t, SUB), (title, B, ti, INK)]   # else the detail goes: time over title
     ti = 7.4 * 0.9; cut = title   # one line: the start time whole, then as much of the title as fits, cut with "…"
     if stringWidth(f"{start} {cut}", B, ti) <= w - 5.5: return [(f"{start} {cut}", B, ti, INK)]
     while cut and stringWidth(f"{start} {cut}…", B, ti) > w - 5.5: cut = cut[:-1]
@@ -802,7 +804,7 @@ def draw_page(c, m, v, page=None):
     leg_top = gbot - 12
     span = _span(m, v)
     a0, b1 = span or (0, 1)
-    def X(t): return gx + (t - a0) * gw / (b1 - a0)
+    def X(t): return gx + (t - a0) * gw / max(1, b1 - a0)   # a span that does not end after its start is taken as one minute
     hours = _hours(a0, b1) if span else []
     edges = [t for t in (_mins(m, p) for p in range(NP + 1)) if a0 <= t <= b1] if span else []
     # each week: its hour row, then its day rows

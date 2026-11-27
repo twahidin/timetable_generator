@@ -55,6 +55,7 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .tt .row{border-top:1px solid var(--line)}
 .tt .row:last-child{border-bottom:1px solid var(--line)}
 .tt .dl{display:flex;flex-direction:column;justify-content:center;padding-left:4px;font-weight:700;font-size:13px}.tt .dl small{font-weight:600;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tt .dl,.tt .wk{position:sticky;left:0;z-index:3;background:var(--panel)}   /* the day names stay in place when the grid moves sideways (opaque, over the cells, also on the glass card) */
 .tt .track{position:relative}
 .tt .vl{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}.tt .vl.h{background:var(--hourline)}
 .tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;font-size:11px;color:var(--muted);background:repeating-linear-gradient(135deg,var(--stripe) 0 6px,var(--stripe2) 6px 12px)}
@@ -62,7 +63,8 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .cell{position:absolute;padding:2px 4px 1px;border-radius:7px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);border-left:4px solid var(--a);
   font-size:11px;line-height:1.15;color:var(--sub);display:flex;flex-direction:column;margin-left:1px}
 .cell b{color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cell .t{color:var(--ink);font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none;overflow:visible;text-overflow:clip}.cell.s{padding:2px 2px 1px;border-left-width:3px}.cell.s .t{font-size:10px;letter-spacing:-.02em}.cell .m{color:var(--sub)}
+.cell .t{color:var(--ink);font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none;overflow:visible;text-overflow:clip}.cell.s{padding:2px 1px 1px;border-left-width:2px}.cell.s .t{font-size:9.5px;letter-spacing:-.02em}.cell .m{color:var(--sub)}
+.cell{container-type:inline-size}.cell .ts{display:none}@container (max-width:75px){.cell .tf{display:none}.cell .ts{display:inline}}   /* a box too narrow for the full time shows the start alone, judged by its real width (75px of content holds the widest, 10.40–11.20) */
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
 .cell.x{opacity:.5;filter:grayscale(.7)}.cell.x b,.cell.x span{text-decoration:line-through}
@@ -118,7 +120,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media print{html.inapp{background:#fff}html.inapp .card{background:none;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}}
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
-@media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
+@media print{@page{size:A4 landscape;margin:9mm}.tt .dl,.tt .wk{position:static}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
   .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.vl,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
 </style>
@@ -181,7 +183,7 @@ const PB = (() => {
 /* the clock sums: a lesson is placed by its start and end in minutes (a, b), not by period number */
 const clk = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padStart(2, "0")}`;   /* minutes after midnight as the school writes a time: 480 is "8.00", 780 is "1.00" */
 const edge = (p, n) => { const hi = PB.length - 1, i = q => Math.max(0, Math.min(hi, Math.floor(q))); return [PB[i(p)][0], PB[i(Math.ceil(p + n) - 1)][1]]; };   /* p held inside the day as time() holds it */
-const cellTime = c => c.b - c.a < 40 ? clk(c.a) : `${clk(c.a)}–${clk(c.b)}`;
+const cellTime = c => `${clk(c.a)}–${clk(c.b)}`, cellStart = c => clk(c.a);   /* a box holds both; its real width decides which shows */
 /* the runs of assembly, recess and lunch on day d, in minutes, kept only when a lesson (or exam, event) of that day starts at or after the run's end */
 function bandsOf(v, d) {
   const row = v.codes ? v.codes[d] : null, out = [];
@@ -335,7 +337,7 @@ function gridHTML(v) {
   const most = Array(ND).fill(1); for (const [c, [, n]] of ln) most[c.d] = Math.max(most[c.d], n);
   const lines = uniq(PB.flat()).filter(m => m > a0 && m < b1 && m % 60).map(m => `<i class="vl" style="left:${pc(m)}"></i>`).join("") + hrs.map(x => `<i class="vl h" style="left:${pc(x.m)}"></i>`).join("");
   const ruler = wk => `<div class="ruler"><div class="wk">${esc(wk)}</div><div class="ax">${hrs.map(x => `<span class="hr${x.m - a0 < 15 ? " l" : b1 - x.m < 15 ? " r" : ""}" style="left:${pc(x.m)}">${esc(x.text)}${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</span>`).join("")}</div></div>`;
-  let h = `<div class="gridwrap"><div class="tt" style="--w:${len * 2}px">`;
+  let h = `<div class="gridwrap"><div class="tt" style="--w:${+(len * 1.8).toFixed(1)}px">`;
   for (let d = 0; d < ND; d++) {
     if (v.only != null && d !== v.only) continue;   /* a view on a date: that day's row only */
     const [wk, dn] = weekDay(DAYS[d]); let inner = lines;
@@ -343,7 +345,7 @@ function gridHTML(v) {
     for (const x of bandsOf(v, d)) if (x.b > a0 && x.a < b1) inner += `<div class="bk${x.b - x.a < 40 ? " v" : ""}" style="left:${pc(x.a)};width:${wd(x.a, x.b)}"><span>${esc(x.name)}</span></div>`;
     for (const c of v.cells.filter(c => c.d === d)) {
       const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : pal(c.color);   /* an exam takes its colours from .cell.exam */
-      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.b - c.a < 40 ? " s" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><span class="t">${esc(cellTime(c))}</span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
+      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.b - c.a < 40 ? " s" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><span class="t"><span class="tf">${esc(cellTime(c))}</span><span class="ts">${esc(cellStart(c))}</span></span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
     }
     h += `<div class="row"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track" style="height:${most[d] > 1 ? 48 * most[d] : 62}px">${inner}</div></div>`;
   }
@@ -518,8 +520,8 @@ function drawLessonTable() {
   const rows = filteredLessons(), lim = S.showAll ? rows.length : Math.min(rows.length, 400), lc = new Set(rows.map(x => x.id)).size;
   const link = (t, k, v) => `<a data-go="${t}" data-key="${esc(k)}">${esc(v)}</a>`;
   $("#ltab").innerHTML = `<p class="count">${rows.length} group lessons (${lc} lesson times)${rows.length > lim ? ` · showing ${lim} <button class="btn" data-act="all">Show all</button>` : ""}</p>
-    <div class="tablebox"><table class="lt"><thead><tr>${LCOLS.map(([k, t]) => `<th data-sort="${k}">${t}${S.sort[0] === k ? (S.sort[1] > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>
-    ${rows.slice(0, lim).map(x => { const [t, a] = pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${COMMITTEE && x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td><td>${x.n}</td><td>${esc(x.level)}</td>
+    <div class="tablebox"><table class="lt"><thead><tr>${LCOLS.filter(([k]) => COMMITTEE || k !== "n").map(([k, t]) => `<th data-sort="${k}">${t}${S.sort[0] === k ? (S.sort[1] > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>
+    ${rows.slice(0, lim).map(x => { const [t, a] = pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${COMMITTEE && x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td>${COMMITTEE ? `<td>${x.n}</td>` : ""}<td>${esc(x.level)}</td>
       <td>${x.classes.map(c => link("classes", c, c)).join(", ")}</td><td><i class="sw" style="--t:#${t};--a:#${a}"></i>${esc(x.subject)}</td><td>${esc(x.group)}${x.block ? `<br><small style="color:var(--muted)">${esc(x.block)}</small>` : ""}</td>
       <td>${x.teachers.map(tt => link("teachers", tt, tt)).join(", ")}</td><td>${x.room ? link("rooms", x.room, x.room) : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
@@ -679,9 +681,9 @@ function search(q) {
 }
 function pick(e) { $("#results").classList.remove("on"); $("#q").value = ""; if (e.f) show("lessons", null, { filters: e.f }); else show(e.t, e.k); }
 function csvDownload(rows, name) {
-  const head = ["Day", "Start", "End", "Periods", "Level", "Band", "Classes", "Subject", "Group", "Teachers", "Room", ...(COMMITTEE ? ["After school"] : []), "Rain room"];
+  const head = ["Day", "Start", "End", ...(COMMITTEE ? ["Periods"] : []), "Level", "Band", "Classes", "Subject", "Group", "Teachers", "Room", ...(COMMITTEE ? ["After school"] : []), "Rain room"];
   const q = v => /[",\n]/.test(v = String(v ?? "")) ? `"${v.replace(/"/g, '""')}"` : v;
-  const body = rows.map(x => [DAYS[x.d], time(x.p)[0], time(x.p + x.n - 1)[1], x.n, x.level, x.block, x.classes.join(", "), x.subject, x.group, x.teachers.join(", "), x.room, ...(COMMITTEE ? [x.ext ? "yes" : ""] : []), x.rain].map(q).join(","));
+  const body = rows.map(x => [DAYS[x.d], time(x.p)[0], time(x.p + x.n - 1)[1], ...(COMMITTEE ? [x.n] : []), x.level, x.block, x.classes.join(", "), x.subject, x.group, x.teachers.join(", "), x.room, ...(COMMITTEE ? [x.ext ? "yes" : ""] : []), x.rain].map(q).join(","));
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + [head.join(","), ...body].join("\r\n")], { type: "text/csv" })); a.download = name.replace(/[\\/:*?"<>|]+/g, "-") + ".csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 document.addEventListener("click", e => {

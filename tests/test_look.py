@@ -111,7 +111,7 @@ t(the_printout_has_its_own_words_and_the_excel_words_stay)
 
 def a_box_tries_each_fallback_in_turn():
     m = school(); c = dict(export.class_view(m, CLASS)["cells"][0])
-    two = export._box_lines(c, 84, 20)                                          # three lines do not fit, time and title do at full size
+    two = export._box_lines(dict(c, lines=[]), 84, 20)                          # three lines do not fit, time and title do at full size (no detail: time over title)
     assert [x[0] for x in two] == [f"{export._clk(c['a'])}–{export._clk(c['b'])}", c["title"]] and (two[0][2], two[1][2]) == (6.2, 7.4), two
     one = export._box_lines(c, 84, 12); st = export._clk(c["a"])
     assert one == [(f"{st} {c['title']}",) + one[0][1:]], one                         # one line: the start only, then the title
@@ -206,6 +206,26 @@ def every_printout_is_a_pdf():
     assert export.pdf_bytes(m, dict(export.room_view(m, ROOM), cells=[]))[:4] == b"%PDF"
     assert export.pdf_bytes(m, export.custom_view(m, CLASS, []))[:4] == b"%PDF"
 t(every_printout_is_a_pdf)
+
+def a_two_line_box_keeps_its_detail():
+    m = school(); c = dict(export.class_view(m, CLASS)["cells"][0], title="EL"); B = export._fonts()[1]
+    full = f"{export._clk(c['a'])}–{export._clk(c['b'])}"; detail = " · ".join(c["lines"])
+    assert detail, c
+    two = export._box_lines(c, 86, 19)                                                   # side by side on a teacher's printout: three lines do not fit, two do
+    assert len(two) == 2 and two[0][0] == f"{full} EL" and two[0][1] == B and two[0][2] == 7.4 and two[1][0] == detail, two
+    assert stringWidth(two[0][0], B, two[0][2]) <= 86 - 5.5 and sum(x[2] * 1.16 for x in two) <= 19 - 3, two
+    narrow = export._box_lines(c, 40, 19)                                                # the time and the title do not share a line: time over title
+    assert [x[0] for x in narrow][1:] == ["EL"] and len(narrow) == 2 and narrow[0][2] == 6.2, narrow
+    assert len(export._box_lines(c, 86, 38)) == 3 and len(export._box_lines(c, 86, 12)) == 1   # three lines and one line as before
+t(a_two_line_box_keeps_its_detail)
+
+def a_lone_zero_length_cell_draws():
+    m = school(); v = export.class_view(m, CLASS); cell = dict(v["cells"][0]); cell["b"] = cell["a"]
+    z = dict(v, cells=[cell], codes=None)
+    assert export._span(m, z) == (cell["a"], cell["a"])
+    c = Rec(); export.draw_page(c, m, z)                                                 # the span is taken as one minute: nothing divides by zero
+    assert export.pdf_bytes(m, z)[:4] == b"%PDF"
+t(a_lone_zero_length_cell_draws)
 
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")
