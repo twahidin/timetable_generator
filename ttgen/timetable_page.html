@@ -309,7 +309,7 @@ function dated(v) {
     const s0 = mins(it.start), e0 = mins(it.end), [a, b] = s0 !== null && e0 !== null ? [s0, e0] : edge(+it.p || 0, +it.n || 0);
     v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, a, b, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
   });
-  if (v.span) v.span = [Math.min(v.span[0], ...v.cells.map(c => c.a)), Math.max(v.span[1], ...v.cells.map(c => c.b))];
+  if (v.cells.length) v.span = [Math.min(...(v.span ? [v.span[0]] : []), ...v.cells.map(c => c.a)), Math.max(...(v.span ? [v.span[1]] : []), ...v.cells.map(c => c.b))];   /* a view with no lessons still has its exams' span */
   v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams, tests or events. This is the usual ${on.day} timetable.`;
   return v;
 }

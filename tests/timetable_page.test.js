@@ -350,5 +350,15 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(P.run("JSON.stringify(S.current.cells.filter(c => c.exam).map(c => [c.a, c.b]))"), "[[470,530]]");
     P.run('show("teachers", "Ms Aisha Rahman")'); await P.tick();
     assert.strictEqual(P.run("S.current.span[0]"), 455);
+    /* a room with no lesson at all: its span is its paper's start and end */
+    P.run('show("rooms", "LT1")'); await P.tick();
+    assert.strictEqual(P.run("JSON.stringify(S.current.span)"), "[585,670]");
+  });
+
+  await t("spanOf starts at a kept band that comes before the first lesson", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP, d => { d.grid["Sec 3"][0] = "F" + d.grid["Sec 3"][0].slice(1); d.lessons[0][2] = 1; });
+    await P.tick();
+    assert.strictEqual(P.run('JSON.stringify(bandsOf(classView("3A"), 0)[0])'), JSON.stringify({ a: 460, b: 480, name: "Assembly" }));
+    assert.strictEqual(P.run('spanOf(classView("3A"))[0]'), 460, "the assembly, not the lesson's 480");
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });
