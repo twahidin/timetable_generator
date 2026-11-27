@@ -83,6 +83,25 @@ def odd_days_long_day_names_and_one_week():
     assert S.staff_day_indexes(S.day_names(1), blocks[0]) == [1]
 
 @t
+def odd_times_and_days_never_raise():
+    sp = school(); NOT = [(True, "Its From and To times are not times.")]
+    for bad in ("\u00b2:30", "\u0661\u0662:\u0663\u0660", "1:2", "12:3x"):
+        row = dict(ZONE, times=[bad, "17:30"])
+        assert S.staff_faults(sp, row) == NOT and S.staff_items(dict(sp, staff_periods=[row])) == [] and S.clock12(bad) == ""
+    assert S.clock12(None) == "" and S.clock12(5) == ""
+    for row in (dict(ZONE, times=["15:00"]), dict(ZONE, days="Tue"), dict(ZONE, days=[3, None]), dict(name="Solo")):
+        assert S.staff_legend_line(row).startswith(row["name"])
+    assert S.staff_legend_line(dict(ZONE, times=["15:00"])) == "Zone computing class · Tue and Thu · West Zone centre"
+    assert S.staff_legend_line(dict(name="Solo")) == "Solo"
+    assert S.staff_day_indexes(["Mon", ""], dict(week="Both", day="Mon")) == [0]
+    assert S.staff_faults(sp, dict(ZONE, days=[" "])) == [(True, "It has no day.")]
+    sp["staff_periods"] = [None, 3, ZONE]
+    assert len(S.staff_items(sp)) == 4 and S.staff_items(sp)[0]["id"] == "tp.z1.Mr Arjun Rao.Tue"
+    assert S.staff_people(sp, dict(ZONE, teachers=[" Mr Arjun Rao "])) == ["Mr Arjun Rao"]
+    sp["teachers"][0]["name"] = "Mr A: Rao"
+    assert S.staff_items(dict(sp, staff_periods=[dict(ZONE, teachers=["Mr A: Rao"])]))[0]["id"] == "tp.z1.Mr A  Rao.Tue"
+
+@t
 def words():
     assert [S.clock12(x) for x in ("15:00", "17:30", "07:40", "12:40", "00:05")] == ["3.00", "5.30", "7.40", "12.40", "12.05"]
     assert S.staff_days_text("Both", ["Tue", "Thu"]) == "Tue and Thu" and S.staff_days_text("Odd", ["Mon"]) == "Odd Mon"

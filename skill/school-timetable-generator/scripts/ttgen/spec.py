@@ -7,6 +7,7 @@ A *spec* is a plain dict (JSON friendly) holding everything the template holds:
                 A after-school slot (used only if needed), '.' no school
   venues, classes, subjects, teachers, blocks, lessons, rules, students, combinations (lists of dicts)
 """
+import re
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 CODES = {"F": "Flag / assembly", "L": "Lessons", "R": "Recess", "W": "Recess window (the solver puts the recess in it)", "U": "Lunch", "A": "After-school slot", ".": "No school"}
 SCOPES = ["School", "Level", "Class", "Teacher", "Department", "Subject", "Block", "Group", "Room"]
@@ -45,11 +46,10 @@ def teacher_depts(t):
 # ---- teacher-only periods: spec["staff_periods"], weekly periods for named teachers with no students ----
 def _clock_min(v):
     """"HH:MM" -> minutes after midnight, or None when it is not a time"""
-    if not isinstance(v, str) or len(v.strip()) not in (4, 5) or ":" not in v: return None
-    h, _, m = v.strip().partition(":")
-    return int(h) * 60 + int(m) if h.isdigit() and m.isdigit() and len(m) == 2 and int(h) < 24 and int(m) < 60 else None
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", v.strip(), re.ASCII) if isinstance(v, str) else None
+    return int(m[1]) * 60 + int(m[2]) if m and int(m[1]) < 24 and int(m[2]) < 60 else None
 
-def _slist(v): return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+def _slist(v): return [x.strip() for x in v if isinstance(x, str) and x.strip()] if isinstance(v, list) else []
 def _sstr(v): return v if isinstance(v, str) else ""
 
 def staff_rows(spec):
@@ -128,7 +128,7 @@ def rules_with_staff(spec):
 def staff_day_indexes(days, item):
     """the indexes of day names ('Odd Mon' ... or 'Mon' ...) that an item or block with week and day falls on (as verify.rule_days, for one weekday)"""
     wk, dy = str(item.get("week") or "Both"), str(item.get("day") or "")
-    return [i for i, d in enumerate(days) if not (wk in ("Odd", "Even") and not d.startswith(wk)) and d.split()[-1][:3] == dy[:3]]
+    return [i for i, d in enumerate(days) if not (wk in ("Odd", "Even") and not d.startswith(wk)) and (d.split() or [""])[-1][:3] == dy[:3]]
 
 def staff_days_text(week, days):
     """'Tue and Thu', 'Odd Mon', 'Even Mon, Wed and Fri'"""
@@ -138,8 +138,11 @@ def staff_days_text(week, days):
 
 def staff_legend_line(x):
     """the legend line: name · week and days · from to to · place (no last part without a place)"""
-    tm = x.get("times") or ["", ""]; days = x.get("days") if x.get("days") is not None else [x.get("day")] if x.get("day") else []
-    parts = [_sstr(x.get("name")), staff_days_text(x.get("week"), days), f"{clock12(tm[0])} to {clock12(tm[1])}"]
+    tm = x.get("times") if isinstance(x.get("times"), (list, tuple)) and len(x.get("times")) == 2 else [None, None]
+    days = _slist(x["days"]) if "days" in x else _slist([x.get("day")])
+    parts = [_sstr(x.get("name")), staff_days_text(x.get("week"), days)]
+    if clock12(tm[0]) and clock12(tm[1]): parts.append(f"{clock12(tm[0])} to {clock12(tm[1])}")
+    parts = [q for q in parts if q]
     if _sstr(x.get("place")).strip(): parts.append(x["place"].strip())
     return " · ".join(parts)
 
