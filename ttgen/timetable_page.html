@@ -50,8 +50,8 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .gridwrap{overflow-x:auto;padding-bottom:4px}
 .tt{min-width:calc(var(--w) + 74px)}
 .tt .ruler,.tt .row{display:grid;grid-template-columns:74px 1fr}.tt .row + .ruler{margin-top:12px}
-.tt .ruler .ax{position:relative;height:28px}.tt .wk{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted);padding:8px 0 0 4px}
-.tt .hr{position:absolute;top:6px;transform:translateX(-50%);font-weight:700;font-size:13px;color:var(--hourlabel);white-space:nowrap}.tt .hr small{font-weight:600;color:var(--muted);font-size:10.5px;margin-left:2px}
+.tt .ruler .ax{position:relative;height:28px}.tt .wk{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);padding:8px 0 0 4px;white-space:nowrap}
+.tt .hr{position:absolute;top:6px;transform:translateX(-50%);font-weight:700;font-size:13px;color:var(--hourlabel);white-space:nowrap}.tt .hr small{font-weight:600;color:var(--muted);font-size:10.5px;margin-left:2px}.tt .hr.l{transform:none}.tt .hr.r{transform:translateX(-100%)}
 .tt .row{border-top:1px solid var(--line)}
 .tt .row:last-child{border-bottom:1px solid var(--line)}
 .tt .dl{display:flex;flex-direction:column;justify-content:center;padding-left:4px;font-weight:700;font-size:13px}.tt .dl small{font-weight:600;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
@@ -59,10 +59,10 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .tt .vl{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}.tt .vl.h{background:var(--hourline)}
 .tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;font-size:11px;color:var(--muted);background:repeating-linear-gradient(135deg,var(--stripe) 0 6px,var(--stripe2) 6px 12px)}
 .tt .bk span{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:100%}.tt .bk.v span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;max-width:none;max-height:100%}
-.cell{position:absolute;padding:2px 6px 1px;border-radius:7px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);border-left:4px solid var(--a);
+.cell{position:absolute;padding:2px 4px 1px;border-radius:7px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);border-left:4px solid var(--a);
   font-size:11px;line-height:1.15;color:var(--sub);display:flex;flex-direction:column;margin-left:1px}
 .cell b{color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cell .t{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none}.cell .m{color:var(--sub)}
+.cell .t{color:var(--ink);font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none;overflow:visible;text-overflow:clip}.cell.s{padding:2px 2px 1px;border-left-width:3px}.cell.s .t{font-size:10px;letter-spacing:-.02em}.cell .m{color:var(--sub)}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
 .cell.x{opacity:.5;filter:grayscale(.7)}.cell.x b,.cell.x span{text-decoration:line-through}
@@ -293,7 +293,8 @@ function dated(v) {
   v.span = spanOf(v);   /* over all days, before the cells are cut to the day */
   if (!on.day) { v.noday = `${nd} is outside the terms or a holiday in the school calendar.`; v.cells = []; return v; }
   const only = DAYS.indexOf(on.day), stop = new Set(ex.stopped || []), runs = new Map();
-  (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push(`${a}–${b}`); });
+  const hm = t => mins(t) === null ? t : clk(mins(t));   /* "08:20" as the school writes it: "8.20" */
+  (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push(`${hm(a)}–${hm(b)}`); });
   v.only = only;
   v.cells = v.cells.filter(c => c.d === only);
   v.cells.forEach(c => {
@@ -332,7 +333,7 @@ function gridHTML(v) {
   const at = m => Math.min(b1, Math.max(a0, m)), pc = m => +((at(m) - a0) / len * 100).toFixed(3) + "%", wd = (a, b) => +((at(b) - at(a)) / len * 100).toFixed(3) + "%";   /* by minutes against the page's span */
   const most = Array(ND).fill(1); for (const [c, [, n]] of ln) most[c.d] = Math.max(most[c.d], n);
   const lines = uniq(PB.flat()).filter(m => m > a0 && m < b1 && m % 60).map(m => `<i class="vl" style="left:${pc(m)}"></i>`).join("") + hrs.map(x => `<i class="vl h" style="left:${pc(x.m)}"></i>`).join("");
-  const ruler = wk => `<div class="ruler"><div class="wk">${esc(wk)}</div><div class="ax">${hrs.map(x => `<span class="hr" style="left:${pc(x.m)}">${esc(x.text)}${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</span>`).join("")}</div></div>`;
+  const ruler = wk => `<div class="ruler"><div class="wk">${esc(wk)}</div><div class="ax">${hrs.map(x => `<span class="hr${x.m - a0 < 15 ? " l" : b1 - x.m < 15 ? " r" : ""}" style="left:${pc(x.m)}">${esc(x.text)}${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</span>`).join("")}</div></div>`;
   let h = `<div class="gridwrap"><div class="tt" style="--w:${len * 2}px">`;
   for (let d = 0; d < ND; d++) {
     if (v.only != null && d !== v.only) continue;   /* a view on a date: that day's row only */
@@ -341,7 +342,7 @@ function gridHTML(v) {
     for (const x of bandsOf(v, d)) if (x.b > a0 && x.a < b1) inner += `<div class="bk${x.b - x.a < 40 ? " v" : ""}" style="left:${pc(x.a)};width:${wd(x.a, x.b)}"><span>${esc(x.name)}</span></div>`;
     for (const c of v.cells.filter(c => c.d === d)) {
       const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : pal(c.color);   /* an exam takes its colours from .cell.exam */
-      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><span class="t">${esc(cellTime(c))}</span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
+      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.b - c.a < 40 ? " s" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><span class="t">${esc(cellTime(c))}</span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
     }
     h += `<div class="row"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track" style="height:${most[d] > 1 ? 48 * most[d] : 62}px">${inner}</div></div>`;
   }
@@ -490,7 +491,7 @@ function byLevel(cls, one, wrap) {   // under a heading for each level, in the s
 function drawLessonGrids() {
   const { active, hit, cls, count } = lessonClasses();
   const one = c => { const v = classView(c.name), ids = hit.get(c.name); if (active) v.cells.forEach(k => { k.dim = !ids.has(k.id); });
-    return `<section class="lcls"><h2><a tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}">Class ${esc(c.name)}</a><small>${active ? `${ids.size} lesson time${ids.size === 1 ? "" : "s"} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></h2>${gridHTML(v)}</section>`; };
+    return `<section class="lcls"><h2><a tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}">Class ${esc(c.name)}</a><small>${active ? `${ids.size} lesson time${ids.size === 1 ? "" : "s"} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></h2>${v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}</section>`; };
   $("#ltab").innerHTML = count + byLevel(cls, one);
 }
 /* One page: every class at once, each a small timetable of blocks; a click opens the class */

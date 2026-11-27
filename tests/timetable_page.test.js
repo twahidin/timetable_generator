@@ -131,7 +131,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(count(v, 'class="cell exam"'), 1, v);
     assert(v.includes('<span class="t">7.50–8.50</span><b>Sec 3 English Paper 1</b><span class="m">3-01</span>'), v);
     P.run('show("classes", "4A")');
-    assert(P.view().includes("runs 08:20–08:40 only") && !P.view().includes('class="cell x"'), P.view());
+    assert(P.view().includes("runs 8.20–8.40 only") && !P.view().includes('class="cell x"'), P.view());
   });
 
   await t("a teacher and a room on a date; a combined venue shows the paper held in one of its rooms", async () => {
@@ -409,5 +409,20 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const first = v.split('<span class="hr"')[1] || "";
     assert(/^ style="left:[\d.]+%">8<small>am<\/small><\/span>/.test(first), first.slice(0, 80));
     assert(/<div class="cell exam" tabindex="0" style="left:0%;/.test(v), "the duty from 7.35 starts the page: " + v);
+  });
+  await t("a 20-minute lesson keeps its whole start time; a shortened lesson's times are written as the school writes them; an empty class grid says so", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP, d => { d.lessons.push([10, 0, 3, 1, "Sec 3", "", ["3A"], "Mathematics", "Entire Class", ["Mr Daniel Koh"], "3-01", 0]); });
+    await P.tick(); P.run('show("classes", "3A")');
+    const v = P.view();
+    assert(/<div class="cell s" data-id="10"[^>]*><span class="t">8\.40<\/span><b>MA<\/b>/.test(v), "a short box has its class and its whole start time: " + v);
+    assert.strictEqual(count(v, 'class="cell s"'), 1, "only the 20-minute lesson is short");
+    const Q = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await Q.tick(); await Q.pick("2026-10-05"); Q.run('show("classes", "4A")');
+    assert(Q.view().includes("runs 8.20–8.40 only") && !Q.view().includes("08:20"), Q.view());
+    const R = boot({ "/api/published/exams": LIST }, APP);
+    await R.tick();
+    R.run('const cv0 = classView; classView = c => c === "3B" ? Object.assign(cv0(c), { cells: [] }) : cv0(c); show("lessons", null)'); await R.tick();
+    const g = (R.el("ltab") || {}).innerHTML || "";
+    assert(/Class 3B<\/a><small><\/small><\/h2><div class="empty">No lessons\.<\/div><\/section>/.test(g), "an empty class grid says No lessons.: " + g.slice(0, 400));
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });
