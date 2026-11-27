@@ -60,6 +60,10 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .cell{position:absolute;padding:3px 5px 3px 7px;border-radius:5px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);
   box-shadow:inset 3px 0 0 var(--a);font-size:11px;line-height:1.25;color:var(--sub);display:flex;flex-direction:column;justify-content:center;margin:1px}
 .cell b{color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span.m{color:var(--muted)}
+.cell.staff{background:#fff;border:1.5px solid #5B6677;border-left-width:4px;box-shadow:none;color:inherit;cursor:default}
+.cell.staff.cut-r{border-right-style:dashed}.cell.staff.cut-l{border-left-style:dashed}
+.cell.staff:hover{outline:2px solid color-mix(in srgb,#5B6677 50%,transparent)}
+.legend .sw.staff{background:#fff;border:1.5px solid #5B6677}
 .cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
@@ -156,6 +160,8 @@ const uniq = a => [...new Set(a)];
 const short = s => (D.subjects[s] || [s])[0];
 const colorOf = s => (D.subjects[s] || [s, 0])[1];
 const deptOf = s => (D.subjects[s] || [])[2] || "";   // an older page's data has no department
+let STAFF = D.staff || [], STAFF_LINES = D.staff_lines || {};   /* teacher-only periods: [teacher, day, first period or null, periods, name, place, from, to, starts before the day, ends after it]; the full page holds everyone's, a teacher's own page gets theirs by /api/timetable/my-periods */
+const staffTime = r => r[8] && r[9] ? `(from ${r[6]} to ${r[7]})` : r[9] ? `${r[6]} (to ${r[7]})` : r[8] ? `(from ${r[6]}) ${r[7]}` : `${r[6]}–${r[7]}`;
 const pal = i => D.palette[i % D.palette.length];
 const untag = s => short(s).replace(/\s+(G[123]|Std|Fdn)$/, "");
 const tshort = ts => ts.map(t => (tIx.get(t) || {}).short || t).join(", ");
@@ -228,6 +234,8 @@ function teacherView(t) {
   }
   const legend = [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? `${e.x.group} (${compact(e.x.classes)})` : e.x.classes.join(", ")} · ${e.periods} periods · ${common(e.rooms) || "-"}` }));
   const days = Object.values(per), mine = CLS.filter(c => c.parents.includes(t)).map(c => c.name);
+  STAFF.filter(r => r[0] === t && r[2] != null).forEach(r => cells.push({ d: r[1], p: r[2], n: r[3], title: r[4], lines: [staffTime(r), r[5]].filter(Boolean), color: null, ext: false, id: null, staff: true, before: !!r[8], after: !!r[9], ix: [] }));   /* a teacher-only period: a box, never counted in the stats */
+  (STAFF_LINES[t] || []).forEach(line => legend.push({ color: null, label: "", text: line, staff: true }));
   const base = [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · ");
   return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: mine.length ? `${base || "Teacher"} · ${PNAME} of ${mine.join(", ")}` : base,
     stats: [[total, "periods a cycle"], ...(MODE === "staff" && !info.allowance ? [] : [[info.allowance || "-", "allowance"]]), [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
@@ -308,8 +316,8 @@ function gridHTML(v) {
     if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
       if (BREAK[ch] || ch === "." || ch === "A") inner += `<div class="bk ${ch === "." ? "none" : ch === "A" ? "slot" : ""}${q === p && NP > 18 ? " v" : ""}" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"><span>${esc(BREAK[ch] || "")}</span></div>`; p = q + 1; }
     for (const c of v.cells.filter(c => c.d === d)) {
-      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : c.ext ? D.ext : pal(c.color);   /* an exam takes its colours from .cell.exam */
-      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
+      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam || c.staff ? [] : c.ext ? D.ext : pal(c.color);   /* an exam takes its colours from .cell.exam */
+      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.staff ? " staff" + (c.after ? " cut-r" : "") + (c.before ? " cut-l" : "") : ""}"${c.exam || c.staff ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px)${c.exam || c.staff ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
     }
     h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d && v.only == null ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
   }
@@ -317,7 +325,7 @@ function gridHTML(v) {
 }
 function viewHTML(v, extra = "") {
   const stats = v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("");
-  const leg = v.legend.map(e => { const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}</span></div>`; }).join("");
+  const leg = v.legend.map(e => { if (e.staff) return `<div><i class="sw staff"></i><span>${esc(e.text)}</span></div>`; const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}</span></div>`; }).join("");
   return `<div class="card"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div><div class="stats">${stats}</div></div>
     <div class="tools">${pdfLink(v)}<button data-act="print">Print</button><button data-act="csv">Download CSV</button>${MODE === "personal" ? "" : `<button data-act="link">Copy link</button>`}${extra}</div>
     ${v.onLine ? `<p class="onday">${esc(v.onLine)}</p>` : ""}
@@ -507,6 +515,7 @@ function renderFree() {
   L.forEach(x => { if (x.d !== day) return; const ps = ran(x); if (!ps.length) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + ps.length; } });
     if (ps.some(q => q >= +f.from && q <= +f.to)) { x.teachers.forEach(t => tb.add(t)); if (x.room) singles(x.room).concat(x.room).forEach(r => rb.add(r)); if (x.rain) x.rain.split(", ").forEach(r => singles(r).concat(r).forEach(q => rb.add(q))); x.classes.forEach(c => cb.add(c)); } });
   const hit = it => +it.p < +f.to + 1 && +it.p + +it.n > +f.from;   /* an exam item's p and n are period positions: period q is q to q + 1 */
+  STAFF.forEach(r => { if (r[1] === day && r[2] != null && hit({ p: r[2], n: r[3] })) tb.add(r[0]); });   /* a teacher in a teacher-only period then is busy */
   Object.entries(ex.teachers || {}).forEach(([t, its]) => { if (its.some(hit)) tb.add(t); });
   Object.entries(ex.rooms || {}).forEach(([r, its]) => { if (its.some(hit)) singles(r).concat(r).forEach(q => rb.add(q)); });
   Object.entries(ex.classes || {}).forEach(([c, its]) => { if (its.some(hit)) cb.add(c); });
@@ -720,6 +729,11 @@ if (APP) {
     $("#onUsual").onclick = () => { $("#onDate").value = ""; pickDate(""); };
   }
   if (EXAMS) loadExams();
+  if (MODE === "staff") fetch("/api/timetable/my-periods", { credentials: "same-origin" }).then(r => r.json()).then(j => {   /* a teacher's own teacher-only periods; a failed answer leaves the page as it was */
+    if (!j || j.error || !Array.isArray(j.staff) || !j.staff.length) return;
+    STAFF = j.staff; STAFF_LINES = { [APP.me]: Array.isArray(j.lines) ? j.lines : [] };
+    if (S.tab === "teachers" && S.key) show("teachers", S.key);
+  }, () => {});
 }
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";

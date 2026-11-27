@@ -181,5 +181,87 @@ def the_skill_names_the_sheet_and_the_version():
     assert S.SKILL_VERSION == "2026-11.12" and "Skill version: 2026-11.12" in s and "`Teacher-only periods`" in s
     assert "Teacher-only periods" in open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
 
+# ---- Task 5: the teacher's timetable (page data, printout, Excel)
+import openpyxl  # noqa: E402
+def model_for(sp, placed):
+    """a timetable model from hand-placed lessons: placed = [(day index, p, n, classes, subject, group, teachers, room)]
+    (as tests/test_combined.py builds one; copied, because importing that file runs its tests)"""
+    sp = copy.deepcopy(sp); reader.derive(sp); days = list(sp["day_structure"][sp["school"]["levels"][0]].keys())
+    level = {c["class"]: c["level"] for c in sp["classes"]}
+    L = [dict(id=i + 1, d=d, p=p, n=n_, level=level.get(cls[0], "") if cls else "", block="", classes=cls, subject=s, group=g, teachers=tt, room=r, ext=False, rain="")
+         for i, (d, p, n_, cls, s, g, tt, r) in enumerate(placed)]
+    m = export._model(sp, days, L); m.setdefault("checked_setup", sp); return m
+def _sample():
+    sp = secondary(); sp["school"].update(start_time="07:40", period_minutes=20, periods_per_day=26); return sp
+sp0 = _sample()
+_x = next(x for x in sp0["lessons"] if x.get("teachers") and x["classes"])
+T, CLS, SUBJECT = _x["teachers"][0], _x["classes"][0], _x["subject"]
+ROOM = next(v["room"] for v in sp0["venues"] if v["kind"] == "classroom")
+SUBJECT_SHORT = export.abbrev(SUBJECT); TEACHER_SHEET = "Teachers"
+_days0 = list(sp0["day_structure"][sp0["school"]["levels"][0]].keys()); TUE = next(i for i, d in enumerate(_days0) if d.endswith("Tue"))
+PLACED = [(TUE, 22, 3, [CLS], SUBJECT, export.ENTIRE, [T], ROOM)]
+ZONE5 = dict(_id="z5", name="Zone computing class", all=False, depts=[], teachers=[T], week="Both", days=["Tue", "Thu"], times=["15:00", "17:30"], place="West Zone centre")
+BRIEF = dict(_id="b5", name="Briefing", all=False, depts=[], teachers=[T], week="Both", days=["Mon"], times=["07:00", "07:30"], place="")
+sp_with_zone = dict(copy.deepcopy(sp0), staff_periods=[ZONE5]); sp_with_briefing = dict(copy.deepcopy(sp0), staff_periods=[BRIEF])
+LINE = "Zone computing class · Tue and Thu · 3.00 to 5.30 · West Zone centre"
+
+@t
+def the_teachers_view_gets_the_box_and_the_line_and_no_new_counts():
+    m0 = model_for(sp0, PLACED); m = model_for(sp_with_zone, PLACED)
+    v0, v = export.teacher_view(m0, T), export.teacher_view(m, T)
+    boxes = [c for c in v["cells"] if c.get("staff")]
+    assert v["stats"] == v0["stats"] and v["subtitle"] == v0["subtitle"] and len(v["cells"]) == len(v0["cells"]) + len(boxes)
+    assert len(boxes) == sum(1 for d in m["days"] if d.split()[-1] in ("Tue", "Thu")) and all((c["p"], c["n"], c["after"], c["before"]) == (22, 4, True, False) for c in boxes)
+    assert boxes[0]["title"] == "Zone computing class" and boxes[0]["lines"] == ["3.00 (to 5.30)", "West Zone centre"] and boxes[0]["id"] is None
+    assert [e["text"] for e in v["legend"] if e.get("staff")] == [LINE]
+    assert [e for e in v["legend"] if not e.get("staff")] == v0["legend"]
+    assert not any(c.get("staff") for c in export.class_view(m, CLS)["cells"]) and not any(c.get("staff") for c in export.room_view(m, ROOM)["cells"])
+    assert [v_["key"] for v_ in export.all_views(m, "teachers")] == [v_["key"] for v_ in export.all_views(m0, "teachers")]      # a teacher with no lessons still has no page
+
+@t
+def the_time_words_and_old_models():
+    m = model_for(sp_with_zone, PLACED)
+    assert export.staff_cells(dict(m, setup={}), None) == [] and export.staff_lines(dict(m, setup={}), T) == []
+    m_ = dict(m); m_.pop("setup"); assert export.staff_cells(m_) == [] and export.staff_lines(m_, T) == []
+    plain = dict(ZONE5, times=["09:00", "10:20"], days=["Mon"])
+    mm = model_for(dict(sp0, staff_periods=[plain]), PLACED); c = [c for c in export.teacher_view(mm, T)["cells"] if c.get("staff")][0]
+    assert c["lines"][0] == "9.00–10.20" and not c["before"] and not c["after"], c
+    mb = model_for(dict(sp0, staff_periods=[dict(plain, times=["07:00", "08:00"])]), PLACED); c = [c for c in export.teacher_view(mb, T)["cells"] if c.get("staff")][0]
+    assert c["lines"][0] == "(from 7.00) 8.00" and c["before"] and not c["after"] and c["p"] == 0, c
+    assert export.staff_cells(m, "Nobody") == [] and {x["teacher"] for x in export.staff_cells(m)} == {T}
+
+@t
+def a_period_wholly_outside_the_day_is_a_line_only():
+    m = model_for(sp_with_briefing, PLACED)
+    v = export.teacher_view(m, T)
+    assert not [c for c in v["cells"] if c.get("staff")] and [e["text"] for e in v["legend"] if e.get("staff")] == ["Briefing · Mon · 7.00 to 7.30"]
+
+@t
+def the_page_data_by_view():
+    m = model_for(sp_with_zone, PLACED)
+    full = export.html_data(m, "full")
+    assert [T, m["days"].index(next(d for d in m["days"] if d.endswith("Tue"))), 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", False, True] in full["staff"]
+    assert full["staff_lines"] == {T: [LINE]}
+    for view in ("student", "staff"): assert export.html_data(m, view)["staff"] == [] and export.html_data(m, view)["staff_lines"] == {}
+    sid = m["students"][0]["id"]; assert export.html_data(m, "personal", student_id=sid)["staff"] == []
+    assert export.html_data(m, "personal", student_id=sid)["staff_lines"] == {}
+    assert "Zone computing class" not in json.dumps(export.html_data(m, "student")) and "Zone computing class" not in json.dumps(export.html_data(m, "personal", student_id=sid))
+    assert "Zone computing class" not in json.dumps(export.html_data(m, "staff"))
+
+@t
+def the_printout_and_the_excel_file_keep_the_lesson():
+    m = model_for(sp_with_zone, PLACED)
+    assert export.pdf_bytes(m, export.teacher_view(m, T))[:4] == b"%PDF"
+    assert export.pdf_bytes(m, export.teacher_view(model_for(sp_with_briefing, PLACED), T))[:4] == b"%PDF"
+    cs = export.teacher_view(m, T)["cells"]; lanes = export._lanes(cs)
+    tue = [c for c in cs if c["d"] == TUE and c["p"] >= 22]
+    assert len(tue) == 2 and {lanes[id(c)][1] for c in tue} == {2}             # they share the row, neither hides the other
+    path = os.path.join(tempfile.mkdtemp(), "x.xlsx"); export.write_excel(m, path, log=lambda *a: None)
+    ws = openpyxl.load_workbook(path)[TEACHER_SHEET]; text = " ".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    assert "Zone computing class" in text and SUBJECT_SHORT in text and LINE in text
+    assert f" / Zone computing class" in text, "the lesson's cell gains the period's name"
+    cs_ = [c for row in ws.iter_rows() for c in row if c.value and " / Zone computing class" in str(c.value)]
+    assert cs_ and all(c.fill.fgColor.rgb != "00FFFFFF" for c in cs_)          # it keeps the lesson's own fill
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

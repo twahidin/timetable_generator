@@ -18,6 +18,7 @@ from .reader import read_template, derive
 from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
 from .spec import filled_lessons, renamed_teachers, renamed, double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
+from .spec import staff_items, staff_rows, staff_people, staff_faults, staff_legend_line, staff_day_indexes, clock12
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -501,6 +502,34 @@ def class_view(m, c):
     return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub + (f" · {pl}" if pl else ""), pdf_subtitle=sub, parents_line=pl, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
                 cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"])
 
+def staff_cells(m, teacher=None):
+    """the teacher-only periods as they fall on the model's days, from the setup kept in the model: one dict per item and per day,
+    dict(teacher, d, p, n, name, place, t0, t1, before, after, key); p is None and n 0 for a period with no box (wholly outside the periods).
+    teacher=None gives everyone's. A model with no setup (an old publish) has none."""
+    setup = m.get("setup") if isinstance(m, dict) else None
+    if not isinstance(setup, dict): return []
+    out = []
+    for it in staff_items(setup):
+        if teacher is not None and it["teacher"] != teacher: continue
+        per = it["periods"]
+        for d in staff_day_indexes(m["days"], it):
+            out.append(dict(teacher=it["teacher"], d=d, p=per[0] if per else None, n=per[1] - per[0] + 1 if per else 0, name=it["name"], place=it["place"],
+                            t0=clock12(it["times"][0]), t1=clock12(it["times"][1]), before=it["before"], after=it["after"], key=it["id"]))
+    return out
+
+def staff_lines(m, teacher):
+    """the legend line of each teacher-only period the teacher is in (each row once, in the list's order)"""
+    setup = m.get("setup") if isinstance(m, dict) else None
+    if not isinstance(setup, dict): return []
+    return [staff_legend_line(r) for r in staff_rows(setup) if not any(h for h, _ in staff_faults(setup, r)) and teacher in staff_people(setup, r)]
+
+def _staff_time(c):
+    """the box's time words: "3.00–4.20", "3.00 (to 5.30)" past the last period, "(from 7.00) 8.00" before the first"""
+    if c["before"] and c["after"]: return f"(from {c['t0']} to {c['t1']})"
+    if c["after"]: return f"{c['t0']} (to {c['t1']})"
+    if c["before"]: return f"(from {c['t0']}) {c['t1']}"
+    return f"{c['t0']}–{c['t1']}"
+
 def teacher_view(m, t):
     info = m["teacher_ix"][t]; rows = [x for x in m["lessons"] if t in x["teachers"]]
     cells, per_day = [], collections.Counter(); ent = collections.OrderedDict(); total = 0; ext = 0
@@ -518,6 +547,10 @@ def teacher_view(m, t):
     for (s, who), e in ent.items():
         x = e["x"]; extra = f" ({compact_classes(x['classes'])})" if x["group"] != ENTIRE else ""
         legend.append(dict(color=_color(m, s), label=abbrev(s), text=f"{who}{extra} · {e['periods']} periods · {_common(e['rooms']) or '-'}"))
+    for c in staff_cells(m, t):   # teacher-only periods: a box (never counted) where it overlaps the periods, and a legend line after the teaching entries
+        if c["p"] is not None:
+            cells.append(dict(d=c["d"], p=c["p"], n=c["n"], title=c["name"], lines=[x for x in (_staff_time(c), c["place"]) if x], color=None, ext=False, id=None, staff=True, before=c["before"], after=c["after"]))
+    for line in staff_lines(m, t): legend.append(dict(color=None, label="", text=line, staff=True))
     busiest = max(per_day.values()) if per_day else 0
     stats = [(str(total), "periods a cycle"), (str(info.get("allowance") or "-"), "allowance"), (str(busiest), "most in a day"), (str(len(per_day)), "days teaching")]
     sub = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "",
@@ -608,6 +641,7 @@ def _hex(c):
     return HexColor("#" + c)
 
 INK, SUB, MUTED, LINE, FAINT = "1B2330", "4A5566", "7A8494", "E3E7EC", "F6F7F9"
+STAFF_BOX, STAFF_LINE = "FFFFFF", "5B6677"   # a teacher-only period: white with a dark outline, unlike any subject
 
 def _fit(text, font, size, maxw, minsize=5.0):
     from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -756,11 +790,17 @@ def draw_page(c, m, v, page=None):
         lane, nl = lanes.get(id(cell), (0, 1))
         bh = rh / nl; x0 = gx + cell["p"] * cw + 1; w = cell["n"] * cw - 2
         y0 = gtop - hdr - (cell["d"] + 1) * rh + rh - (lane + 1) * bh + 1; h = bh - 2
-        tint, acc = EXT if cell["ext"] else PALETTE[cell["color"] % len(PALETTE)]
-        c.setFillColor(_hex(tint)); c.setStrokeColor(_hex(acc)); c.setLineWidth(0.7)
+        staff = bool(cell.get("staff"))
+        tint, acc = (STAFF_BOX, STAFF_LINE) if staff else EXT if cell["ext"] else PALETTE[cell["color"] % len(PALETTE)]
+        c.setFillColor(_hex(tint)); c.setStrokeColor(_hex(acc)); c.setLineWidth(1.0 if staff else 0.7)
         if cell["ext"]: c.setDash(2, 1.4)
         c.roundRect(x0, y0, w, h, 2.2, stroke=1, fill=1); c.setDash()
         c.setFillColor(_hex(acc)); c.rect(x0 + 0.35, y0 + 0.35, 1.8, h - 0.7, stroke=0, fill=1)
+        if staff:   # a broken edge where the period runs on past the first or the last period
+            for edge, x_ in (("after", x0 + w), ("before", x0)):
+                if cell.get(edge):
+                    c.setStrokeColor(_hex(tint)); c.setLineWidth(1.6); c.line(x_, y0 + 1, x_, y0 + h - 1)
+                    c.setStrokeColor(_hex(acc)); c.setLineWidth(1.0); c.setDash(2, 1.6); c.line(x_, y0 + 1, x_, y0 + h - 1); c.setDash()
         ts_, ls_ = (7.4, 6.3) if w > 34 else (6.4, 5.6)
         lines = [(cell["title"], B, ts_, INK)] + [(l, R, ls_, SUB if i == 0 else MUTED) for i, l in enumerate(cell["lines"])]
         if cell["ext"]: lines.append(("after school", B, 5.4, "8A5300"))
@@ -778,8 +818,8 @@ def draw_page(c, m, v, page=None):
     for ci, col in enumerate(lay["cols"]):
         lx = M + ci * (lay["cw"] + 14); yy = ly - 14
         for e, lw, lines, hh in col:
-            tint, acc = PALETTE[e["color"] % len(PALETTE)]
-            c.setFillColor(_hex(tint)); c.setStrokeColor(_hex(acc)); c.setLineWidth(0.6); c.roundRect(lx, yy - size + 0.6, 5.6, 5.6, 1.2, stroke=1, fill=1)
+            tint, acc = (STAFF_BOX, STAFF_LINE) if e.get("staff") else PALETTE[e["color"] % len(PALETTE)]
+            c.setFillColor(_hex(tint)); c.setStrokeColor(_hex(acc)); c.setLineWidth(0.9 if e.get("staff") else 0.6); c.roundRect(lx, yy - size + 0.6, 5.6, 5.6, 1.2, stroke=1, fill=1)
             c.setFillColor(_hex(INK)); c.setFont(B, size); c.drawString(lx + 9, yy - size + 1.2, e["label"])
             c.setFillColor(_hex(SUB)); c.setFont(R, size)
             for i, ln in enumerate(lines):
@@ -870,6 +910,7 @@ def write_excel(m, path, log=print):
     fills = {i: PatternFill("solid", fgColor=t) for i, (t, _) in enumerate(PALETTE)}
     extfill = PatternFill("solid", fgColor=EXT[0]); brk = PatternFill("solid", fgColor="EDF0F3"); noschool = PatternFill("solid", fgColor="F7F8FA")
     hdrfill = PatternFill("solid", fgColor=NAVY); wrapc = Alignment(wrap_text=True, vertical="center", horizontal="center")
+    staffbox = PatternFill("solid", fgColor="FFFFFF"); staffside = Side(style="thin", color=STAFF_LINE); staffborder = Border(left=Side(style="thick", color=STAFF_LINE), top=staffside, bottom=staffside, right=staffside)
     borders = {a: Border(left=Side(style="thick", color=a), top=Side(style="thin", color="FFFFFF"), bottom=Side(style="thin", color="FFFFFF")) for _, a in PALETTE + [EXT]}
     links = collections.OrderedDict()
 
@@ -900,11 +941,16 @@ def write_excel(m, path, log=print):
                     if cs:
                         key = tuple(id(x) for x in cs); q = p
                         while q + 1 < NP and tuple(id(x) for x in at.get((d, q + 1), [])) == key: q += 1
+                        sp_ = [x for x in cs if x.get("staff")]; cs = [x for x in cs if not x.get("staff")] or sp_   # a teacher-only period beside a lesson: the lesson keeps its cell and the period's name is added to its text
                         if len(cs) == 1: txt = "\n".join([cs[0]["title"]] + cs[0]["lines"])
                         else: txt = "\n".join(f"{x['title']}" + (f" ({x['lines'][0]})" if x["lines"] else "") for x in cs)
-                        c = ws.cell(rr, p + 2, txt); c.font = XF(size=8); c.alignment = wrapc
-                        c.fill = extfill if any(x["ext"] for x in cs) else fills[cs[0]["color"] % len(PALETTE)]
-                        c.border = borders[EXT[1] if any(x["ext"] for x in cs) else PALETTE[cs[0]["color"] % len(PALETTE)][1]]
+                        if cs[0].get("staff"): c = ws.cell(rr, p + 2, txt); c.fill = staffbox; c.border = staffborder
+                        else:
+                            if sp_: txt += " / " + ", ".join(dict.fromkeys(x["title"] for x in sp_))
+                            c = ws.cell(rr, p + 2, txt)
+                            c.fill = extfill if any(x["ext"] for x in cs) else fills[cs[0]["color"] % len(PALETTE)]
+                            c.border = borders[EXT[1] if any(x["ext"] for x in cs) else PALETTE[cs[0]["color"] % len(PALETTE)][1]]
+                        c.font = XF(size=8); c.alignment = wrapc
                         if kind == "classes" and cs[0]["lines"] and "groups" in cs[0]["lines"][-1]:
                             det = [f"{x['group']}: {x['subject']} - {', '.join(x['teachers'])} - {x['room']}" for x in m["lessons"] if x["id"] == cs[0]["id"] and v["key"] in x["classes"]]
                             c.comment = Comment("\n".join(det), "Timetable"); c.comment.width = 340; c.comment.height = 30 + 14 * len(det)
@@ -922,7 +968,7 @@ def write_excel(m, path, log=print):
             ws.cell(lr, 1, v["legend_title"]).font = XF(bold=True, size=9, color=NAVY)
             for e in v["legend"]:
                 lr += 1
-                c = ws.cell(lr, 1, e["label"]); c.font = XF(bold=True, size=8); c.fill = fills[e["color"] % len(PALETTE)]; c.alignment = Alignment(vertical="top", wrap_text=True)
+                c = ws.cell(lr, 1, e["label"]); c.font = XF(bold=True, size=8); c.fill = staffbox if e.get("staff") else fills[e["color"] % len(PALETTE)]; c.alignment = Alignment(vertical="top", wrap_text=True)
                 c2 = ws.cell(lr, 2, e["text"]); c2.font = XF(size=8); c2.alignment = Alignment(wrap_text=True, vertical="top")
                 _merge(ws, lr, 2, lr, NP + 1)
                 ws.row_dimensions[lr].height = 12 * max(1, -(-len(e["text"]) // (NP * (6 if NP > 16 else 9))))
@@ -1006,7 +1052,10 @@ def html_data(m, view="full", student_id=None, app=None):
              lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])] + ([x["rain"]] if x.get("rain") else [])
                       for x in m["lessons"]],
              students=[[s["id"], s["name"], s["cls"], s["groups"]] for s in m["students"]],
-             checks=dict(ok=m["checks"]["ok"], problems=m["checks"]["problems"], after=m["checks"]["after_school"], notes=m["notes"]), app=app)
+             checks=dict(ok=m["checks"]["ok"], problems=m["checks"]["problems"], after=m["checks"]["after_school"], notes=m["notes"]), app=app, staff=[], staff_lines={})
+    if view == "full":   # teacher-only periods reach only the full page (the committee's and a teacher's code page); every other view holds none
+        d["staff"] = [[c["teacher"], c["d"], c["p"], c["n"], c["name"], c["place"], c["t0"], c["t1"], c["before"], c["after"]] for c in staff_cells(m)]
+        d["staff_lines"] = {t: staff_lines(m, t) for t in dict.fromkeys(c["teacher"] for c in staff_cells(m))}
     if view in ("student", "staff", "personal"):
         d["teachers"] = [[t[0], t[1], "", ""] for t in d["teachers"]]
         d["subjects"] = {k: [v[0], v[1], ""] for k, v in d["subjects"].items()}   # a student's page has no Lessons tab: the department stays behind

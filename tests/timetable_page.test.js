@@ -304,4 +304,43 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const F = boot({ "/api/published/exams": LIST }, APP);
     await F.tick(); assert(!F.fetched.includes("/api/exams/my-duties"), "only staff mode asks");
   });
+  await t("a teacher-only period: a box on the teacher's own timetable, its line in the legend, nothing in the counts, none on a class, and the teacher busy in Who's free", async () => {
+    const ROW = ["Mr Ben Ong", 1, 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", false, true];   /* Odd Tue, periods 22 to 25, runs on to 5.30 */
+    const LINE = "Zone computing class · Tue · 3.00 to 5.30 · West Zone centre";
+    const withStaff = d => { d.staff = [ROW, ["Mr Ben Ong", 0, null, 0, "Briefing", "", "7.00", "7.30", true, false]]; d.staff_lines = { "Mr Ben Ong": [LINE, "Briefing · Mon · 7.00 to 7.30"] }; };
+    const P = boot({ "/api/published/exams": LIST }, APP, withStaff), Q = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick(); await Q.tick();
+    const tv = P.run('teacherView("Mr Ben Ong")'), tq = Q.run('teacherView("Mr Ben Ong")');
+    assert.strictEqual(JSON.stringify(tv.stats), JSON.stringify(tq.stats)); assert.strictEqual(tv.rows.length, tq.rows.length);
+    const boxes = tv.cells.filter(c => c.staff);
+    assert.strictEqual(boxes.length, 1, "the period with no periods has no box"); assert.strictEqual(boxes[0].title, "Zone computing class");
+    assert.strictEqual(JSON.stringify(boxes[0].lines), JSON.stringify(["3.00 (to 5.30)", "West Zone centre"])); assert.strictEqual(boxes[0].after, true);
+    assert.strictEqual(JSON.stringify(tv.legend.filter(e => e.staff).map(e => e.text)), JSON.stringify([LINE, "Briefing · Mon · 7.00 to 7.30"]));
+    assert.strictEqual(tv.cells.length, tq.cells.length + 1);
+    P.run('show("teachers", "Mr Ben Ong")'); const h = P.view();
+    const box = h.match(/<div class="cell staff cut-r"[^>]*>.*?<\/div>/)[0];
+    assert(!box.includes("data-id") && box.includes("Zone computing class") && box.includes("to 5.30") && box.includes("West Zone centre"), box);
+    assert(h.includes('<i class="sw staff"></i><span>Zone computing class · Tue · 3.00 to 5.30 · West Zone centre</span>'), "the legend line");
+    assert(!Q.view().includes("staff"), "no staff data: as it was");
+    const cv = P.run('classView("4A")'); assert(!cv.cells.some(c => c.staff) && !cv.legend.some(e => e.staff));
+    P.run('S.ff = { d: 1, from: 22, to: 23 }; show("free", null)'); assert(!P.view().includes('data-key="Mr Ben Ong"'), "busy in the period: " + P.view());
+    P.run('S.ff = { d: 1, from: 1, to: 3 }; show("free", null)'); assert(P.view().includes('data-key="Mr Ben Ong"'), "free at the start of the day");
+    P.run('S.ff = { d: 0, from: 22, to: 23 }; show("free", null)'); assert(P.view().includes('data-key="Mr Ben Ong"'), "another day");
+    P.run('S.ff = { d: 1, from: 18, to: 21 }; show("free", null)'); assert(P.view().includes('data-key="Mr Ben Ong"'), "the period has not begun");
+  });
+
+  await t("in staff mode a teacher's own periods come by a request of their own; a failed answer changes nothing", async () => {
+    const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" });
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], "", ""]); d.rooms = []; d.students = []; };
+    const ROW = ["Mr Ben Ong", 1, 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", false, true];
+    const EL = [200, { schedules: [], banner: null }];
+    const P = boot({ "/api/published/exams": EL, "/api/exams/my-duties": [200, { schedules: [], lessons: [] }], "/api/timetable/my-periods": [200, { staff: [ROW], lines: ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"] }] }, STAFF, cut);
+    await P.tick(); P.run('show("teachers", "Mr Ben Ong")'); await P.tick();
+    const v = P.view(); assert(P.fetched.includes("/api/timetable/my-periods"));
+    assert(v.includes('class="cell staff cut-r"') && v.includes("Zone computing class") && v.includes("Zone computing class · Tue · 3.00 to 5.30"), v);
+    const F = boot({ "/api/published/exams": EL, "/api/timetable/my-periods": [403, { error: "x" }] }, STAFF, cut);
+    await F.tick(); F.run('show("teachers", "Mr Ben Ong")'); assert(!F.view().includes("staff") && F.view().includes('class="cell'), "a refusal leaves the page as it was");
+    const G = boot({ "/api/published/exams": EL }, STAFF, cut); await G.tick(); G.run('show("teachers", "Mr Ben Ong")'); assert(!G.view().includes("cell staff"), "no answer at all");
+    const O = boot({ "/api/published/exams": LIST }, APP); await O.tick(); assert(!O.fetched.includes("/api/timetable/my-periods"), "only staff mode asks");
+  });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });

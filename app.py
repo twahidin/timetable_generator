@@ -2951,6 +2951,7 @@ REPUBLISHED = "The timetable was published again: reload the page."
 NO_DAY_CAL = "The school calendar is not set yet, so the timetable cannot be shown on a date."
 ONLY_STAFF_PRINTS = "Only staff can open the seating plans and rosters."
 ONLY_OWN_DUTIES = "Sign in with your own code or password to see your exam and event duties."
+ONLY_OWN_PERIODS = "Sign in with your own code or password to see your teacher-only periods."
 ONLY_OWN_EVENTS = "Sign in with your own code or password to start or open an event."
 
 def _exams_gate():
@@ -3393,6 +3394,19 @@ def exams_my_duties():
     rights = _exams_rights(pub)
     if rights is None: return {"error": ONLY_OWN_DUTIES}, 403   # the shared heads', teacher and student codes are nobody's
     return jsonify(exams_published.my_duties(pub, _exam_cal(pub), exams_schedules.on_site(), rights[1], _exams_today()))
+
+@app.get("/api/timetable/my-periods")
+@need("timetable")
+def timetable_my_periods():
+    """a person's own teacher-only periods from the published timetable, signed in by name any way (the shared committee code: no one's, so none;
+    the shared heads', teacher and student codes: refused). The staff page is one page kept for all staff, so a teacher's periods come here"""
+    from ttgen import export
+    pub = store.published(); rights = _exams_rights(pub)
+    if rights is None: return {"error": ONLY_OWN_PERIODS}, 403
+    if not pub: return jsonify(staff=[], lines=[])
+    m = pub["model"]; me = rights[1]
+    return jsonify(staff=[[c["teacher"], c["d"], c["p"], c["n"], c["name"], c["place"], c["t0"], c["t1"], c["before"], c["after"]] for c in export.staff_cells(m, me)],
+                   lines=export.staff_lines(m, me))
 
 @app.get("/api/me/exams")
 @need("own")

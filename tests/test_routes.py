@@ -250,6 +250,7 @@ GUARDS = {
     "exams_me": ('exams', 'committee', 'timetable'),
     "exams_move": ('exams', 'committee'),
     "exams_my_duties": ('timetable',),
+    "timetable_my_periods": ('timetable',),
     "exams_my_exams": ('own',),
     "exams_one_page": ('exams', 'committee'),
     "exams_papers_download": ('exams', 'committee'),
@@ -745,5 +746,25 @@ def the_plan_with_ai_tile_is_there_only_with_an_ai_and_the_exams_rights():
             assert PLAN_TILE not in shown and "Plan with AI" not in page and all(l != "/plan" for _, l in greyed), (keys, shown, greyed)
             assert ("My exam and event duties", "/exams") in shown, "their own duties tile stays as it was"
     finally: PAI.enabled = real
+
+@t
+def a_teacher_gets_only_their_own_teacher_only_periods():
+    """/api/timetable/my-periods: the viewer's own rows from the published model; a shared code or a student is refused"""
+    m = store.published()["model"]; old = m["setup"]
+    m["setup"] = dict(old, school=dict(start_time="07:40", period_minutes=20, periods_per_day=26), staff_periods=[
+        dict(_id="p1", name="Zone computing class", all=False, depts=[], teachers=[TINA], week="Both", days=["Tue"], times=["15:00", "17:30"], place="West Zone centre")])
+    try:
+        mine = client(person(TINA, "code")).get("/api/timetable/my-periods"); j = mine.get_json()
+        assert mine.status_code == 200 and j["lines"] == ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"], j
+        assert j["staff"] and all(r[0] == TINA and r[4] == "Zone computing class" and r[6:] == ["3.00", "5.30", False, True] for r in j["staff"]), j
+        other = client(person(HAL, "password")).get("/api/timetable/my-periods")
+        assert other.status_code == 200 and other.get_json() == {"staff": [], "lines": []}, other.get_json()
+        assert client(dict(role="committee")).get("/api/timetable/my-periods").get_json() == {"staff": [], "lines": []}   # the shared committee code is nobody's
+        for kind in ("shared student", "shared teacher", "shared head"):
+            r = client(KINDS[kind][0]).get("/api/timetable/my-periods"); assert r.status_code == 403 and "own code or password" in r.get_json()["error"], (kind, r.status_code)
+        assert client(KINDS["personal student"][0]).get("/api/timetable/my-periods").status_code in (401, 302) and by_guard(client(KINDS["personal student"][0]).get("/api/timetable/my-periods"))
+    finally: m["setup"] = old
+    pub = store.published(); m_ = store.published()["model"]; assert "staff_periods" not in m_["setup"]
+    assert client(person(TINA, "code")).get("/api/timetable/my-periods").get_json() == {"staff": [], "lines": []}   # nothing set: nothing to show
 
 print(f"{COUNT} route tests passed")

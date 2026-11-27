@@ -859,6 +859,17 @@ def test_a_forced_lesson_on_a_teacher_only_period_publishes():
         store.publish = real
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_the_preview_shows_a_teacher_only_period_from_the_setup_as_it_is_now():
+    import re
+    who = TEACHERS[1]; staff = [dict(_id="z2", name="Zone computing class", all=False, depts=[], teachers=[who], week="Both", days=["Tue"], times=["15:00", "16:00"], place="West Zone centre")]
+    assert c.put("/api/setup", json=dict(spec=dict(SPEC, staff_periods=staff), why="a zone class")).status_code == 200
+    try:
+        fresh(); html = c.get("/draft/preview").get_data(as_text=True)
+        data = json.loads(re.search(r"<script>const DATA = (.*?);</script>", html, re.S).group(1).replace("<\\/", "</"))
+        assert data["staff"] and all(r[0] == who and r[4] == "Zone computing class" for r in data["staff"]) and list(data["staff_lines"]) == [who], data["staff"]
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()
