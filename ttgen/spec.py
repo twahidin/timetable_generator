@@ -32,7 +32,7 @@ RULE_TYPES = [
     ("In words", "School, Level, Class, Subject, Room, Teacher", "N", "N", "A rule in plain words that the list cannot say. The timetable scripts do not enforce it: the agent honours a Must, tries a Prefer, and reports how each was met.", "Level · Sec 1 · No PE in the first period"),
 ]
 TYPED = "In words"             # a rule the agent honours and reports on; never enforced by the solver
-SKILL_VERSION = "2026-11.11"     # SKILL.md's version line and the one the workbook's README names
+SKILL_VERSION = "2026-11.12"     # SKILL.md's version line and the one the workbook's README names
 
 def teacher_depts(t):
     """A teacher row's departments, home first: the trimmed, non-empty, different ones of dept and dept2"""

@@ -700,7 +700,7 @@ def unfilled_rows(spec):
 
 def normalise(spec):
     """the editor's JSON -> the exact spec an agent would read from the workbook (codes, periods and lesson lengths worked out)"""
-    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices"): spec.setdefault(k, [])
+    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices", "staff_periods"): spec.setdefault(k, [])
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp: path = tmp.name
     try:
         write_template(spec, path); return read_template(path)

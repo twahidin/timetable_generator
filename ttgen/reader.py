@@ -6,7 +6,7 @@ template) and the older one (a 7 Rules sheet). Everything that constrains the ti
 import collections, datetime, re
 import openpyxl
 from . import parents as PA
-from .spec import clean_name, defaults, lesson_split, names_list, venue_problems, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
+from .spec import clean_name, defaults, lesson_split, names_list, rules_with_staff, venue_problems, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
 
 FIXED_COLS = ("Level", "Class(es) or group", "Subject", "Week", "Day", "Start period", "Note")   # Fixed lessons, as the template writes it
 
@@ -212,6 +212,14 @@ def read_template(path):
             a, b = periods_between(sc, x["From"], x["To"])
             rules.append(dict(scope="Teacher", target=str(x["Teacher"]), rule="Not available", week=x.get("Week") or "Both", day=x.get("Day") or "All",
                               **{"from": a, "to": b}, strength="Must", note=x.get("Reason"), times=[_clock(x["From"]), _clock(x["To"])]))
+    staff_periods = []
+    if "Teacher-only periods" in wb.sheetnames:
+        def _hhmm(v):
+            try: return _clock(v) if v not in (None, "") else None
+            except (TypeError, ValueError): return None
+        for x in _table(wb["Teacher-only periods"], "Name")[1]:
+            staff_periods.append(dict(name=str(x.get("Name") or "").strip(), all=_yes(x.get("All teachers")), depts=names_list(x.get("Departments")), teachers=names_list(x.get("Teachers")),
+                                      week=str(x.get("Week") or "Both").strip(), days=names_list(x.get("Days")), times=[_hhmm(x.get("From")), _hhmm(x.get("To"))], place=str(x.get("Place") or "").strip()))
     class_names = {c["class"] for c in classes}
     if "Fixed lessons" in wb.sheetnames:
         for x in _table(wb["Fixed lessons"], "Level", FIXED_COLS)[1]:
@@ -258,7 +266,7 @@ def read_template(path):
         while rows_ and not any(v not in ("", None) for v in rows_[-1]): rows_.pop()
         extra.append(dict(name=ws.title, rows=[[v if isinstance(v, (int, float, str)) else str(v) for v in row] for row in rows_]))
     out = dict(school=sc, day_structure=day_structure, venues=venues, classes=classes, subjects=subjects, teachers=teachers,
-               blocks=blocks, lessons=lessons, rules=rules, students=students, combinations=combinations, roles=roles, extra_sheets=extra,
+               blocks=blocks, lessons=lessons, rules=rules, students=students, combinations=combinations, roles=roles, extra_sheets=extra, staff_periods=staff_periods,
                choices=_read_choices(wb, sc, rules))
     if "Changed by hand" not in lh and PA.subjects(out): PA.adopt(out)   # an older workbook: teachers typed on a named subject's lessons are kept, not replaced
     return out
@@ -307,7 +315,7 @@ def _instead_row(x):
     return r
 
 KNOWN_SHEETS = {"README", "Settings", "Period times", "Day structure", "1 Venues", "2 Classes", "3 Subjects", "4 Teachers", "Roles", "5 Blocks", "6 Lessons",
-                "7 Rules", "More rules", "Choices", "Choices used", "Rule types", "Teacher availability", "Fixed lessons", "Students", "Combinations", "Lists"}
+                "7 Rules", "More rules", "Choices", "Choices used", "Rule types", "Teacher availability", "Teacher-only periods", "Fixed lessons", "Students", "Combinations", "Lists"}
 
 def _clock(t):
     m = _minutes(t); return f"{m // 60:02d}:{m % 60:02d}"
@@ -357,4 +365,5 @@ def derive(spec):
         if not x["classes"]: problems.append(f"Lesson row {i + 6}: no class.")
         if not x["teachers"]: problems.append(f"Lesson row {i + 6}: no teacher ({x['subject']} {', '.join(x['classes'])}).")
     problems += [f"Venue row {i + 6}: {text}" for i, text, _ in venue_problems(spec)]   # the sheet row: 1 Venues' data starts on row 6, as Lessons'
+    spec["rules"] = rules_with_staff(spec)   # the teacher-only periods' block-outs come last: the solver, step 7's sums and the rule check follow them
     return problems

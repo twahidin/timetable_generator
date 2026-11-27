@@ -90,5 +90,77 @@ def words():
     assert S.staff_legend_line(ZONE) == "Zone computing class · Tue and Thu · 3.00 to 5.30 · West Zone centre"
     assert S.staff_legend_line(dict(ZONE, place="")) == "Zone computing class · Tue and Thu · 3.00 to 5.30"
 
+def round_trip(sp):
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f: path = f.name
+    try: template.write_template(sp, path); return reader.read_template(path)
+    finally: os.unlink(path)
+
+@t
+def the_workbook_keeps_every_shape_of_row():
+    sp = secondary(); names = [x["name"] for x in sp["teachers"]][:2]; dept = sp["teachers"][0]["dept"]
+    rows = [dict(name="Zone computing class", all=False, depts=[], teachers=names, week="Both", days=["Tue", "Thu"], times=["15:00", "17:30"], place="West Zone centre"),
+            dict(name="Staff meeting", all=True, depts=[], teachers=[], week="Odd", days=["Mon"], times=["15:00", "16:20"], place="Hall"),
+            dict(name="Department meeting", all=False, depts=[dept], teachers=names[:1], week="Even", days=["Wed"], times=["14:20", "15:20"], place=""),
+            dict(name="", all=False, depts=[], teachers=[], week="Both", days=[], times=["15:00", "16:00"], place="")]            # a row just added on step 6
+    sp["staff_periods"] = copy.deepcopy(rows)
+    assert round_trip(sp)["staff_periods"] == rows
+    assert round_trip(secondary())["staff_periods"] == []
+    back = round_trip(sp); avail = [r for r in back["rules"] if r.get("rule") == "Not available" and r.get("scope") == "Teacher"]
+    assert len(avail) == len([r for r in secondary()["rules"] if r.get("rule") == "Not available" and r.get("scope") == "Teacher"])   # not written to Teacher availability too
+
+@t
+def names_with_full_stops_and_apostrophes_survive_and_odd_times_do_not_raise():
+    sp = secondary(); sp["teachers"][0]["name"] = "Mdm. Ng O'Neil"
+    row = dict(name="Zone class", all=False, depts=[], teachers=["Mdm. Ng O'Neil"], week="Both", days=["Fri"], times=["15:00", "17:30"], place="")
+    sp["staff_periods"] = [row]; assert round_trip(sp)["staff_periods"] == [row]
+    sp["staff_periods"] = [dict(row, times=["x", None])]
+    back = round_trip(sp)["staff_periods"]; assert len(back) == 1 and back[0]["name"] == "Zone class" and back[0]["teachers"] == ["Mdm. Ng O'Neil"]
+
+@t
+def a_derived_setup_writes_the_same_sheets_as_before_derive():
+    sp = secondary(); t0 = sp["teachers"][0]["name"]
+    sp["staff_periods"] = [dict(name="Zone computing class", all=False, depts=[], teachers=[t0], week="Both", days=["Tue"], times=["15:00", "17:30"], place="")]
+    plain = round_trip(sp); d = copy.deepcopy(sp); reader.derive(d); back = round_trip(d)
+    assert back["staff_periods"] == plain["staff_periods"] == S.staff_rows(sp)
+    assert [r for r in back["rules"] if not r.get("staff")] == [r for r in plain["rules"] if not r.get("staff")] and not any(r.get("staff") for r in back["rules"])
+
+@t
+def derive_appends_the_block_outs_once():
+    sp = secondary(); t0 = sp["teachers"][0]["name"]; before = len(sp["rules"])
+    sp["staff_periods"] = [dict(name="Zone computing class", all=False, depts=[], teachers=[t0], week="Both", days=["Tue"], times=["15:00", "17:30"], place="")]
+    reader.derive(sp); n1 = len(sp["rules"]); reader.derive(sp)
+    assert n1 == len(sp["rules"]) == before + 1 and sp["rules"][-1]["staff"] == "Zone computing class" and sp["rules"][:before] == S.plain_rules(sp)
+    assert not any(i >= before for i, _ in solver.rule_problems(sp))
+
+@t
+def the_solver_keeps_a_teachers_lessons_out():            # only with --full
+    if "--full" not in sys.argv: return
+    from ttgen import report
+    sp = secondary(); who = next(x for x in sp["lessons"] if x.get("teachers"))["teachers"][0]
+    sp["staff_periods"] = [dict(name="Zone computing class", all=False, depts=[], teachers=[who], week="Both", days=["Mon"], times=["07:40", "09:40"], place="")]
+    res = solver.solve(copy.deepcopy(sp), time_limit=240, log=lambda *a: None); assert res["status"] in ("OPTIMAL", "FEASIBLE"), res["status"]
+    report.assign_rooms(res)
+    m = export.model_from_result(res); mon = [i for i, d in enumerate(m["days"]) if d.endswith("Mon")]
+    assert [x for x in m["lessons"] if who in x["teachers"]] and not [x for x in m["lessons"] if who in x["teachers"] and x["d"] in mon and x["p"] < 6]
+
+@t
+def will_it_fit_and_the_database_know_the_list():
+    from ttgen import checks, database
+    sp = secondary(); who = next(x for x in sp["lessons"] if x.get("teachers"))["teachers"][0]
+    fit = lambda s: [f["text"] for f in checks.findings(copy.deepcopy(s)) if f["text"].startswith(f"{who} teaches") and "no timetable can fit them" in f["text"]]
+    assert not fit(sp)
+    row = dict(name="Zone computing class", all=False, depts=[], teachers=[who], week="Both", days=["Mon", "Tue", "Wed", "Thu", "Fri"], times=["00:00", "23:59"], place="")
+    sp["staff_periods"] = [row]
+    assert len(fit(sp)) == 1, fit(sp)
+    d = copy.deepcopy(sp); reader.derive(d); days = list(d["day_structure"][d["school"]["levels"][0]].keys())
+    m = export._model(d, days, []); path = os.path.join(tempfile.mkdtemp(), "t.sqlite"); database.write_db(m, path)
+    assert S.staff_rows(database.read_db(path)[5]) == [row]
+
+@t
+def the_skill_names_the_sheet_and_the_version():
+    s = open(os.path.join(ROOT, "skill/school-timetable-generator/SKILL.md"), encoding="utf-8").read()
+    assert S.SKILL_VERSION == "2026-11.12" and "Skill version: 2026-11.12" in s and "`Teacher-only periods`" in s
+    assert "Teacher-only periods" in open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")
