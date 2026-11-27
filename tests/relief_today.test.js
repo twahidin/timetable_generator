@@ -565,20 +565,46 @@ t("a relief whose teacher is away: named above the new pick, or above an open ro
 });
 
 /* ---- Send-out, final fix wave ---- */
-t("past the cut-off, on the next day: how many of today are still to arrange, and open Today shows today", async () => {
+t("past the cut-off, on the next day: how many of today are still to arrange, and the page shows today", async () => {
   const flat = el => el.kids.map(k => (typeof k === "string" ? k : flat(k))).join("");   /* the line as it reads, its button in it */
   const past = (left, more) => day([], Object.assign({ date: "2026-10-14", hours: Object.assign({}, HOURS, { past_cut_off: true, today_left: left }) }, more));
   const p = await today(past(1));
   const line = p.all("#tdTop .td-top").find(e => p.text(e).startsWith("Today still"));
-  assert.ok(line, p.top()); assert.strictEqual(flat(line).replace(/\s+/g, " ").trim(), "Today still has 1 to arrange: open Today.");
+  assert.ok(line, p.top()); assert.strictEqual(flat(line).replace(/\s+/g, " ").trim(), "Today still has 1 to arrange: show today.");
   p.day = c => ok(day([row()], { date: c.url.slice(-10), hours: Object.assign({}, HOURS, { past_cut_off: true, today_left: 1 }) }));
-  await p.click("#tdTop button", "open Today");
+  await p.click("#tdTop button", "show today");
   assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=${TODAY}`);
   assert.strictEqual(p.text("#tdTitle"), "Relief today"); assert.strictEqual(p.find("#tdSeg button", "Today").getAttribute("aria-pressed"), "true");
   assert.ok(!p.top().some(x => x.startsWith("Today still")), "on today's own view: no such line");
   const q = await today(past(2)); assert.ok(q.top().some(x => x.startsWith("Today still has 2 to arrange:")), q.top());
   const z = await today(past(0)); assert.ok(!z.top().some(x => x.startsWith("Today still")), "nothing left: no line");
   const o = await today(day([], { date: "2026-10-14" })); assert.ok(!o.top().some(x => x.startsWith("Today still")), "no hours: no line");
+});
+
+t("showDay before the tab was opened opens it on that date", async () => {
+  const p = await today(day([row()]), { hash: "#mine" });
+  assert.strictEqual(p.reads(), 0, "the tab is not open yet");
+  p.window.Relief.showDay("not a date"); await p.settle();
+  assert.strictEqual(p.reads(), 1, "a text that is not a date only opens the tab");
+  assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`))[0].url, `${URL}?`);
+  const q = await today(day([row()]), { hash: "#mine" });
+  q.window.Relief.showDay("2026-10-16"); await q.settle();
+  assert.strictEqual(q.calls.filter(c => c.url.startsWith(`${URL}?`))[0].url, `${URL}?date=2026-10-16`);
+});
+t("showDay on an open tab changes its date", async () => {
+  const p = await today(day([row()]));
+  p.window.Relief.showDay("2026-10-16"); await p.settle();
+  assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=2026-10-16`);
+  assert.strictEqual(p.text("#tdTitle"), "Relief on Fri 16 Oct"); assert.strictEqual(p.window.Relief.cur, "today");
+});
+t("showDay on an open tab reads the asked day once, and again once for the day already shown", async () => {
+  const p = await today(day([row()])), asked = d => p.calls.filter(c => c.method === "GET" && c.url === `${URL}?date=${d}`).length;
+  p.window.Relief.showDay("2026-10-16"); await p.settle();
+  assert.strictEqual(asked("2026-10-16"), 1, "one request for the asked date"); assert.strictEqual(p.reads(), 2);
+  assert.strictEqual(p.text("#tdTitle"), "Relief on Fri 16 Oct"); assert.strictEqual(p.find("#tdSeg button", "Today").getAttribute("aria-pressed"), "false");
+  assert.strictEqual(p.find("#tdDate") ? p.find("#tdDate").value : "2026-10-16", "2026-10-16");
+  p.window.Relief.showDay("2026-10-16"); await p.settle();
+  assert.strictEqual(asked("2026-10-16"), 2, "the same day again reads once more");
 });
 
 run(all);

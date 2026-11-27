@@ -1,5 +1,5 @@
 "use strict";
-/* Pick dates on Plan relief and on Ask for relief: two months side by side, Monday first. Loaded after relief-form.js and before
+/* Pick dates on Relief Planning and on Ask for relief: two months side by side, Monday first. Loaded after relief-form.js and before
    relief.js (window.Relief is read only inside functions).
 
    ReliefDates.mount(box, {key, picked, max, onChange}) draws the calendar into box. The school days come from

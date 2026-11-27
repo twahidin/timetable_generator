@@ -1,12 +1,12 @@
 "use strict";
-/* Plan relief (/relief#plan), for management and the relief team (me.can_plan). The form plans relief for a colleague:
+/* Relief Planning (/relief#plan), for management and the relief team (me.can_plan). The form plans relief for a colleague:
    the dates, the absent teacher, the whole day or some periods, a reason and remarks for the relief team; then that
    teacher's lessons, each with its work box (optional here: the absent teacher is asked to set it) and "Choose a relief
    teacher", which opens that lesson's "free then" list from /api/relief/free. Choosing fills the lesson; a lesson left
    open goes to the relief team. Planned by me lists what this person planned; Open shows an absence as the same card as
    My absences (R.absences), with Choose on its open lessons, and Download gives the relief sheet for a range of dates.
    The form is kept in P and the lessons' work by ReliefForm; the "free then" lists are kept in F. A refusal shows the
-   server's sentence and keeps everything typed and chosen. The list itself is drawn by Relief.freeList, which Today's
+   server's sentence and keeps everything typed and chosen. The list itself is drawn by Relief.freeList, which Today's Relief Assignments'
    Change (relief-today.js) uses too. */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
@@ -93,7 +93,7 @@
     return freeList({ data: s.data, x, chosen: inf.chosen, also: inf.r ? new Map() : alsoChosen(x), busy: s.busy, teaching: s.teaching, duty: s.duty });
   }
 
-  /* the "free then" list as HTML, from a free route's answer; Today's Change (relief-today.js) draws the same list through
+  /* the "free then" list as HTML, from a free route's answer; Today's Relief Assignments' Change (relief-today.js) draws the same list through
      Relief.freeList. o: data ({groups, teaching}), x (the lesson, or a cover with its date: classes, subject, group, p, n,
      date), chosen (the name chosen now, or ""), also (Map: name -> the lesson they are chosen for here), busy (Choose
      disabled), teaching (the names teaching then shown), mark (the chosen person's chip, "Chosen" when left out). Its

@@ -1,4 +1,4 @@
-// Plain-assert tests for the relief team's What's in page (static/relief-inbox.js): run with `node tests/relief_inbox.test.js`.
+// Plain-assert tests for the relief team's All Relief Requests page (static/relief-inbox.js): run with `node tests/relief_inbox.test.js`.
 // The page's script runs, with the real relief-form.js, in a small stand-in for the page, against an /api/relief/absences answer written here.
 const assert = require("assert");
 const fs = require("fs");
@@ -51,9 +51,22 @@ t("a long absence's dates read as one run in the row", async () => {
   assert.ok(html.includes("Tue 13 Oct \u2013 Fri 16 Oct"), html);
 });
 
+t("Not acknowledged is the view's name, and it takes a head's planning or a relief of today", async () => {
+  const html = await shown([record({ id: "a", nudge: true, how: "planned", by: "Mr Hugo Ong" }), record({ id: "b", unacked: [{ who: "Mr Sam Tan", p: 6, n: 3, started: false }] }), record({ id: "c" })]);
+  assert.ok(html.includes("Not acknowledged (2)") && !html.includes("Needs a nudge"), html);
+});
+t("a row says which relief teacher has not acknowledged, and when the lesson has started", async () => {
+  const html = await shown([record({ unacked: [{ who: "Mr Sam Tan", p: 6, n: 3, started: false }, { who: "Ms Maya Lee", p: 11, n: 1, started: true }] })]);
+  assert.ok(html.includes("Relief not acknowledged: Mr Sam Tan, P7\u2013P9") && html.includes("Relief not acknowledged: Ms Maya Lee, P12 \u00b7 started"), html);
+});
+t("an answer without unacked (an older server) is as before", async () => {
+  const html = await shown([record()]);
+  assert.ok(html.includes("Not acknowledged (0)") && !html.includes("Relief not acknowledged"), html);
+});
+
 (async () => {
   for (const [name, f] of all) {
     try { await f(); n++; } catch (e) { console.error("FAIL", name); throw e; }
   }
-  console.log(`${n} relief What's in tests passed`);
+  console.log(`${n} relief All Relief Requests tests passed`);
 })().catch(e => { console.error(e); process.exit(1); });

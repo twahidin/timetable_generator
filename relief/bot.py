@@ -419,7 +419,7 @@ def _approve(p):
     line = f"✅ Approved: {b['who']}, {_hm(c['approved']['at'])}."
     short = lambda: next((q.get("short") for q in _accounts.staff(pub) if q["name"] == b["who"]), None) or b["who"]
     rows = _rows(b["name"], lambda: [[dict(text=f"📤 Send out to {short()}", what="sendout", id=r["id"], ckey=b["ckey"], who=b["who"],
-                                           extra=dict(absent=r["teacher"], date=x["date"], approved_at=c["approved"]["at"]))]])     # None: the team sends out on Today
+                                           extra=dict(absent=r["teacher"], date=x["date"], approved_at=c["approved"]["at"]))]])     # None: the team sends out on Today's Relief Assignments
     return _Out(line, line=line, after=_after("approve", r, b, pub), rows=rows)
 
 

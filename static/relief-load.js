@@ -1,5 +1,5 @@
 "use strict";
-/* Load (/relief#load), for the relief team (me.can_team): who has taken how much relief, from /api/relief/load. One row a
+/* Term Relief Report (/relief#load), for the relief team (me.can_team): who has taken how much relief, from /api/relief/load. One row a
    teacher: teaching this week, relief this week, exams and events this week (periods more for exam duties and events, fewer
    for lessons that stop; the column shows only in a week that has any), week so far, relief this term, requests to change
    this term. This week lists whoever has teaching, relief or a duty this week; This term whoever has relief or a request to change this term. Filters:
@@ -53,7 +53,7 @@
     const exams = rows().some(r => Number(r.exams)), signed = v => Number(v) > 0 ? `+${v}` : Number(v) < 0 ? `−${-v}` : "0";
     const cols = [["Teaching this week", "teaching"], ["Relief this week", "relief"], ...(exams ? [["Exams and events this week", "exams"]] : []), ["Week so far", "week"], ["Relief this term", "term"], ["Requests to change this term", "changes"]];
     box.innerHTML = `<div class="card ld">
-      <div class="ab-top"><div><h2>Load</h2><div class="small muted">${esc(about)}</div></div>
+      <div class="ab-top"><div><h2>Term Relief Report</h2><div class="small muted">${esc(about)}</div></div>
         <div class="row"><button type="button" class="small" data-ld="reload" ${L.loading ? "disabled" : ""}>${L.loading ? "Reading…" : "Refresh"}</button><button type="button" class="small" data-ld="csv">Download</button></div></div>
       <div class="line ld-filters"><div class="seg" role="group" aria-label="Which period">${seg}</div>
         <span class="ld-dept"><label class="small muted" for="ldDept">Department</label><select id="ldDept" data-ld="dept">${opts}</select></span>

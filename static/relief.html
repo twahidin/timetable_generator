@@ -119,7 +119,7 @@ a.filebtn.small{padding:3px 8px;font-size:12.5px}
 .chip.new{background:#e6efff;color:#1d4ed8;font-weight:600}
 .note{font-size:12.5px;color:var(--muted);margin-top:8px}
 .pl-changed{color:#7a4b00}
-/* Plan relief: a chosen relief teacher and the "free then" list */
+/* Relief Planning: a chosen relief teacher and the "free then" list */
 .pl-chosen{display:inline-flex;align-items:center;gap:2px;padding:2px 3px 2px 10px;font-size:12.5px;white-space:normal}
 .pl-chosen button{border:0;background:transparent;padding:0 6px;border-radius:999px;line-height:1.5;color:inherit;box-shadow:none}
 .pl-chosen button:hover:not(:disabled){background:rgba(27,35,48,.08);color:var(--warn);box-shadow:none}
@@ -140,14 +140,20 @@ a.filebtn.small{padding:3px 8px;font-size:12.5px}
 .linkish:hover:not(:disabled){box-shadow:none;background:transparent;border:0}
 .pl-dl{margin:0 0 14px}
 .pl-dl .line{margin-top:0}
-/* Planned by me and What's in */
+/* Planned by me and All Relief Requests */
 .tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 table.rtable td{padding:8px;vertical-align:top}
 table.rtable td.act{text-align:right;white-space:nowrap}
 table.rtable tr.off td{opacity:.62}
 table.rtable tr.new td{background:#f3f8ff}
 table.inbox{min-width:860px}
-/* Today (the relief team) */
+/* Planned Relief Assignments */
+.ah-day{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
+.ah-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+table.ah{table-layout:fixed;width:100%;min-width:640px}   /* one set of columns for every day, so they line up; narrower than 640px the .tablewrap scrolls */
+table.ah th:nth-child(1){width:96px}table.ah th:nth-child(2){width:24%}table.ah th:nth-child(3){width:17%}table.ah th:nth-child(4){width:21%}
+table.ah td{overflow-wrap:anywhere}table.ah .chip{white-space:normal}
+/* Today's Relief Assignments (the relief team) */
 .td-acts{justify-content:flex-end}
 .td-acts.tg{margin-bottom:12px}   /* only while a bot is connected: Remind all's place is then kept under the buttons */
 .td-acts [data-td="remind-all"],.td-gap{margin-right:14px}
@@ -169,7 +175,7 @@ table.inbox{min-width:860px}
 .td-by{display:inline-block;font-size:11px;font-weight:700;color:#1d4ed8;background:#e6efff;border-radius:4px;padding:0 5px}
 .td-warn{font-size:12.5px;color:var(--warn);margin-top:4px}
 .td-busy{color:var(--navy);font-style:italic}
-/* Load (the relief team) */
+/* Term Relief Report (the relief team) */
 .ld-filters{margin:0 0 10px}
 .ld-filters select{max-width:100%}
 .ld-dept{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -236,10 +242,11 @@ table.sm-table{min-width:620px}
     <button type="button" role="tab" id="tab-mine" data-tab="mine" aria-controls="pane-mine" hidden>My absences<span class="n" id="mineN"></span></button>
     <button type="button" role="tab" id="tab-ask" data-tab="ask" aria-controls="pane-ask" hidden>Ask for relief</button>
     <button type="button" role="tab" id="tab-covering" data-tab="covering" aria-controls="pane-covering" hidden>Reliefs I'm covering</button>
-    <button type="button" role="tab" id="tab-plan" data-tab="plan" aria-controls="pane-plan" hidden>Plan relief</button>
-    <button type="button" role="tab" id="tab-inbox" data-tab="inbox" aria-controls="pane-inbox" hidden>What's in</button>
-    <button type="button" role="tab" id="tab-today" data-tab="today" aria-controls="pane-today" hidden>Today</button>
-    <button type="button" role="tab" id="tab-load" data-tab="load" aria-controls="pane-load" hidden>Load</button>
+    <button type="button" role="tab" id="tab-plan" data-tab="plan" aria-controls="pane-plan" hidden>Relief Planning</button>
+    <button type="button" role="tab" id="tab-inbox" data-tab="inbox" aria-controls="pane-inbox" hidden>All Relief Requests</button>
+    <button type="button" role="tab" id="tab-today" data-tab="today" aria-controls="pane-today" hidden>Today's Relief Assignments</button>
+    <button type="button" role="tab" id="tab-ahead" data-tab="ahead" aria-controls="pane-ahead" hidden>Planned Relief Assignments</button>
+    <button type="button" role="tab" id="tab-load" data-tab="load" aria-controls="pane-load" hidden>Term Relief Report</button>
     <button type="button" role="tab" id="tab-summary" data-tab="summary" aria-controls="pane-summary" hidden>Weekly summary</button>
   </nav>
   <div id="loading" class="card"><p class="muted">Loading…</p></div>
@@ -249,6 +256,7 @@ table.sm-table{min-width:620px}
   <section class="pane" id="pane-plan" role="tabpanel" aria-labelledby="tab-plan" hidden></section>
   <section class="pane" id="pane-inbox" role="tabpanel" aria-labelledby="tab-inbox" hidden></section>
   <section class="pane" id="pane-today" role="tabpanel" aria-labelledby="tab-today" hidden></section>
+  <section class="pane" id="pane-ahead" role="tabpanel" aria-labelledby="tab-ahead" hidden></section>
   <section class="pane" id="pane-load" role="tabpanel" aria-labelledby="tab-load" hidden></section>
   <section class="pane" id="pane-summary" role="tabpanel" aria-labelledby="tab-summary" hidden></section>
 </main>
@@ -259,6 +267,7 @@ table.sm-table{min-width:620px}
 <script src="/static/relief-plan.js"></script>
 <script src="/static/relief-inbox.js"></script>
 <script src="/static/relief-today.js"></script>
+<script src="/static/relief-ahead.js"></script>
 <script src="/static/relief-load.js"></script>
 <script src="/static/relief-summary.js"></script>
 <script src="/static/relief-covering.js"></script>
