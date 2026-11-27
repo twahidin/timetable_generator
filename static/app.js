@@ -96,7 +96,7 @@ function canRedraw() {
   const typing = a && $("#main").contains(a) && ((a.tagName === "INPUT" && ["text", "number", "time", "search"].includes(a.type)) || a.tagName === "TEXTAREA");
   return !(typing && a.value !== a.defaultValue);
 }
-const LIST_KEYS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "combinations"];
+const LIST_KEYS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "staff_periods", "students", "combinations"];
 function takeSpec(spec) {   // a newer copy with others' changes in it: redraw now, or once the person is done with the box or pop-up
   if (!canRedraw()) { SYNC.held = { spec, from: Sync.clone(S.spec) }; return; }
   const rows = s => ["lessons", "students", "teachers"].map(k => (s[k] || []).map(r => r._id).join()).join("|");
@@ -661,7 +661,7 @@ const ownDepts = () => { const m = myDepts(), D = sc().departments || []; if (!m
 const cpWhy = () => `Only the committee can change these lessons: their teachers are the class's ${Parents.label(S.spec)}.`
 const cpHand = (x, i, dis) => x.by_hand === true && Parents.staffed(S.spec, x) ? `<span class="small muted">Changed by hand</span> <button class="small ghost" data-cpback="${i}" ${dis ? `disabled title="${esc(cpWhy())}"` : ""}>Back to the ${esc(Parents.label(S.spec))}</button>` : "";
 function issues() {
-  const out = { school: {}, config: {}, choices: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
+  const out = { school: {}, config: {}, choices: {}, lessons: {}, rules: {}, staff_periods: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
   const crit = new Set(), add = (k, i, m, hard) => { (out[k][i] = out[k][i] || []).push(m); if (hard) crit.add(`${k}|${i}|${m}`); };
   Object.entries(Choices.problems(S.spec, SET())).forEach(([i, ms]) => ms.forEach(m => add("choices", i, `${Choices.itemLabel(S.spec, S.spec.choices[i], SET())}: ${m}`)));   // the give-way list: warnings
@@ -692,6 +692,7 @@ function issues() {
   }
   structureWarnings().forEach((m, k) => m.startsWith("Fixed lesson")   // the Day structure and the rules saying different things: warnings,
     ? add("rules", `ds${k}`, m, true) : add("school", `ds${k}`, m));   // except a fixed lesson outside lesson time, which no timetable can meet
+  (S.spec.staff_periods || []).forEach((row, i) => StaffPeriods.faults(S.spec, row).forEach(f => add("staff_periods", i, "Teacher-only period " + ((row && row.name) || "(no name)") + ": " + f.text, false)));   // a teacher-only period: never critical
   const info = lessonInfo(), same = Groups.sameCode(S.spec);   // same: the rows whose code another group has too
   S.spec.lessons.forEach((x, i) => {
     if (!x.subject) { add("lessons", i, "Pick a subject."); return; }
@@ -970,7 +971,7 @@ function render() {
   if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); if (id === "publish") loadRenames(again); }   // again: the person opened the step: the draft, and the renamed teachers (whatever their signature), are fetched again
   if (id === "download") fitCheck();
 }
-const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
+const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules", staff_periods: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
 function renderIssues() {
   const el = $("#issues"); if (!S.spec) { el.innerHTML = ""; return; }
@@ -1703,11 +1704,28 @@ const VIEWS = {
     const tab = TABS.find(t => t[0] === R6.tab) || TABS[0], [tid, tlabel, tscopes] = tab;
     const standard = where.more.filter(i => S.spec.rules[i].rule !== "In words"), typed = where.more.filter(i => S.spec.rules[i].rule === "In words");
     const onTab = (ix, id) => ix.filter(i => tabOf(S.spec.rules[i]) === id);
-    const count = id => onTab(where.availability, id).length + onTab(where.fixed, id).length + onTab(standard, id).length + onTab(typed, id).length;
+    const count = id => (id === "teachers" ? (S.spec.staff_periods || []).length : 0) + onTab(where.availability, id).length + onTab(where.fixed, id).length + onTab(standard, id).length + onTab(typed, id).length;
     const strip = `<div class="row tabs">${TABS.map(([id, label]) => `<button data-rtab="${id}" class="${id === tid ? "on" : ""}">${label}<span class="n">${count(id) || ""}</span></button>`).join("")}</div>`;
     const first = tscopes[0], add = (k, label, title) => `<button data-add="${k}" data-scope="${esc(first)}"${title ? ` title="${esc(title)}"` : ""}>${label}</button>`;
     const parts = [];
     const av = onTab(where.availability, tid);
+    if (tid === "teachers") {
+      const SP = S.spec.staff_periods = S.spec.staff_periods || [], badS = i => rowCls(out, crit, "staff_periods", i), wkdays = days.slice(1);
+      const msgS = i => out.staff_periods[i] ? `<tr class="rowmsg ${badS(i)}"><td colspan="8">${out.staff_periods[i].map(esc).join("<br>")}</td></tr>` : "";
+      const staffRow = i => { const r = SP[i] || {}, o = StaffPeriods.options(S.spec, r), tm = Array.isArray(r.times) ? r.times : ["", ""], chosen = new Set(Array.isArray(r.days) ? r.days : []);
+        const chip = (key, text) => `<span class="chip spchip">${esc(text)}<button class="spx" data-spx="${esc(i + "|" + key)}" title="Take off">✕</button></span>`;
+        const addOpts = `<option value="">+ Add teachers</option>${o.all ? `<option value="all">All teachers</option>` : ""}${o.depts.length ? `<optgroup label="Departments">${o.depts.map(d => `<option value="d|${esc(d)}">${esc(d)}</option>`).join("")}</optgroup>` : ""}${o.teachers.length ? `<optgroup label="Teachers">${o.teachers.map(t => `<option value="t|${esc(t)}">${esc(t)}</option>`).join("")}</optgroup>` : ""}`;
+        const who = StaffPeriods.whoLine(S.spec, r);
+        return `<tr id="staff_periods-${i}" class="${badS(i)}" title="${esc((out.staff_periods[i] || []).join(" "))}"><td style="min-width:160px">${inp(`spec.staff_periods.${i}.name`, r.name || "", "text", 'maxlength="60"')}</td>
+          <td style="min-width:240px"><div class="spwho">${r.all === true ? chip("all", "All teachers") : ""}${(Array.isArray(r.depts) ? r.depts : []).map(d => chip("d|" + d, d)).join("")}${(Array.isArray(r.teachers) ? r.teachers : []).map(t => chip("t|" + t, t)).join("")}<select data-spadd="${i}">${addOpts}</select></div>${who ? `<div class="muted small">${esc(who)}</div>` : ""}</td>
+          <td>${sel(`spec.staff_periods.${i}.week`, r.week || "Both", weeks, false)}</td>
+          <td><div class="spdays">${wkdays.map(d => `<button class="small${chosen.has(d) ? " on" : ""}" data-spday="${i}|${d}" aria-pressed="${chosen.has(d)}">${d}</button>`).join("")}</div></td>
+          <td><input type="time" data-sptime="${i}|0" value="${esc(tm[0] || "")}"></td><td><input type="time" data-sptime="${i}|1" value="${esc(tm[1] || "")}"><div class="muted small">${esc(StaffPeriods.blocksLine(sc(), r))}</div></td>
+          <td>${inp(`spec.staff_periods.${i}.place`, r.place || "", "text", 'maxlength="60"')}</td><td>${delBtn("staff_periods", i)}</td></tr>${msgS(i)}`; };
+      parts.push(`<h2>Teacher-only periods</h2><p class="muted">A period for teachers with no students, the same every week: a meeting, a zone class. It shows on their timetables. Lessons are kept away from it; a lesson you put there by hand gets a warning. A change here shows on the published timetable after you publish again on step 9.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Name on the timetable</th><th>Who</th><th>Week</th><th>Days</th><th>From</th><th>To</th><th>Place (optional)</th><th></th></tr>${SP.map((_, i) => staffRow(i)).join("")}</table></div>
+      <div class="row" style="margin:10px 0 16px"><button data-add="staffp">+ Add a teacher-only period</button></div>`);
+    }
     if (tid === "teachers") parts.push(`<h2>Teacher availability</h2><p class="muted">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked.</p>
       <div class="tablewrap"><table class="ruletable"><tr><th>Teacher</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Blocks</th><th>Reason</th><th></th></tr>${av.map(availRow).join("")}</table></div>
       <div class="row" style="margin:10px 0 16px"><button data-add="avail">+ Add block-out</button></div>`);
@@ -1859,6 +1877,14 @@ document.addEventListener("click", async e => {
   if (b.dataset.btclear !== undefined) { M.bt = null; render(); return; }
   if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
+  if (b.dataset.spx !== undefined) {   // a teacher-only period: take one chip off (all teachers, a department or a teacher)
+    const [i, kind, ...rest] = b.dataset.spx.split("|"), r = (S.spec.staff_periods || [])[Number(i)], v = rest.join("|"); if (!r) return;
+    if (kind === "all") r.all = false; else if (kind === "d") r.depts = (r.depts || []).filter(x => x !== v); else if (kind === "t") r.teachers = (r.teachers || []).filter(x => x !== v);
+    save(); render(); return; }
+  if (b.dataset.spday !== undefined) {   // a teacher-only period: a weekday on or off, kept in weekday order
+    const [i, d] = b.dataset.spday.split("|"), r = (S.spec.staff_periods || [])[Number(i)]; if (!r) return;
+    const on = new Set(Array.isArray(r.days) ? r.days : []); on.has(d) ? on.delete(d) : on.add(d);
+    r.days = ["Mon", "Tue", "Wed", "Thu", "Fri"].filter(x => on.has(x)); save(); render(); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split(".");
     const no = k === "lessons" && otherRow(S.spec.lessons[Number(i)]) ? OTHER_ROW : k === "blocks" ? bandWhy(S.spec.blocks[Number(i)]) : ""; if (no) { toast(no); return; }   /* a head signed in as a person: as the server rules */ if (k === "students" && !stuDelOk(Number(i))) return;   /* the published timetable loses the student too: asked first */ if (k === "teachers" && TV.open !== null) { if (TV.open === Number(i)) tkOpen(null); else if (TV.open > Number(i) && !TV.openId) TV.open--; } if (k === "venues") { const gone = VenueView.cleanName((S.spec.venues[Number(i)] || {}).room); if (gone && !S.spec.venues.some((v, j) => j !== Number(i) && v && VenueView.cleanName(v.room) === gone)) VenueView.dropRoom(S.spec, gone); }   // it leaves any combined venue made of it
     S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") { vvOpen(null); VenueView.syncKinds(S.spec); } if (k === "rules") Choices.prune(S.spec); unpick(); save(); if (k === "students") syncNow(); /* sent at once: a second ✕ goes in a save of its own, so each one removes its student */ render(); return; }   // a choice on a deleted rule goes with it
@@ -1900,6 +1926,7 @@ document.addEventListener("click", async e => {
       if (CV.view === "bands") { CV.view = "cards"; try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } }
       if (CV.view === "cards") cvOpen(Number(ck[1]));
     }
+    if (/^staff_periods-/.test(b.dataset.row)) R6.tab = "teachers";   // a teacher-only period lives on step 6's Teachers tab
     const tk = /^teachers-(\d+)$/.exec(b.dataset.row);
     if (tk && TV.view === "cards" && S.spec.teachers[Number(tk[1])]) tkOpen(Number(tk[1]), People.depts(S.spec.teachers[Number(tk[1])])[0] || "");   // a teacher: their card opens in their home column, so its messages show
     const vk = /^venues-(\d+)$/.exec(b.dataset.row);
@@ -2020,6 +2047,13 @@ document.addEventListener("change", async e => {
   if (el.dataset.parent) {   // a Class Parents box: all of that class's boxes make its list (setPath would throw on a class with no list)
     const i = Number(el.dataset.parent.split("|")[0]);
     Parents.setParents(S.spec, i, [...el.closest("[data-parents]").querySelectorAll("[data-parent]")].map(x => x.value)); save(); render(); poll(); return; }
+  if (el.dataset.spadd !== undefined) {   // a teacher-only period: a department, a teacher or everyone added to Who
+    const r = (S.spec.staff_periods || [])[Number(el.dataset.spadd)], [kind, ...rest] = el.value.split("|"), v = rest.join("|"); if (!r || !el.value) return;
+    if (kind === "all") r.all = true; else if (kind === "d" && !(r.depts || []).includes(v)) r.depts = [...(Array.isArray(r.depts) ? r.depts : []), v]; else if (kind === "t" && !(r.teachers || []).includes(v)) r.teachers = [...(Array.isArray(r.teachers) ? r.teachers : []), v];
+    save(); render(); return; }
+  if (el.dataset.sptime !== undefined) {   // a teacher-only period's From or To
+    const [i, k] = el.dataset.sptime.split("|").map(Number), r = (S.spec.staff_periods || [])[i]; if (!r) return;
+    r.times = Array.isArray(r.times) && r.times.length === 2 ? [...r.times] : ["", ""]; r.times[k] = el.value; save(); render(); return; }
   if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
     const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
     r.times = [...ruleTimes(r)]; r.times[k] = el.value; [r.from, r.to] = periodsBetween(r.times[0], r.times[1]); save(); render(); return; }
@@ -2111,9 +2145,10 @@ function addRow(k, scope) {   // scope: a preset for a rule added from a tab of 
     venuerule: { scope: "Subject", target: subjectNames().find(n => /physical education|^pe$/i.test(n)) || null, rule: "Only in venues", week: "Both", day: "All", from: periodAt("11:00"), to: Number(sc().periods_per_day) - 1,
       venues: [], strength: "Must", note: "Late in the day only in these rooms" },
     roles: { role: "", what: "", allowance: null, group: "" },
+    staffp: StaffPeriods.blank(),
     students: { id: "", name: "", level: clsLevel(S.stu.cls) || null, class: S.stu.cls || null, groups: [] } }[k];
   if (k === "students") S.stu.q = "";
-  const into = { avail: "rules", fixed: "rules", fixedall: "rules", hbl: "rules", venuerule: "rules", typed: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
+  const into = { staffp: "staff_periods", avail: "rules", fixed: "rules", fixedall: "rules", hbl: "rules", venuerule: "rules", typed: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
   const row = JSON.parse(JSON.stringify(blank));
   if (k === "lessons" && myDepts()) {   /* a head signed in as a person: a row of one of their subjects (the server refuses a row with none), the one the table shows if it is theirs */
     const own = subjectNames().filter(mySubject), at = own.filter(n => ((subj(n) || {}).periods || {})[row.level]);

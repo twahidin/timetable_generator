@@ -42,6 +42,10 @@ td.num input{width:70px}
 /* rules: each drop-down is as wide as its longest choice, so names are never cut off (the table scrolls sideways) */
 table.ruletable td select{width:auto;min-width:100%}
 table.ruletable td.note input{min-width:220px}
+.spwho{display:flex;gap:4px;flex-wrap:wrap;align-items:center}.spwho select{min-width:0;width:auto;max-width:150px}
+.chip.spchip{display:inline-flex;align-items:center;gap:4px}.spchip .spx{border:0;background:transparent;padding:0 2px;font-size:11px;cursor:pointer;color:inherit;line-height:1}.spchip .spx:disabled{cursor:default;opacity:.5}
+.spdays{display:flex;gap:3px;flex-wrap:nowrap}.spdays button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
 textarea.wrapbox{display:block;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:var(--input);color:var(--ink);font:inherit;line-height:1.35;resize:none;overflow:hidden;field-sizing:content;min-height:30px}
 textarea.wrapbox:focus{outline:2px solid #bfd3fb;border-color:#93b4f7}
 table.ruletable td.note textarea{min-width:240px}td.bnote{min-width:280px}table.ruletable td.note,table.ruletable td.words{vertical-align:top}

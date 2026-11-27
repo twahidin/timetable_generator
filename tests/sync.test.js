@@ -49,9 +49,22 @@ for (const c of cases) {
 // constants and ids
 assert.deepStrictEqual(Sync.MERGE, { teachers: ["can_teach"], students: ["groups"] });
 assert.deepStrictEqual(Sync.LISTS, ["venues", "classes", "subjects", "teachers", "blocks", "lessons",
-  "rules", "students", "combinations", "roles", "choices"]);
+  "rules", "staff_periods", "students", "combinations", "roles", "choices"]);
 assert(/^[a-z0-9]{10}$/.test(Sync.newId()));
 assert.notStrictEqual(Sync.newId(), Sync.newId());
+
+// a teacher-only period is a list of its own: a row has an _id, and a change goes by row
+{
+  const row = { name: "Zone class", teachers: ["A"], days: ["Tue"], times: ["15:00", "17:30"], place: "" };
+  const base = { staff_periods: [] }, spec = { staff_periods: [row] };
+  assert.strictEqual(Sync.ensureIds(spec), true);
+  assert(/^[a-z0-9]{10}$/.test(row._id));
+  const ops = Sync.diff(base, spec);
+  assert.strictEqual(ops.length, 1); assert.deepStrictEqual([ops[0][0], ops[0][1], ops[0][2]._id], ["add", "staff_periods", row._id]);
+  const next = copy(spec); next.staff_periods[0].place = "Hall";
+  assert.deepStrictEqual(Sync.diff(spec, next), [["set", "staff_periods", row._id, "place", "Hall"]]);
+}
+passed++;
 
 // ensureIds
 {

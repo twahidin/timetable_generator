@@ -72,13 +72,13 @@ const rspec = () => ({ school: {}, teachers: [
     { scope: "School", rule: "In words", text: "no PE after lunch" }, { scope: "School", rule: "In words", text: "New Teacher 3 is free on Fridays" }] });
 
 t("uses finds every place that names a teacher exactly", () => {
-  assert.deepStrictEqual(TeacherView.uses(rspec(), "New Teacher 3"), { lessons: [0, 1], classes: [0], rules: [0], typed: [2], notes: 1, twice: false });
-  assert.deepStrictEqual(TeacherView.uses(rspec(), ""), { lessons: [], classes: [], rules: [], typed: [], notes: 0, twice: false });
-  assert.deepStrictEqual(TeacherView.uses({}, "X"), { lessons: [], classes: [], rules: [], typed: [], notes: 0, twice: false });
+  assert.deepStrictEqual(TeacherView.uses(rspec(), "New Teacher 3"), { lessons: [0, 1], classes: [0], rules: [0], staff: [], typed: [2], notes: 1, twice: false });
+  assert.deepStrictEqual(TeacherView.uses(rspec(), ""), { lessons: [], classes: [], rules: [], staff: [], typed: [], notes: 0, twice: false });
+  assert.deepStrictEqual(TeacherView.uses({}, "X"), { lessons: [], classes: [], rules: [], staff: [], typed: [], notes: 0, twice: false });
 });
 t("a rename carries to groups, form teachers and Teacher rules, and keeps the old name", () => {
   const s = rspec(), r = TeacherView.rename(s, 0, "  Mdm   Lee ");
-  assert.deepStrictEqual(r, { was: "New Teacher 3", now: "Mdm Lee", groups: 2, classes: ["2A"], rules: 1, typed: [2], notes: 1, twice: false, short: "NT3" });
+  assert.deepStrictEqual(r, { was: "New Teacher 3", now: "Mdm Lee", groups: 2, classes: ["2A"], rules: 1, staff: 0, typed: [2], notes: 1, twice: false, short: "NT3" });
   assert.strictEqual(s.teachers[0].name, "Mdm Lee");
   assert.deepStrictEqual(s.teachers[0].earlier_names, ["New Teacher 3"]);
   assert.deepStrictEqual(s.lessons[0].teachers, ["Mdm Lee", null]);            // the empty place stays where it is
@@ -143,6 +143,14 @@ t("a short name that was the name follows it; any other short name stays", () =>
   const v = rspec(); v.teachers[0].short = "New Teacher 3"; v.teachers.push({ _id: "d", name: "New Teacher 3", short: "New Teacher 3" });
   TeacherView.rename(v, 0, "Mdm Lee"); assert.deepStrictEqual([v.teachers[0].short, v.teachers[3].short], ["Mdm Lee", "New Teacher 3"]);   // only the renamed row's
   const w = rspec(); w.teachers[0].short = "New Teacher 3"; assert.strictEqual(TeacherView.rename(w, 0, "arjun nair").error, "Arjun Nair is already a teacher."); assert.strictEqual(w.teachers[0].short, "New Teacher 3");   // refused: nothing changes
+});
+t("a rename carries to the teacher-only periods", () => {
+  const s = rspec(); s.staff_periods = [{ name: "Zone class", teachers: ["New Teacher 3", "Arjun Nair"] }, { name: "Briefing", teachers: ["Arjun Nair"] }];
+  assert.deepStrictEqual(TeacherView.uses(s, "New Teacher 3").staff, [0]);
+  const r = TeacherView.rename(s, 0, "Mdm Lee");
+  assert.deepStrictEqual(s.staff_periods[0].teachers, ["Mdm Lee", "Arjun Nair"]); assert.strictEqual(r.staff, 1);
+  assert.ok(TeacherView.renameText(r).includes("1 teacher-only period"));
+  assert.ok(!TeacherView.renameText({ ...r, staff: 2 }).includes("1 teacher-only period") && TeacherView.renameText({ ...r, staff: 2 }).includes("2 teacher-only periods"));
 });
 t("settle puts earlier names right whatever wrote them", () => {
   const s = rspec();
