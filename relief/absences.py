@@ -20,6 +20,7 @@ NOT_YOURS = "You cannot change this absence."
 CANCELLED = "This absence was cancelled."
 NO_FILES_YET = "Add files after the absence is sent."
 SAY_WHY = "Say why in a line."
+WHY_LONG = "Keep the reason under 200 characters."
 PAST_LESSON = "This lesson is in the past."
 PAST_ABSENCE = "This absence is in the past."
 ACKED = "This was acknowledged already."
@@ -509,9 +510,9 @@ def not_needed(id, key, why, by, *, team=False):
         _may_change(r, by, team)
         x = _lesson(r, key)
         _past(x)
-        if not 1 <= len(why) <= 200: raise ValueError(SAY_WHY)
+        if len(why) > 200: raise ValueError(WHY_LONG)
         _cover.clear(r, x, by, why, _now())       # its relief, pick, approval, acknowledgement and request to change end
-        x["needed"], x["not_needed"], x["relief"], x["relief_by"] = False, dict(by=by, why=why), None, None
+        x["needed"], x["not_needed"], x["relief"], x["relief_by"] = False, dict(by=by, why=why, at=_now()), None, None
         _save(r)
     return r
 

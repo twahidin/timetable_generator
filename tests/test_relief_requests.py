@@ -356,6 +356,23 @@ def planning_for_a_colleague_with_a_chosen_relief_teacher():
     AB.cancel(r["id"], "Not needed", GRACE)
 
 @t
+def not_needed_takes_an_optional_reason():
+    r = AB.new(data(lessons=[dict(key=lk(APUB, 8), needed=True)]), APUB, EVE, "asked")
+    i = r["id"]; key = [x for x in r["lessons"] if x["p"] == 8][0]["key"]
+    real = AB._now; AB._now = lambda: "2026-10-12T09:00:00+08:00"
+    try:
+        for given, kept in (("", ""), (None, ""), ("Class on a trip", "Class on a trip")):
+            AB.not_needed(i, key, given, EVE)
+            x = [x for x in AB.load(i)["lessons"] if x["key"] == key][0]
+            assert x["needed"] is False and x["not_needed"] == dict(by=EVE, why=kept, at=AB._now()), x["not_needed"]
+            AB.needed_again(i, key, EVE)
+    finally: AB._now = real
+    refuses(AB.WHY_LONG, lambda: AB.not_needed(i, key, "x" * 201, EVE))
+    refuses("Say why in a line.", lambda: AB.cancel(i, " ", EVE))
+    AB.cancel(i, "Done", EVE)
+
+
+@t
 def a_shared_lesson_needs_no_relief_unless_asked():
     r = AB.new(data(), APUB, EVE, "asked")
     b = [x for x in r["lessons"] if x["p"] == 8][0]
@@ -364,14 +381,16 @@ def a_shared_lesson_needs_no_relief_unless_asked():
     r = AB.new(data(lessons=[dict(key=lk(APUB, 8), needed=True)]), APUB, EVE, "asked")
     b = [x for x in r["lessons"] if x["p"] == 8][0]
     assert b["needed"] is True and b["not_needed"] is None
-    AB.not_needed(r["id"], b["key"], "Covered by Mr Busy Chan", EVE)
+    real = AB._now; AB._now = lambda: "2026-10-12T09:00:00+08:00"
+    try: AB.not_needed(r["id"], b["key"], "Covered by Mr Busy Chan", EVE)
+    finally: AB._now = real
     b = AB.load(r["id"])["lessons"][1]
-    assert b["needed"] is False and b["not_needed"] == dict(by=EVE, why="Covered by Mr Busy Chan")
+    assert b["needed"] is False and b["not_needed"] == dict(by=EVE, why="Covered by Mr Busy Chan", at="2026-10-12T09:00:00+08:00")
     AB.needed_again(r["id"], b["key"], TEAMER, team=True)
     b = AB.load(r["id"])["lessons"][1]
     assert b["needed"] is True and b["not_needed"] is None
     refuses("You cannot change this absence.", lambda: AB.not_needed(r["id"], b["key"], "x", SAM))
-    refuses("Say why in a line.", lambda: AB.not_needed(r["id"], b["key"], " ", EVE))
+    refuses(AB.WHY_LONG, lambda: AB.not_needed(r["id"], b["key"], "x" * 201, EVE))
     refuses(AB.CHANGED, lambda: AB.not_needed(r["id"], "nokey", "why", EVE))
     AB.cancel(r["id"], "x", TEAMER, team=True)
 
@@ -659,8 +678,9 @@ def asking_through_the_api():
         no(eve.put(lesson_url(i, K5, "work"), json=wk(link="ftp://x")), 400, "A link starts with http:// or https://.")
         assert ok(eve.post(lesson_url(i, K8, "needed")))["lessons"][1]["needed"] is True
         got = ok(eve.post(lesson_url(i, K8, "not-needed"), json=dict(why="Covered by Mr Busy Chan")))
-        assert got["lessons"][1]["needed"] is False and got["lessons"][1]["not_needed"] == dict(by=EVE, why="Covered by Mr Busy Chan")
-        no(eve.post(lesson_url(i, K8, "not-needed"), json={}), 400, "Say why in a line.")
+        nn = got["lessons"][1]["not_needed"]
+        assert got["lessons"][1]["needed"] is False and nn == dict(by=EVE, why="Covered by Mr Busy Chan", at=nn["at"]) and nn["at"], nn
+        no(eve.post(lesson_url(i, K8, "not-needed"), json=dict(why="x" * 201)), 400, AB.WHY_LONG)
         no(eve.post(lesson_url(i, "nokey", "needed")), 400, AB.CHANGED)
         no(eve.put(lesson_url(i, K5, "relief"), json=dict(relief=SAM)), 403, CHOOSE_ONLY)
         no(eve.post(f"/api/relief/absences/{i}/acknowledge"), 400, "Only Ms Evelyn Koh can acknowledge this.")

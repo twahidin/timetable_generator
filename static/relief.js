@@ -204,7 +204,7 @@
       const head = `<div class="rf-head"><div><b>${esc(RF.title(x))}</b> <span class="muted">· ${esc(RF.when(x))}</span></div>${side ? `<div class="rf-side small">${side}</div>` : ""}</div>`;
       let body;
       if (!x.needed) {
-        const nn = x.not_needed || {}, line = nn.by === "app" ? `${nn.why}: no relief needed` : `Not needed: ${nn.why || ""}`;
+        const nn = x.not_needed || {}, line = nn.by === "app" ? `${nn.why}: no relief needed` : (nn.why ? `Relief not needed: ${nn.why}` : "Relief not needed");
         body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${now && !r.cancelled ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;
       } else body = now ? workEdit(r, x, i) : workRead(r, x);
       const extra = cover && opts.extra ? opts.extra(r, x) || "" : "";
@@ -220,13 +220,13 @@
       const files = d.files.map((f, j) => `<span class="chip rf-file">${fileLink(r, f)} <span class="muted">${esc(RF.size(f.size))}</span><button type="button" data-act="unfile" data-j="${j}" title="Take this file off" aria-label="Take ${esc(f.name)} off">✕</button></span>`).join("");
       const asking = M.ask && M.ask.id === r.id && M.ask.key === x.key;
       const nn = asking
-        ? `<div class="ab-ask"><label for="why-${esc(id)}">Why is this lesson not needed? In a line.</label><input id="why-${esc(id)}" data-why="1" maxlength="200" value="${esc(M.ask.why)}" autocomplete="off">
-            <button type="button" class="small primary" data-act="nn-go" ${M.busy.has(r.id) ? "disabled" : ""}>Mark it not needed</button><button type="button" class="small" data-act="ask-off">Back</button></div>`
+        ? `<div class="ab-ask"><label for="why-${esc(id)}">Why is relief not needed? (optional)</label><input id="why-${esc(id)}" data-why="1" maxlength="200" value="${esc(M.ask.why)}" autocomplete="off">
+            <button type="button" class="small primary" data-act="nn-go" ${M.busy.has(r.id) ? "disabled" : ""}>Mark relief not needed</button><button type="button" class="small" data-act="ask-off">Back</button></div>`
         : "";
       return `<div class="rf-work"><label class="small muted" for="${esc(id)}-t">Work for this lesson</label>
         <textarea id="${esc(id)}-t" class="wrapbox" data-w="text" rows="2" maxlength="2000" placeholder="What the class does in this lesson">${esc(d.text)}</textarea>
         <input type="url" data-w="link" maxlength="500" value="${esc(d.link)}" placeholder="A link, if any (SLS, Google Drive): https://…" aria-label="A link for this lesson">
-        <div class="rf-files">${files}<button type="button" class="small" data-act="addfile" ${up ? "disabled" : ""}>Add a file</button><input type="file" data-w="file" multiple accept="${RF.KINDS.join(",")}" hidden>${asking ? "" : `<button type="button" class="small ab-nn-btn" data-act="nn-ask">Not needed</button>`}</div>
+        <div class="rf-files">${files}<button type="button" class="small" data-act="addfile" ${up ? "disabled" : ""}>Add a file</button><input type="file" data-w="file" multiple accept="${RF.KINDS.join(",")}" hidden>${asking ? "" : `<button type="button" class="small ab-nn-btn" data-act="nn-ask">Relief not needed</button>`}</div>
         <div class="rf-err${e && !e.bad ? " say" : ""}" role="status">${e ? esc(e.text) : ""}</div></div>${nn}`;
     }
 
