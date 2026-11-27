@@ -210,6 +210,8 @@ def head_resets_their_department():
     rr = rec(ALICE); assert rr["must_change"] and rr["n"] == n0 + 1 and PW.check_pw(rr["pw"], once)
     e = last("account"); assert e["text"] == f"{ALICE}: a new one-time password from their head of department" and e["who"] == ERIC
     r = c.post("/staff-reset", data=dict(name=DANA)); assert r.status_code == 200 and rec(DANA)["username"]   # no username yet: one is made
+    e = last("account"); assert e["text"] == f"{DANA}: a new one-time password from their head of department; username {rec(DANA)['username']}", e["text"]
+    assert any(x.get("field") == "username" and x.get("name") == DANA and x.get("now") == rec(DANA)["username"] for x in e["changes"]), e
     SECRETS.append(re.search(r"[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}", r.data.decode()).group(0))
 
 @t
@@ -226,6 +228,25 @@ def head_reset_refusals():
     assert signed_in(ALICE).get("/staff-reset").status_code in (302, 401)          # a teacher
     c, _ = code_in(staff_code(ERIC)); assert c.post("/staff-reset", data=dict(name=ALICE)).status_code in (302, 401)
     h = signed_in("Ms Noor Head", group="hod", depts=[]).get("/staff-reset").data.decode(); assert RESET_NONE in h
+
+@t
+def head_cannot_reset_a_committee_member():
+    future = (datetime.date.today() + datetime.timedelta(days=365)).isoformat(); past = (datetime.date.today() - datetime.timedelta(days=30)).isoformat()
+    cases = {"Ms Tia Committee": {"timetable": True}, "Ms Rae Relief": {"relief": True}, "Ms Exa Future": {"exams": future}}
+    publish(TEACHERS + [dict(name=n, dept="Science") for n in (*cases, "Ms Pat Past")])
+    account(ERIC, group="hod", depts=["Science"])
+    for n, ex in cases.items(): account(n, group="teacher", extras=ex)
+    account("Ms Pat Past", group="teacher", extras={"exams": past})
+    c = signed_in(ERIC, group="hod", depts=["Science"])
+    h = c.get("/staff-reset").data.decode()
+    assert "Ms Pat Past" in h and not any(n in h for n in cases), h
+    for n in cases:
+        before = json.dumps(P.load(), sort_keys=True); k = len(H.read(kinds=["account"], limit=1000))
+        r = c.post("/staff-reset", data=dict(name=n))
+        assert r.status_code == 403 and RESET_REFUSED in r.data.decode(), n
+        assert json.dumps(P.load(), sort_keys=True) == before and len(H.read(kinds=["account"], limit=1000)) == k, n
+    r = c.post("/staff-reset", data=dict(name="Ms Pat Past")); assert r.status_code == 200
+    SECRETS.append(re.search(r"[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}", r.data.decode()).group(0))
 
 @t
 def head_reset_with_nothing_published():

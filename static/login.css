@@ -47,6 +47,11 @@ button.open{background:#15803d}button.open:hover{background:#166534}
 .login.other{padding-top:20px;padding-bottom:20px}
 a.btn{display:block;text-align:center;font-weight:600;padding:11px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;line-height:1.35}
 a.btn:hover{filter:brightness(.92)}
+.classes{display:flex;flex-wrap:wrap;gap:8px}
+.classes a{font-weight:600;font-size:14px;padding:6px 12px;border-radius:999px;background:var(--accent);color:#fff;text-decoration:none}
+.classes a:hover{filter:brightness(.92)}
+form.srow{flex-direction:row;align-items:center;justify-content:space-between;gap:10px;margin:0;padding:6px 0;border-bottom:1px solid var(--line)}
+form.srow button{padding:5px 12px;font-size:14px;flex:none}
 input.plain{font-size:16px;letter-spacing:normal;text-transform:none}
 
 /* the home page after signing in: hello, then the tiles the person may open (greyed: only with the password) */

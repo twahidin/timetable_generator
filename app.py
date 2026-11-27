@@ -1551,14 +1551,14 @@ def _codes_page(cls=None, shown=None, msg=""):
     if shown:
         box = f"""<div class="notes"><p><strong>{esc(shown["name"])}</strong> ({esc(shown["cls"])})</p>
 <p>Code: <strong>{esc(access.personal_code(shown["id"]))}</strong></p></div>"""
-    links = " ".join(f'<a class="btn" href="/student-codes?cls={urllib.parse.quote(c, safe="")}">{esc(c)}</a>' for c in classes)
+    links = " ".join(f'<a href="/student-codes?cls={urllib.parse.quote(c, safe="")}">{esc(c)}</a>' for c in classes)
     rows = ""
     if cls is not None:
         mine = sorted((x for x in students if str(x.get("cls", "")) == cls), key=lambda x: (str(x.get("name", "")).lower(), str(x.get("id", ""))))
         if not mine: msg = msg or CODES_EMPTY_CLASS
-        rows = "".join(f"""<form method="post" action="/student-codes"><p>{esc(x.get("name", ""))} <input type="hidden" name="id" value="{esc(x.get("id", ""))}">
-<button type="submit">Show code</button></p></form>""" for x in mine)
-    return _form_page("Student codes", f"{box}<p>{links}</p>{rows}", msg, CODES_HINT, back=back, tail="")
+        rows = "".join(f"""<form class="srow" method="post" action="/student-codes"><span>{esc(x.get("name", ""))}</span><input type="hidden" name="id" value="{esc(x.get("id", ""))}">
+<button type="submit">Show code</button></form>""" for x in mine)
+    return _form_page("Student codes", f"{box}<p class='classes'>{links}</p><div class='students'>{rows}</div>", msg, CODES_HINT, back=back, tail="")
 
 @app.get("/student-codes")
 @need("codes.look")
@@ -1588,10 +1588,14 @@ RESET_REFUSED = "You cannot reset this person's password. Ask an admin."
 
 def _resettable(pub, d, me):
     """the staff a head may give a new temporary password, in listing order: not themselves, not switched off, not a head
-    or a school leader, not an admin, and in one of the head's own departments"""
-    mine = set(people.record(d, me)["depts"])
+    or a school leader, in one of the head's own departments, and signed in by password they have no right the head lacks
+    (so never a committee, relief team or admin member, nor anyone with a current Exams and events tick)"""
+    rec = people.record(d, me)
+    mine = set(rec["depts"])
+    head = dict(group=rec["group"], extras=rec["extras"], off=rec["off"])
+    have = rights_table.rights(head, "password")
     return [p for p in people.staff(pub, d) if p["name"] != me and not p["off"] and p["group"] not in ("leader", "hod", "sh")
-            and not p["extras"].get("admin") and set(p["depts"]) & mine]
+            and set(p["depts"]) & mine and rights_table.rights(p, "password") <= have]
 
 def _reset_page(me, shown=None, msg="", status=200):
     back = ("/home", "Back")
@@ -1631,14 +1635,15 @@ def staff_reset_do():
         if not u:
             taken = {str(x.get("username") or "").lower() for x in d["people"].values() if isinstance(x, dict)}
             u = account_slips.make_username(name, next(p["depts"] for p in people.staff(pub, d) if p["name"] == name), taken)
+        out = [dict(name=name, field="username", was=r["username"], now=u)] if u != r["username"] else []
         r.update(username=u, pw=h, must_change=True, n=r["n"] + 1)
         d["people"][name] = r
-        return u, [p["depts"] for p in people.staff(pub, d) if p["name"] == name][0]
-    try: u, depts = people.update(change)
+        return u, [p["depts"] for p in people.staff(pub, d) if p["name"] == name][0], out
+    try: u, depts, out = people.update(change)
     except Refused: return _reset_page(me, msg=RESET_REFUSED, status=403)
     except people.Unreadable: return _reset_page_unreadable()
     lockout.clear(u)
-    _account_entry("reset", [name], [], f"{name}: a new one-time password from their head of department", by_=by_, where="Reset a password", depts=depts)
+    _account_entry("reset", [name], out, f"{name}: a new one-time password from their head of department" + (f"; username {u}" if out else ""), by_=by_, where="Reset a password", depts=depts)
     return _reset_page(me, dict(name=name, username=u, once=once))
 
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
