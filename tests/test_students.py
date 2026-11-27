@@ -327,6 +327,19 @@ def the_files_are_remade_and_carry_the_change():
     assert not os.path.isdir(os.path.join(store.PUB, "PDF", "Students"))
 
 @t
+def files_made_by_an_older_look_are_made_again():
+    from ttgen import export as E
+    fresh(); meta = store.published()["meta"]
+    assert meta["files_look"] == E.LOOK and store.files_stale(meta) is False
+    old = {k: v for k, v in meta.items() if k != "files_look"}          # a publish made before the look was numbered
+    store.write_json(os.path.join(store.PUB, "meta.json"), old); store._cache.update(stamp=None, value=None)
+    meta = store.published()["meta"]; assert "files_look" not in meta and store.files_stale(meta) is True
+    assert students.files_now() is True
+    meta2 = store.published()["meta"]
+    assert meta2["files_look"] == E.LOOK and meta2["files_behind"] is False and meta2["published_at"] == meta["published_at"]
+    assert store.files_stale(meta2) is False and os.path.exists(os.path.join(store.PUB, meta2["files"]["books"]["classes"]))
+
+@t
 def a_change_during_the_remake_is_kept():
     fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
     from ttgen import export as E; real = E.export_all

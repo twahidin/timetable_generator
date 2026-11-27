@@ -1,7 +1,7 @@
 """Where things live: the committee's saved setup, its earlier copies and the published timetable, all under DATA_DIR
 (a Railway volume, so they survive redeploys)."""
 import collections, copy, csv, datetime, io, json, os, pickle, shutil, sys, threading, time
-from ttgen.export import model_from_files, export_all
+from ttgen.export import model_from_files, export_all, LOOK
 import sync
 from ttgen import parents
 from access import personal_code, personal_codes_on, norm
@@ -328,7 +328,7 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spe
         ch = m["checks"]
         write_json(os.path.join(tmp, "meta.json"), dict(published_at=now(), run=run_id, source=source, school=m["school"]["name"], timetable=m["school"]["timetable"],
                                                          ok=ch["ok"], problems=ch["problems"][:20], after_school=ch["after_school"],
-                                                         classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files,
+                                                         classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files, files_look=LOOK,
                                                          rule_report=m.get("rule_report") or [], choices_used=m.get("choices_used") or [],
                                                          choice_problems=m.get("choice_problems") or [],
                                                          config_id=str(((m.get("setup") or {}).get("school") or {}).get("config_id") or ""), **(extra or {})))
@@ -371,6 +371,10 @@ def swap_model(model, **meta):
                 _cache.update(stamp=None, value=None)
                 _turns["swap"] += 1
 
+def files_stale(meta):
+    """true when the stored files are behind a student change or were made by an older look of the printouts"""
+    return bool(meta.get("files_behind")) or meta.get("files_look") != LOOK
+
 def remake_files():
     """make the files to download again from the published model as it is now and swap them in as a publish does; None
     when nothing is published, True when the files are up to date (or a publish made its own meanwhile), False when a
@@ -400,7 +404,7 @@ def remake_files():
                 for f in os.listdir(PUB):         # what the export does not make: the model, the setup and the timetable it was published from
                     if f in ("model.pkl", "setup.xlsx") or f.startswith("timetable."): shutil.copy(os.path.join(PUB, f), os.path.join(tmp, f))
                 behind = _turns["swap"] != turns["swap"] or meta.get("students_at") != meta0.get("students_at")
-                write_json(os.path.join(tmp, "meta.json"), {**meta, "files": files, "files_at": now(), "files_behind": behind})
+                write_json(os.path.join(tmp, "meta.json"), {**meta, "files": files, "files_at": now(), "files_behind": behind, "files_look": LOOK})
                 with _lock:
                     shutil.rmtree(old, ignore_errors=True)
                     os.replace(PUB, old)

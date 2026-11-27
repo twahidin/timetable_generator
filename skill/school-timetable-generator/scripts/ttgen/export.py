@@ -26,6 +26,7 @@ PALETTE = [("DCEBFB", "2F6FB5"), ("FDE6D2", "C2610F"), ("DCF1E1", "2E8B4E"), ("F
            ("E7DFF7", "6A4FB3"), ("D3EFEE", "1F8380"), ("EEE2D7", "87573A"), ("E2E7EE", "4A5A70"), ("F7DDEF", "A0408A"),
            ("E5F2D0", "58841C"), ("D6ECF7", "1B76A0"), ("F3E3D3", "9C5B1E"), ("E0E4F8", "4453A8")]
 EXT = ("FFF1CC", "B86E00")
+LOOK = 2   # the number of the printouts' look; raise it when draw_page changes what a stored book shows, and the stored files are made again after the next start
 KINDS = ("classes", "teachers", "rooms", "students")
 
 
