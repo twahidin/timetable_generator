@@ -154,7 +154,7 @@ def a_change_lists_kept_added_and_gone():
     assert p["dates"] == ["2026-10-13", "2026-10-16"] and p["periods"] is None and p["earlier"] == 0 and p["unchanged"] is False, p
     f = p["added"][0]
     assert f["date"] == "2026-10-16" and f["needed"] is True and f["not_needed"] is None and f["relief"] is None and f["relief_by"] is None, f
-    assert f["work"] == dict(text="", link="", files=[]) and "stopped" not in f and "_ask" not in f, f
+    assert f["work"] == dict(text="", link="", files=[]) and "stopped" not in f and "_ask" not in f and "backup_cover" not in f, f
     p = plan(r["id"], ["2026-10-13"], [5, 11])
     assert keys(p["kept"]) == [K5, K8] and p["added"] == [] and keys(p["gone"]) == [K2], p
     assert p["dates"] == ["2026-10-13"] and p["periods"] == [5, 11] and p["unchanged"] is False, p
@@ -220,6 +220,12 @@ def an_added_lesson_asks_a_planned_teacher_to_acknowledge_again():
     assert r["acknowledged"] and keys(r["lessons"]) == [KF], r
     r, _ = change(i, ["2026-10-13"], [5, 11], by=TEAMER, team=True)
     assert r["acknowledged"] is None and r["changes"][-1]["again"] is True, "the relief team adding a needed lesson asks again"
+    r, _ = change(i, ["2026-10-13", "2026-10-16"], by=GRACE)
+    assert r["acknowledged"] is None and r["changes"][-1]["again"] is False, "not acknowledged since: it does not ask again"
+    fresh()
+    n = absent(by=GRACE, lessons=[dict(key=K2, relief=MAYA)])["id"]      # planned, never acknowledged
+    r, _ = change(n, ["2026-10-13", "2026-10-16"], by=GRACE)
+    assert r["acknowledged"] is None and r["changes"][-1]["again"] is False and keys(r["lessons"]) == [K2, K5, K8, KF], r
     fresh()
     a = absent()["id"]                                   # an asked record never gains or loses acknowledged
     r, _ = change(a, ["2026-10-13", "2026-10-16"], by=EVE)
@@ -257,6 +263,21 @@ def a_started_lesson_is_never_dropped():
         refuses(AB.PAST_ABSENCE, lambda: AB.plan_change(old, dict(dates=["2026-10-16"], periods=None), PUB, AB.all_records(), None, FL._when(AB._now())))
     finally:
         LS.today, AB._now = old_today, old_now
+
+
+@t
+def every_earlier_date_stays():
+    fresh()
+    i = absent(dates=("2026-10-13",))["id"]
+    r = AB.load(i); r["dates"] = ["2026-10-09", "2026-10-13"]; AB._save(r)      # Fri 9 Oct: a day before today with no lesson (a duty only)
+    p = plan(i, ["2026-10-13"])
+    assert p["unchanged"] is True and p["dates"] == ["2026-10-09", "2026-10-13"] and p["earlier"] == 0, p
+    refuses(AB.NOTHING, lambda: change(i, ["2026-10-13"]))
+    p = plan(i, ["2026-10-16"])
+    assert p["dates"] == ["2026-10-09", "2026-10-16"] and keys(p["gone"]) == [K2, K5, K8] and keys(p["added"]) == [KF], p
+    r, _ = change(i, ["2026-10-13", "2026-10-16"])
+    assert r["dates"] == ["2026-10-09", "2026-10-13", "2026-10-16"] and r["changes"][-1]["before"]["dates"] == ["2026-10-09", "2026-10-13"], r
+    same(r, i)
 
 
 @t
@@ -299,8 +320,11 @@ def an_added_lesson_held_by_a_backup_moves_in():
     y = AB._lesson(AB.load(b["id"]), KF)
     assert y["relief"] == SAM and y["approved"], y
     i = absent()["id"]
+    p = plan(i, ["2026-10-13", "2026-10-16"])
+    assert keys(p["added"]) == [KF] and p["added"][0]["backup_cover"] == dict(relief=SAM, state="approved"), p["added"]
     r, p = change(i, ["2026-10-13", "2026-10-16"])
     x = AB._lesson(r, KF)
+    assert "backup_cover" not in x and p["added"][0]["backup_cover"] == dict(relief=SAM, state="approved"), "the plan's word is never saved"
     assert keys(p["added"]) == [KF] and x["relief"] == SAM and x["approved"] == y["approved"] and x["sent_out"] == y["sent_out"], x
     assert x["history"] == y["history"], x
     o = AB.load(b["id"])
@@ -316,6 +340,8 @@ def a_backup_with_more_lessons_keeps_the_others():
     b = AB.from_exams(EVE, lessons, dict(id="s1", kind="exam"), "Exams committee", "Invigilating: X", None)
     i = absent(dates=("2026-10-16",))["id"]           # her own absence of Fri took KF over already
     assert keys(AB.load(b["id"])["lessons"]) == [K2, K5, K8], AB.load(b["id"])["lessons"]
+    q = plan(i, ["2026-10-13", "2026-10-16"])
+    assert [x.get("backup_cover") for x in q["added"]] == [dict(relief=None, state="open"), dict(relief=None, state="open"), None], q["added"]
     r, p = change(i, ["2026-10-13", "2026-10-16"], [0, 4])
     o = AB.load(b["id"])
     assert keys(p["added"]) == [K2] and keys(r["lessons"]) == [K2, KF], r

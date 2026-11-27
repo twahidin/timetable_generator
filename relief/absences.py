@@ -418,8 +418,10 @@ def plan_change(r, data, pub, records, links, now) -> dict:
     -> dict(dates, periods, kept, added, gone, earlier, unchanged):
     kept, the record's lessons dated today or later that stay (in the new choice, or started: a started lesson is never
     dropped); added, the lessons only in the new choice, built as new builds them (needed unless one of its other teachers is
-    there); gone, the record's lessons that go; earlier, how many of its lessons are dated before today (they stay, unlisted);
-    dates, the new dates with those of every lesson that stays because it is earlier or started; periods, the new periods;
+    there; one a backup of the teacher holds carries backup_cover: dict(relief, state), its relief there and cover.state's word,
+    as it moves in with it); gone, the record's lessons that go; earlier, how many of its lessons are dated before today (they
+    stay, unlisted); dates, the new dates with every date of the record before today (a day with no lesson left keeps its date)
+    and those of the lessons that stay because they started; periods, the new periods;
     unchanged, nothing added or gone and the same dates and periods. Refused as a new request is"""
     if r.get("cancelled"): raise ValueError(CANCELLED)
     if r.get("exams"): raise ValueError(BACKUP)
@@ -455,8 +457,12 @@ def plan_change(r, data, pub, records, links, now) -> dict:
                        + [x["needed"] or x["_stopped"] for x in added], links)
     for x in added: x.pop("_stopped")
     _no_overlap([o for o in records if o.get("id") != r["id"]], teacher, [x for x in added if x["needed"]])
-    out_dates = sorted({d.isoformat() for d in dates} | {str(x["date"]) for x in earlier}
-                       | {str(x["date"]) for x in kept if x["key"] not in mine})
+    by_key = {x["key"]: x for x in added}
+    for o, moved in _moving(records, teacher, [x for x in added if x["needed"]]):     # as change moves them in (_take_over)
+        for key, y in moved.items():
+            by_key[key]["backup_cover"] = dict(relief=y.get("relief"), state=_cover.state(o, y, y))
+    out_dates = sorted({d.isoformat() for d in dates} | {str(d) for d in r.get("dates") or [] if str(d) < today.isoformat()}
+                       | {str(x["date"]) for x in earlier} | {str(x["date"]) for x in kept if x["key"] not in mine})
     kept.sort(key=_order); added.sort(key=_order); gone.sort(key=_order)
     unchanged = not added and not gone and out_dates == list(r.get("dates") or []) and periods == r.get("periods")
     return dict(dates=out_dates, periods=periods, kept=kept, added=added, gone=gone, earlier=len(earlier), unchanged=unchanged)
@@ -475,7 +481,7 @@ def change(id, data, by, pub, *, team=False, links=None, shown=None):
     (why, else CHANGED_WHY, by by) and its work files deleted when no lesson left lists them, and is kept in the gone list when
     it has a history; an added needed lesson one of the teacher's backups holds moves in with its whole cover (_take_over).
     The change is written down in changes (again: whether it asked the absent teacher to acknowledge again, which it does on a
-    planned absence when someone else adds a needed lesson). Refused, writing nothing, as plan_change refuses, by whom
+    planned absence she had acknowledged when someone else adds a needed lesson). Refused, writing nothing, as plan_change refuses, by whom
     _may_change refuses, and NOTHING when nothing changes. -> (the record, the plan)"""
     pub = _pub(pub)
     if not isinstance(data, dict): raise ValueError(WRONG)
@@ -498,13 +504,14 @@ def change(id, data, by, pub, *, team=False, links=None, shown=None):
         at = _now()
         before = dict(dates=list(r["dates"]), periods=r["periods"])
         drop = set(gone)
-        r["lessons"] = sorted([x for x in r["lessons"] if not (isinstance(x, dict) and x.get("key") in drop)] + p["added"],
+        new_lessons = [{k: v for k, v in x.items() if k != "backup_cover"} for x in p["added"]]      # the plan's word for the preview only
+        r["lessons"] = sorted([x for x in r["lessons"] if not (isinstance(x, dict) and x.get("key") in drop)] + new_lessons,
                               key=lambda x: _order(x) if isinstance(x, dict) else ("", 0, ""))
         for x in p["gone"]: _gone(r, x, why or CHANGED_WHY, by)
-        needed = [x for x in p["added"] if x["needed"]]
+        needed = [x for x in new_lessons if x["needed"]]
         backups = _take_over(_moving(records, r["teacher"], needed), r)
         r["dates"], r["periods"] = p["dates"], p["periods"]
-        again = r.get("how") == "planned" and by != r["teacher"] and bool(needed)
+        again = r.get("how") == "planned" and by != r["teacher"] and bool(needed) and bool(r.get("acknowledged"))
         r.setdefault("changes", []).append(dict(at=at, by=by, why=why, dates=list(p["dates"]), periods=p["periods"], before=before,
                                                 added=added, gone=gone, again=again))
         r["changed_at"] = at
