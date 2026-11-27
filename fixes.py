@@ -546,7 +546,7 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
             elif x["id"] not in put: put.add(x["id"]); L1 += after.get(x["id"], [])
         L1 += [x for x in new if x["id"] not in put]
         for k, w in rule_subjects(m, sp, L1).items():
-            if k not in s0: (must if w["strength"] == "Must" else prefer).append(w["text"])
+            if k not in s0: (must if w["strength"] == "Must" else prefer).append(w.get("staff") or w["text"])   # a teacher-only period: the board's short sentence
     if kind in ("teacher", "trade", "add", "delete"):
         by = lambda rows: {i: [x for x in rows if x["id"] == i] for i in dict.fromkeys(x["id"] for x in rows)}
         b0, b1, inpool = by(old + p0), by(new + p1), by(pool)

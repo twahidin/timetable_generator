@@ -842,6 +842,23 @@ def test_a_preview_of_a_trade_shows_both_classes_changed():
     assert sorted(g["name"] for g in j["classes"]) == sorted(CLASSES) and _row(j, CLASSES[0], 1)["mark"] == "changed" and _row(j, CLASSES[1], 2)["mark"] == "changed"
     assert _row(j, CLASSES[0], 1)["teachers"] == [T1] and _row(j, CLASSES[1], 2)["teachers"] == [T0] and fixes_stored() == [] and taught(1) == [[T0]]
 
+def test_a_forced_lesson_on_a_teacher_only_period_publishes():
+    assert L1 == 1 and DAYS[0] == "Mon" and SPEC["school"]["start_time"] == "07:30" and int(SPEC["school"]["period_minutes"]) == 30   # periods 1 and 2 of Monday are 8.00 to 9.00
+    who = TEACHERS[1]; staff = [dict(_id="z1", name="Staff meeting", all=False, depts=[], teachers=[who], week="Both", days=["Mon"], times=["08:00", "09:00"], place="Hall")]
+    assert c.put("/api/setup", json=dict(spec=dict(SPEC, staff_periods=staff), why="a staff meeting")).status_code == 200
+    sent, real = [], store.publish
+    try:
+        fresh(CLEAN); f = move(2, (0, L1 + 1)); why = f"{who} has Staff meeting then (Mon 8.00 to 9.00)."
+        raises(ValueError, lambda: draft.fix(f), why); draft.fix(dict(f, force=True, why=why))
+        j = draft.info(); text = f"{who} has {SUBJ2} for {CLASSES[1]} on {DAYS[0]} period {L1 + 1} during Staff meeting (8.00 to 9.00)."
+        ws = [w for w in j["warnings"] if w["text"] == text and not w["decision"]]
+        assert len(ws) == 1 and ws[0]["staff"] == why and j["critical"] == 0 and not [w for w in j["warnings"] if "staff" in w and w["text"] != text], [w["text"] for w in j["warnings"]]
+        store.publish = lambda *a, **k: sent.append(k)
+        r = c.post("/api/draft/publish"); assert r.status_code == 200 and len(sent) == 1 and text in sent[0]["extra"]["left"], r.get_json()
+    finally:
+        store.publish = real
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()
