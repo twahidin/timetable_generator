@@ -999,20 +999,25 @@ def ahead():
     today_ = _lessons.today()
     span = "term" if request.args.get("span") == "term" else "weeks"
     until, cal = today_ + datetime.timedelta(days=14), settings["calendar"]
-    if span == "term":
+    if span == "term" and isinstance(cal, dict):
         try:
             term = term_of(cal, today_) or min((t for t in cal.get("terms", []) if datetime.date.fromisoformat(str(t["start"])[:10]) > today_), key=lambda t: str(t["start"])[:10], default=None)
             if term: until = datetime.date.fromisoformat(str(term["end"])[:10])
-        except (TypeError, ValueError, KeyError) as e: current_app.logger.error("relief: the end of the term could not be read (%s)", type(e).__name__)
+        except (TypeError, ValueError, KeyError, AttributeError) as e: current_app.logger.error("relief: the end of the term could not be read (%s)", type(e).__name__)
     first, last = today_.isoformat(), until.isoformat()
     records = _absences.all_records()
-    links = _links_or_none(pub, cal)
-    by_day = {}
+    links = _links_or_none(pub, cal if isinstance(cal, dict) else {})
+    by_day, bad = {}, set()
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
-            if not x.get("needed") or not isinstance(x.get("date"), str) or not first < x["date"] <= last: continue
-            for i, c in enumerate(_cover.covers(x)): by_day.setdefault(x["date"], []).append(_row(pub, settings, records, r, x, c, i, links, now, light=True))
+            try:
+                if not x.get("needed") or not isinstance(x.get("date"), str) or not first < x["date"] <= last: continue
+                for i, c in enumerate(_cover.covers(x)):
+                    try: by_day.setdefault(x["date"], []).append(_row(pub, settings, records, r, x, c, i, links, now, light=True))
+                    except Exception as e: bad.add(type(e).__name__)
+            except Exception as e: bad.add(type(e).__name__)             # a record changed by hand: passed over, never the page's failure
+    if bad: current_app.logger.error("relief: a lesson to come could not be read and was passed over (%s)", ", ".join(sorted(bad)))
     days = []
     for date in sorted(by_day):
         rows = sorted(by_day[date], key=lambda v: (v["p"], v["absent"], v["ckey"]))

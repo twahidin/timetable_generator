@@ -2565,6 +2565,52 @@ def ahead_is_the_relief_teams():
     fresh()
     for name in (SAM, GRACE): no(staff(name).get("/api/relief/ahead"), 403, TEAM_ONLY)
 
+@rt
+def ahead_leaves_out_today_while_it_lists_the_days_to_come():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"): i = absent(dates=["2026-10-13", "2026-10-16"])["id"]
+    with at("2026-10-13T09:00:00+08:00"):
+        j = ok(team.get("/api/relief/ahead")); assert [d["date"] for d in j["days"]] == ["2026-10-16"], j["days"]
+
+@rt
+def ahead_includes_the_last_day_and_not_the_day_after():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"): absent(dates=["2026-10-30"])
+    with at("2026-10-16T09:00:00+08:00"):                                        # Fri 16 + 14 = Fri 30
+        j = ok(team.get("/api/relief/ahead")); assert (j["until"], [d["date"] for d in j["days"]]) == ("2026-10-30", ["2026-10-30"]), j
+    with at("2026-10-15T09:00:00+08:00"):                                        # Thu 15 + 14 = Thu 29: Fri 30 is the day after
+        j = ok(team.get("/api/relief/ahead")); assert (j["until"], j["days"]) == ("2026-10-29", []), j
+
+def _ahead_passes_over():
+    team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"):
+        i = absent()["id"]; k = absent(teacher=MAYA, dates=["2026-10-16"])["id"]
+        n = len(ok(team.get("/api/relief/ahead"))["days"][0]["rows"])
+        r = AB.load(k); r["lessons"].append("changed by hand"); AB._save(r)
+        j = ok(team.get("/api/relief/ahead")); assert [d["date"] for d in j["days"]] == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n, "a lesson that is not a dict"
+        r = AB.load(k); r["lessons"].pop(); AB._save(r)
+        r = AB.load(i); c = CV.covers(r["lessons"][0])[0]; c.pop("p"); AB._save(r)
+        j = ok(team.get("/api/relief/ahead")); assert [d["date"] for d in j["days"]] == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n - 1, "a cover with no p"
+        assert ok(team.get("/api/relief/ahead?span=term"))["span"] == "term"
+
+@rt
+def ahead_passes_over_a_record_it_cannot_read():
+    fresh(); team = staff(TEAMER)
+    old_level = A.app.logger.level; A.app.logger.setLevel(logging.CRITICAL)            # the passed-over lines are expected here
+    try: _ahead_passes_over()
+    finally: A.app.logger.setLevel(old_level)
+
+@rt
+def ahead_gives_each_part_of_a_split_lesson_its_own_row():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"):
+        i = absent()["id"]; CV.split(i, K2, 3, TEAMER)
+        rows = [r for r in ok(team.get("/api/relief/ahead"))["days"][0]["rows"] if r["split"]]
+        assert [(r["p"], r["n"]) for r in rows] == [(2, 1), (3, 2)] and rows[0]["ckey"] != rows[1]["ckey"], rows
+        CV.change(i, rows[0]["ckey"], SAM, TEAMER, PUB, ST)
+        a, b = [r for r in ok(team.get("/api/relief/ahead"))["days"][0]["rows"] if r["split"]]
+        assert a["state"] != b["state"] and a["pick"] is not None and a["state"] in ("approved", "waiting") and b["pick"] is None, (a, b)
+
 assert REAL == [], "a test reached the real call"
 
 print(f"{COUNT} relief team tests passed")
