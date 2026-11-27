@@ -1,6 +1,6 @@
 """The relief request routes (stage 2): a teacher asks for relief and sets work for each lesson; management and the
 relief team plan relief for a colleague and choose relief teachers; the absent teacher acknowledges, sets work or
-cancels; the relief team sees What's in. Registered from app.py after init(has=..., me=..., need=...).
+cancels; the relief team sees All Relief Requests. Registered from app.py after init(has=..., me=..., need=...).
 
 Every route answers 401 {"error": "Please sign in again."} without a person signed in by name who has the relief right
 (app.py's need("relief"), as every other route of the app), 409 with NO_PUB when nothing is published, 403 {"error":
@@ -22,11 +22,11 @@ reason, reason_text, remarks, reporting_officer, lessons=[{key, needed, relief, 
 {text, link, files: [{id, name}], known: [the file ids the page started from]} (a missing or other body is refused,
 never read as "no work"); POST …/not-needed and …/cancel take {why}; PUT …/relief takes {relief: a name, or
 null to take the choice off}; POST …/files takes one file in the multipart field "file"; POST /api/relief/absences/seen
-takes {at}: the as_of the What's in list answered (now when left out). Periods are 0-based, as in the records.
+takes {at}: the as_of the All Relief Requests list answered (now when left out). Periods are 0-based, as in the records.
 
 Stage 3 (relief/cover.py, pick.py, fill.py). A cover is a lesson, or one part of a split lesson, by its cover key (the
 lesson's key, or key#i for part i); every list of covers is sent in time order (by p). The relief team (relief.team,
-asked inside with TEAM_ONLY before the absence is opened): Today (GET /today?date=), Approve (POST …/covers/<ckey>/approve
+asked inside with TEAM_ONLY before the absence is opened): Today's Relief Assignments (GET /today?date=), Approve (POST …/covers/<ckey>/approve
 {who: the pick the page showed}), Approve all waiting (POST /today/approve-all {date, covers: [{id, ckey, who}], the
 waiting rows the page showed}), each refused or skipped with cover.PICK_CHANGED once that pick is no longer who; Send out
 (POST …/covers/<ckey>/send-out {who, approved_at: the relief and the approval the page showed}) and Send out all approved
@@ -47,7 +47,7 @@ force, always after the save and the absences lock. Each save here is one histor
 Stage 4: each save, after its history entry, asks relief.tell (_tell_soon) what there is to say on Telegram; nothing is sent
 from a route, and a message that cannot be worked out never fails the save. What a person may also do on Telegram
 (relief/bot.py) has its history entry's words and what follows the save in STEPS, the same for both; so has an absence asked for there
-(relief/asking.py) in created. via ("telegram") in a record: it was asked for there (What's in alone shows it)."""
+(relief/asking.py) in created. via ("telegram") in a record: it was asked for there (All Relief Requests alone shows it)."""
 import csv, datetime, io, os, threading
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -78,7 +78,7 @@ NO_PUB = "Publish the timetable first: relief reads the teachers from it."
 SIGN_IN = "Please sign in again."
 PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
 CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
-TEAM_ONLY = "Only the relief team can open What's in."
+TEAM_ONLY = "Only the relief team can open this."
 NOT_YOURS = "This absence is not yours to open."
 GONE = "That absence is not there any more."
 NO_FILE = "That file is not there any more."
@@ -541,7 +541,7 @@ def _seen_at(name):
 @need("relief")
 def whats_in():
     """every absence, newest first; new = submitted, or given a lesson (a backup's changed_at), at or after the time this
-    person last marked What's in as seen (never: all new); cover = dict(total, approved, waiting, open): its covers that
+    person last marked All Relief Requests as seen (never: all new); cover = dict(total, approved, waiting, open): its covers that
     need relief, each part of a split lesson one, less the lessons an exam or event stops (approved: approved, acknowledged
     or asked to change); nudge: planned by
     someone else, not acknowledged, not cancelled, not over, and now past times.remind_at on the school day before its
@@ -576,7 +576,7 @@ def _cover_counts(r, links=None):
 @bp.post("/api/relief/absences/seen")
 @need("relief")
 def seen():
-    """records when this person last saw What's in: the as_of posted back, never later than now"""
+    """records when this person last saw All Relief Requests: the as_of posted back, never later than now"""
     pub, me, err = _gate("relief.team", TEAM_ONLY)
     if err: return err
     now, at = _clock(), _time(_body().get("at"))

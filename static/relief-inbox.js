@@ -1,5 +1,5 @@
 "use strict";
-/* What's in (/relief#inbox), for the relief team (me.can_team), read-only: every absence, newest first, with when it came
+/* All Relief Requests (/relief#inbox), for the relief team (me.can_team), read-only: every absence, newest first, with when it came
    in, who sent it and how, for whom and when, the reason, whether the absent teacher has acknowledged (when someone else
    planned it), how many lessons have work and how many reliefs are approved, waiting or open (from the server's cover
    counts); cancelled ones dimmed. Views: Coming up, Needs a nudge (planned by someone else, not acknowledged, and past
@@ -74,7 +74,7 @@
     const seg = VIEWS.map(([k, label, f]) => `<button type="button" data-in="view" data-v="${k}" class="${k === v[0] ? "on" : ""}" aria-pressed="${k === v[0] ? "true" : "false"}">${esc(label)} (${esc(count(f))})</button>`).join("");
     const about = [I.asOf ? `As of ${stamp(I.asOf, true)}` : "", fresh ? `${fresh} new since you last looked` : ""].filter(Boolean).join(" · ");
     box.innerHTML = `<div class="card">
-      <div class="ab-top"><div><h2>What's in</h2><div class="small muted">${esc(about)}</div></div>
+      <div class="ab-top"><div><h2>All Relief Requests</h2><div class="small muted">${esc(about)}</div></div>
         <div class="row"><div class="seg" role="group" aria-label="Which absences">${seg}</div><button type="button" class="small" data-in="reload" ${I.loading ? "disabled" : ""}>${I.loading ? "Reading…" : "Refresh"}</button></div></div>
       ${I.err ? `<p>${R.say(I.err)}</p>` : ""}
       ${rows.length ? `<div class="tablewrap"><table class="rtable inbox"><thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Absent teacher</th><th>Work</th><th>Relief status</th></tr></thead>

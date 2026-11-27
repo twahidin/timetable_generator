@@ -1,6 +1,6 @@
 "use strict";
 /* The Relief home (/relief) for a member of staff signed in by name (their own code or password). Tabs: My absences and Ask for relief
-   (this file); Reliefs I'm covering, Plan relief, What's in, Today, Load and Weekly summary come from relief-covering.js,
+   (this file); Reliefs I'm covering, Relief Planning, All Relief Requests, Today's Relief Assignments, Term Relief Report and Weekly summary come from relief-covering.js,
    relief-plan.js, relief-inbox.js, relief-today.js, relief-load.js and relief-summary.js, which call
    Relief.tab(name, {init(pane, me), shown(pane), dirty()}). A tab shows only when the person may open it and its code is
    loaded. Each tab keeps its own part of the page, so moving between tabs loses nothing typed; leaving the page with
@@ -88,7 +88,7 @@
     if (!allowed(k)) k = "mine";
     R.cur = k;
     for (const [n] of TABS) { const p = $(`#pane-${n}`); if (p) p.hidden = n !== k; }
-    $("#main").classList.toggle("wide", k === "inbox" || k === "today" || k === "load" || k === "summary");   /* What's in, Today, Load and Weekly summary are wide tables */
+    $("#main").classList.toggle("wide", k === "inbox" || k === "today" || k === "load" || k === "summary");   /* All Relief Requests, Today's Relief Assignments, Term Relief Report and Weekly summary are wide tables */
     const m = mods[k], pane = $(`#pane-${k}`);
     if (!m.started) { m.started = true; m.init(pane, R.me); }
     else if (m.shown) m.shown(pane);

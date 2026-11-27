@@ -200,7 +200,7 @@ bot's @name). The code works once and runs out in 15 minutes; **Get a new code**
   absences then says why ("Your Telegram was unlinked on {day}: the bot was blocked there. Unblock it in Telegram, then
   link again."), until they link again. The relief team is told on Telegram as well (the blocked-bot alert, below), and
   the **History** has the line "Telegram unlinked for {name}: the bot was blocked", by "The app".
-- The relief team sees on **Today** who is not on Telegram. Those people see their relief in the app, in **Reliefs I'm
+- The relief team sees on **Today's Relief Assignments** who is not on Telegram. Those people see their relief in the app, in **Reliefs I'm
   covering**.
 
 ### When messages go
@@ -211,18 +211,18 @@ These times in **Relief settings**, under **Times**, decide it. Each is a settin
 |---|---|---|
 | Morning message to the relief team at | 06:30 | One message to each of the relief team on Telegram with everything waiting for today. Not on weekends or holidays. |
 | Earliest send-out to relief teachers | 06:45 | Nothing reaches a relief teacher before this time of a school day. |
-| Cut-off for the day's relief | 14:00 | After it nobody on the team is pinged about today, and Today opens on the next school day. |
+| Cut-off for the day's relief | 14:00 | After it nobody on the team is pinged about today, and Today's Relief Assignments opens on the next school day. |
 | Remind the absent teacher to set work at | 18:00 the evening before, and 07:00 on the day | Only while a lesson of that day has no work. The evening one is not sent after 22:00 of that evening. |
 
 Saving checks the order: "The morning message comes at or before the earliest send-out, and both before the cut-off."
 The old time "Fill open lessons at" is gone: every open lesson is picked at once. Its value stays in the settings file,
 unread.
 
-- **Approve, then Send out.** Approve no longer tells the relief teacher. **Send out** (on a row of **Today**, **Send
+- **Approve, then Send out.** Approve no longer tells the relief teacher. **Send out** (on a row of **Today's Relief Assignments**, **Send
   out {n} approved** at the top, or **📤 Send out to {name}** on Telegram after **Approve**) does. In school hours it goes
-  at once; outside them it is held, and Today says "Will be sent at 06:45". The message is made when it goes, from the
+  at once; outside them it is held, and Today's Relief Assignments says "Will be sent at 06:45". The message is made when it goes, from the
   record as it is then: a change or a cancel before then is what goes, or nothing goes. A head who chooses the relief
-  teacher in **Plan relief for a colleague** needs no Approve or Send out: the choice is approved and sent out at once.
+  teacher in **Relief Planning** (for a colleague) needs no Approve or Send out: the choice is approved and sent out at once.
 - **School hours for relief teachers** are from the earliest send-out time to the cut-off of a school day. After the
   cut-off, only a message about a lesson of that same day still to come goes. Anything to a relief teacher (the relief,
   its reminders, moved, kept, no longer needed, not happening, on again) that falls due outside them waits for the next
@@ -245,8 +245,8 @@ unread.
   goes by itself. Once the lesson of such a relief has started, still never sent out, the next report lists it once
   under "Started, never sent out:", and the all clear counts it ("No reliefs are waiting now: 1 never sent out.").
   **Remind them again** reminds only those not acknowledged.
-- **After the cut-off**, when Today shows the next school day and today still has lessons to come that are open,
-  waiting for approval, or approved and not sent out, the page says "Today still has {n} to arrange: open Today." above
+- **After the cut-off**, when Today's Relief Assignments shows the next school day and today still has lessons to come that are open,
+  waiting for approval, or approved and not sent out, the page says "Today still has {n} to arrange: show today." above
   the rows. Nobody is pinged for them.
 - **The teacher who is away** is told at once, as before: "Relief planned for you", and the two reminders to set work at
   18:00 and 07:00, on purpose. "Who covers you" goes when a relief teacher acknowledges, from the earliest send-out time
@@ -277,7 +277,7 @@ So roll back between the earliest send-out time (06:45) and the cut-off (14:00) 
 relief, sent out or not, is then told at once. Messages of the new kinds still queued (the morning message, a late
 request, a reminder of a relief, Relief needed again, Who covers you, the alert, Please set work) go when they are
 sent. A Relief settings save made while rolled back drops the new times; forward again, they are at their defaults.
-Going forward again: a relief the older version told reads "Approved · not sent out" on Today, and is not in that
+Going forward again: a relief the older version told reads "Approved · not sent out" on Today's Relief Assignments, and is not in that
 teacher's Reliefs I'm covering, until someone presses **Send out**; that press sends no second message. A takeover done
 by the older version (a teacher's own absence taking over the lesson of an exam's or event's backup) drops the mark, so a cover it moved counts as
 sent out. A relief on an absence asked for while rolled back has no mark at all: it too counts as sent out at its
@@ -319,15 +319,15 @@ If the outage began while a message was on its way and no answer came, that one 
 "Telegram answers again" once when it ends. A message that fails by
 itself, again and again while others go, is tried six times over about 43 minutes and then shows as "Could not be sent".
 **Relief settings**, on the **Telegram** card, lists the messages that could not be sent, or may not have been, since
-Monday, by kind, name and time, never their text: all but reliefs (their line is on **Today**), reports and all clears. The
+Monday, by kind, name and time, never their text: all but reliefs (their line is on **Today's Relief Assignments**), reports and all clears. The
 list is shown to the relief team alone, since it names who was away; the timetable committee sees the card without it.
 
-**When `relief/telegram.db` is damaged** (the Telegram cards say only "Something went wrong. Try again.", **Today** looks as
+**When `relief/telegram.db` is damaged** (the Telegram cards say only "Something went wrong. Try again.", **Today's Relief Assignments** looks as
 it does without a bot, and the log says "the message sender failed" or "a message could not be sent"), relief goes on in the app, but nothing goes to Telegram
 and nothing people press there is answered. To start Telegram again: delete `relief/telegram.db`, `relief/telegram.db-wal`
 and `relief/telegram.db-shm` on the volume (for example from a shell on the service, in `/data/relief/`), redeploy, press
 **Connect the bot**, and everyone links again. What is lost: who had linked, the messages waiting and what was sent before
-(so **Today** shows the earlier reliefs as not sent), and any conversation with the bot in the middle. The absences, the
+(so **Today's Relief Assignments** shows the earlier reliefs as not sent), and any conversation with the bot in the middle. The absences, the
 reliefs and the History are kept: they are in other files.
 
 **One copy only.** Telegram passes what people send a bot to one address. If somebody puts the same token on a second
@@ -338,8 +338,8 @@ the token off the second copy and press **Connect again** on the one the school 
 
 Set `TELEGRAM_BOT_TOKEN=practice` (with `SECRET_KEY`) on a copy for trying things, such as a local run. The card says
 "Practice mode: nothing is sent to Telegram." Press **Connect the bot** to see the Telegram cards in Relief settings and
-My absences, and **Today** with a bot connected. Nobody can link there: there is no bot to open, so **Link Telegram**
-shows the code but no **Open the bot** button, and there is nothing to send the code to. So no message is made, and **Today** says "Not on Telegram" for
+My absences, and **Today's Relief Assignments** with a bot connected. Nobody can link there: there is no bot to open, so **Link Telegram**
+shows the code but no **Open the bot** button, and there is nothing to send the code to. So no message is made, and **Today's Relief Assignments** says "Not on Telegram" for
 everybody. To see the messages too, a developer has to stand in for Telegram (with `RELIEF_JOBS=on`). Never use it on the
 copy the school uses: those who are linked there would be marked as told, with nothing sent. With a real token
 afterwards, press **Connect the bot** once more.

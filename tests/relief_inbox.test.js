@@ -1,4 +1,4 @@
-// Plain-assert tests for the relief team's What's in page (static/relief-inbox.js): run with `node tests/relief_inbox.test.js`.
+// Plain-assert tests for the relief team's All Relief Requests page (static/relief-inbox.js): run with `node tests/relief_inbox.test.js`.
 // The page's script runs, with the real relief-form.js, in a small stand-in for the page, against an /api/relief/absences answer written here.
 const assert = require("assert");
 const fs = require("fs");
@@ -55,5 +55,5 @@ t("a long absence's dates read as one run in the row", async () => {
   for (const [name, f] of all) {
     try { await f(); n++; } catch (e) { console.error("FAIL", name); throw e; }
   }
-  console.log(`${n} relief What's in tests passed`);
+  console.log(`${n} relief All Relief Requests tests passed`);
 })().catch(e => { console.error(e); process.exit(1); });

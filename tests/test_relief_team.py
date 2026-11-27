@@ -1625,7 +1625,7 @@ import access, history as H  # noqa: E402
 from relief import files as RF  # noqa: E402
 # who plans and who is on the team: the accounts. Grace is a school leader (relief.plan); Mr Team Lee has the Relief team extra
 AP.update(lambda d: d["people"].update({GRACE: dict(group="leader"), TEAMER: dict(extras=dict(relief=True, exams=None, admin=False))}))
-TEAM_ONLY = "Only the relief team can open What's in."
+TEAM_ONLY = "Only the relief team can open this."
 NOT_YOURS = "This absence is not yours to open."
 GONE_ABS = "That absence is not there any more."
 SIGN_IN = "Please sign in again."

@@ -495,7 +495,7 @@ from exams import make as MK  # noqa: E402
 
 CHLOE, HAFIZ = "Ms Chloe Tan", "Mr Hafiz Rahman"
 store.write_json(RS.PATH, dict(calendar=CAL, limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
-# and now on the relief team too: the Relief team extra (relief.team, for What's in)
+# and now on the relief team too: the Relief team extra (relief.team, for All Relief Requests)
 ACC.update(lambda d: d["people"][GRACE].update(extras=dict(relief=True, exams=None, admin=False)))
 DKEY = RL.key_of(M, 2, MON, "Odd Mon")      # Daniel's 4A Mathematics, periods 2-3 (08:00-08:40): 4A is not on a Sec 3 exam
 DUTY_KEY = ISO + " 07:50"
@@ -550,7 +550,7 @@ def approve_sends_backups():
         assert r["cancelled"] is None and r["acknowledged"] is None
         assert [(x["key"], x["needed"], x["relief"]) for x in r["lessons"]] == [(DKEY, True, None)], r["lessons"]
         j = ok(staff(GRACE).get("/api/relief/absences"))
-        assert r["id"] in [x["id"] for x in j["absences"]], "it shows in What's in"
+        assert r["id"] in [x["id"] for x in j["absences"]], "it shows in All Relief Requests"
         v = ok(c.get(f"/api/exams/{id}/view"))
         item = next(x for x in v["lessons"]["backup"] if x["key"] == DKEY)
         assert item["teacher"] == DANIEL and item["state"] == "sent" and item["relief"] is None, item
@@ -1021,7 +1021,7 @@ def an_absence_sent_before_approval_marks_its_stopped_lesson():
         x = ok(d.get("/api/relief/absences/" + j["id"]))["lessons"][0]
         assert x["stopped"] == why and x["needed"] is True, x
         mine = next(r for r in ok(g.get("/api/relief/absences"))["absences"] if r["id"] == j["id"])
-        assert mine["lessons"][0]["stopped"] == why, "What's in marks it too"
+        assert mine["lessons"][0]["stopped"] == why, "All Relief Requests marks it too"
         url = "/api/relief/absences/%s/lessons/%s/relief" % (j["id"], urllib.parse.quote(DKEY))
         r = g.put(url, json=dict(relief=CHLOE))
         assert r.status_code == 400 and r.get_json() == {"error": "This lesson is not happening: %s." % why}, r.get_data(as_text=True)

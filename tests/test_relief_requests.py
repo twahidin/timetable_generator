@@ -588,7 +588,7 @@ def staff(name):
 
 PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
 CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
-TEAM_ONLY = "Only the relief team can open What's in."
+TEAM_ONLY = "Only the relief team can open this."
 NOT_YOURS = "This absence is not yours to open."
 GONE_ABS = "That absence is not there any more."
 NO_PUB = "Publish the timetable first: relief reads the teachers from it."
@@ -1150,6 +1150,18 @@ def the_pages_copy():
     assert '"Earlier"' in inbox
     assert '"relief.ro:" + R.me.name' in page and 'getItem("relief.ro")' not in page
     assert "come in the next stage" not in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
+
+@t
+def the_tabs_have_their_new_names():
+    from relief import web as WB, tell as TE
+    html = open(os.path.join(ROOT, "static", "relief.html"), encoding="utf-8").read()
+    for tab, name in (("plan", "Relief Planning"), ("inbox", "All Relief Requests"), ("today", "Today's Relief Assignments"), ("load", "Term Relief Report")):
+        assert f'id="tab-{tab}" data-tab="{tab}" aria-controls="pane-{tab}" hidden>{name}<' in html, tab
+    for old in (">Plan relief<", ">What's in<", ">Today<", ">Load<"): assert old not in html, old
+    js = {f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read() for f in ("relief-inbox.js", "relief-load.js", "relief-today.js")}
+    assert "<h2>All Relief Requests</h2>" in js["relief-inbox.js"] and "<h2>Term Relief Report</h2>" in js["relief-load.js"]
+    assert ">show today</button>" in js["relief-today.js"] and "open Today" not in js["relief-today.js"]
+    assert WB.TEAM_ONLY == "Only the relief team can open this." and TE.OPEN_TODAY == "Open Today's Relief Assignments"
 
 @t
 def the_old_name_of_rule_on_day_still_works():

@@ -1,11 +1,11 @@
 "use strict";
-/* Today (/relief#today), for the relief team (me.can_team). Every lesson that needs relief on a date (today until another
+/* Today's Relief Assignments (/relief#today), for the relief team (me.can_team). Every lesson that needs relief on a date (today until another
    is chosen), from /api/relief/today, one row a cover (each part of a split lesson its own row), in time order: the
    periods and times, the class and subject, the room, the absent teacher and whether work is set, the relief teacher with
    who picked them and why, and the state in plain words. Buttons: Approve; Send out (an approved relief not sent out yet:
    nothing reaches its teacher until it is, and one sent out outside school hours goes at the earliest send-out time; a head's
    own choice, planned_by, is approved and sent out when it is planned, and its line reads "Planned by {head} · "); Choose
-   or Change, which opens the "free then" list (Relief.freeList, drawn as Plan relief's) and approves the one chosen at once; Split (a cover of two periods or
+   or Change, which opens the "free then" list (Relief.freeList, drawn as Relief Planning's) and approves the one chosen at once; Split (a cover of two periods or
    more that is not approved: the person chooses after which period); Join again (a split lesson none of whose parts is
    approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting,
    Send out all approved and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
@@ -14,8 +14,8 @@
    second day button is the next school day (hours.next_day; "Tomorrow" when it is). An approved row says "Approved · not sent out",
    "Will be sent at 06:45" (held) or what its teacher was sent; a waiting row asked after the cut-off says so; above the rows, a
    line for the reliefs held and, on the next school day past the cut-off, one for what sending out now does and one for how many
-   of today's lessons still to come are open, waiting or not sent out (hours.today_left: "Today still has 1 to arrange: open Today.",
-   whose "open Today" shows today; nobody is pinged for them after the cut-off).
+   of today's lessons still to come are open, waiting or not sent out (hours.today_left: "Today still has 1 to arrange: show today.",
+   whose "show today" shows today; nobody is pinged for them after the cut-off).
    Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each); Send out and Send
    out all the same, with the approval shown ({id, ckey, who, approved_at}): the server
    refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
@@ -236,7 +236,7 @@
       lines.push({ text: `${one ? "1 relief sent out: it" : `${held.length} reliefs sent out: they`} will be sent at ${at} on ${day(d)}. You can still change ${one ? "it" : "them"} until then.` });
     }
     lines.push(...T.top);
-    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">open Today</button>.` : ""}</p>`; });
+    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">show today</button>.` : ""}</p>`; });
     if (T.data && T.data.filling) lines.push(`<p class="td-top small td-busy">Being picked… The page reads the day again every 3 seconds.</p>`);
     if (T.err && T.data) lines.push(`<p class="td-top">${say(T.err)} <button type="button" class="small" data-td="reload">Try again</button></p>`);
     if (lines.join("") !== T.lines) $("#tdTop", T.pane).innerHTML = T.lines = lines.join("");   /* a live region: what is there already is not said again */
