@@ -17,7 +17,7 @@
 - The public repository names the school only as "CTSS" and never a real person. Tests and docs use the made-up names already in the test files (`Ms Evelyn Koh`, `Mr Hugo Ong`, `Ms Grace Wong`, `Mr Team Lee`, `Mr Sam Tan`, `Ms Maya Lee`, `Mr Flex Ng`).
 - No real model call in a test. No new dependency.
 - NEVER run `git stash`, `git stash pop`, `git checkout -- <file>`, `git reset`, or switch branches. Never `pkill`/`killall` by name: stop only processes you started, by PID. To see old code: `git show HEAD:path > scratch-file`.
-- Work only in `/Users/joetay/Developer/tt-generator/tt-relief-tabs` (branch `relief-tabs`). Other worktrees belong to other sessions.
+- Work only in the worktree `tt-relief-tabs` (branch `relief-tabs`). Other worktrees belong to other sessions.
 - Commit messages end with the line `Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>`.
 - After a block edit of a page script, check that every `const`/`function` the old block defined is still defined or no longer used (`git diff` for removed lines, then `grep -F`).
 - A suite passes only when its command exits 0 AND its last line says so; judge with `if out=$(cmd 2>&1); then …`.
