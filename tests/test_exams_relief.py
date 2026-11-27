@@ -268,7 +268,7 @@ def free_route_uses_links():
 @t
 def relief_plan_page_shows_the_busy_fold():
     js = open(os.path.join(ROOT, "static", "relief-plan.js"), encoding="utf-8").read()
-    assert "on an exam duty or at an event then" in js
+    assert "busy then (an exam duty, an event or a teacher-only period)" in js
 
 # ---- Task 3: asking for and planning relief on an exam or event day
 from relief import absences as AB  # noqa: E402

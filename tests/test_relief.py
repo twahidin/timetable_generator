@@ -658,5 +658,22 @@ def a_fill_time_sent_by_a_page_is_not_saved():
 def a_time_with_a_new_line_after_it_is_not_a_time():
     raises(ValueError, lambda: S.save(base(times=dict(morning_at="06:30\n")), PUB, "x"), "06:30\n is not a time like 15:00.")
     raises(ValueError, lambda: S.save(base(times=dict(remind_at="15:00\n")), PUB, "x"), "15:00\n is not a time like 15:00.")
+@t
+def a_teacher_only_period_is_no_lesson_for_relief():
+    from relief import lessons as LS
+    cal = dict(terms=[dict(name="Term 4", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[])
+    days = day_names(2)
+    tue = [d for d in days if d.startswith("Even") and d.split()[-1].startswith("Tue")][0]
+    pub = P.fake_pub([dict(name="Ms Evelyn Koh")], [dict(d=days.index(tue), p=0, n=1, classes=["1A"], subject="Art", group="", teachers=["Ms Evelyn Koh"], room="R1", level="Sec 1")])
+    pub["model"]["school"].update(start_time="08:00", period_minutes=30)
+    pub["model"]["NP"] = 12
+    date = datetime.date(2026, 10, 13)
+    before = ([(x["p"], x["n"]) for x in LS.on_date(pub, cal, "Ms Evelyn Koh", date)], LS.teaching_periods(pub, cal, "Ms Evelyn Koh", date))
+    setup = pub["model"]["setup"]
+    setup["school"] = dict(start_time="08:00", period_minutes=30, periods_per_day=12)
+    setup["staff_periods"] = [dict(_id="s1", name="Staff meeting", all=False, depts=[], teachers=["Ms Evelyn Koh"], week="Both", days=["Tue"], times=["10:30", "11:30"], place="")]
+    after = ([(x["p"], x["n"]) for x in LS.on_date(pub, cal, "Ms Evelyn Koh", date)], LS.teaching_periods(pub, cal, "Ms Evelyn Koh", date))
+    assert before == after and before[0] == [(0, 1)] and before[1] == 1, (before, after)
+
 
 print(f"{COUNT} relief tests passed")

@@ -112,7 +112,7 @@
         <span class="small cand-n">week ${esc(p.week)}</span><span class="small muted cand-n">${esc(p.today)} relief today</span>${pick}</div>`;
     };
     const fold = teaching.length ? ` · <button type="button" class="linkish" data-pl="teaching" aria-expanded="${o.teaching ? "true" : "false"}">${o.teaching ? "Hide" : "Show"} the ${teaching.length} teaching then</button>` : "";
-    const dutyFold = onDuty.length ? ` · <button type="button" class="linkish" data-pl="duty" aria-expanded="${o.duty ? "true" : "false"}">${o.duty ? "Hide" : "Show"} the ${onDuty.length} on an exam duty or at an event then</button>` : "";
+    const dutyFold = onDuty.length ? ` · <button type="button" class="linkish" data-pl="duty" aria-expanded="${o.duty ? "true" : "false"}">${o.duty ? "Hide" : "Show"} the ${onDuty.length} busy then (an exam duty, an event or a teacher-only period)</button>` : "";
     return `<div class="pl-list" role="group" aria-label="${esc(`Who is free for ${RF.title(x)}`)}">
       <div class="small muted">Free at ${esc(RF.periods(x))} on ${esc(day(x.date))}: ${esc(R.plural(n, "teacher"))}${fold}${dutyFold}</div>
       ${o.teaching && teaching.length ? `<div class="small pl-teaching">${esc(teaching.join(", "))}</div>` : ""}
