@@ -1022,6 +1022,11 @@ def html_data(m, view="full", student_id=None, app=None):
         names = {t for x in d["lessons"] for t in x[9]}
         d["teachers"] = [t for t in d["teachers"] if t[0] in names]
         d["students"] = [[s["id"], s["name"], s["cls"], s["groups"]]]
+    if not (app is None or app.get("mode") == "committee"):   # planning data (allowances, class sizes, after-school marks and lists, notes) stays with the committee
+        d["teachers"] = [t[:3] + [""] + t[4:] for t in d["teachers"]]
+        d["classes"] = [c[:2] + [""] + c[3:] for c in d["classes"]]
+        d["lessons"] = [x[:11] + [0] + x[12:] for x in d["lessons"]]
+        d["checks"] = dict(d["checks"], after=[], notes=[])
     return d
 
 def render_html(m, view="full", student_id=None, app=None, title=None):
