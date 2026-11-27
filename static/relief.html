@@ -147,6 +147,9 @@ table.rtable td.act{text-align:right;white-space:nowrap}
 table.rtable tr.off td{opacity:.62}
 table.rtable tr.new td{background:#f3f8ff}
 table.inbox{min-width:860px}
+/* Planned Relief Assignments */
+.ah-day{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
+.ah-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 /* Today (the relief team) */
 .td-acts{justify-content:flex-end}
 .td-acts.tg{margin-bottom:12px}   /* only while a bot is connected: Remind all's place is then kept under the buttons */
@@ -239,6 +242,7 @@ table.sm-table{min-width:620px}
     <button type="button" role="tab" id="tab-plan" data-tab="plan" aria-controls="pane-plan" hidden>Relief Planning</button>
     <button type="button" role="tab" id="tab-inbox" data-tab="inbox" aria-controls="pane-inbox" hidden>All Relief Requests</button>
     <button type="button" role="tab" id="tab-today" data-tab="today" aria-controls="pane-today" hidden>Today's Relief Assignments</button>
+    <button type="button" role="tab" id="tab-ahead" data-tab="ahead" aria-controls="pane-ahead" hidden>Planned Relief Assignments</button>
     <button type="button" role="tab" id="tab-load" data-tab="load" aria-controls="pane-load" hidden>Term Relief Report</button>
     <button type="button" role="tab" id="tab-summary" data-tab="summary" aria-controls="pane-summary" hidden>Weekly summary</button>
   </nav>
@@ -249,6 +253,7 @@ table.sm-table{min-width:620px}
   <section class="pane" id="pane-plan" role="tabpanel" aria-labelledby="tab-plan" hidden></section>
   <section class="pane" id="pane-inbox" role="tabpanel" aria-labelledby="tab-inbox" hidden></section>
   <section class="pane" id="pane-today" role="tabpanel" aria-labelledby="tab-today" hidden></section>
+  <section class="pane" id="pane-ahead" role="tabpanel" aria-labelledby="tab-ahead" hidden></section>
   <section class="pane" id="pane-load" role="tabpanel" aria-labelledby="tab-load" hidden></section>
   <section class="pane" id="pane-summary" role="tabpanel" aria-labelledby="tab-summary" hidden></section>
 </main>
@@ -259,6 +264,7 @@ table.sm-table{min-width:620px}
 <script src="/static/relief-plan.js"></script>
 <script src="/static/relief-inbox.js"></script>
 <script src="/static/relief-today.js"></script>
+<script src="/static/relief-ahead.js"></script>
 <script src="/static/relief-load.js"></script>
 <script src="/static/relief-summary.js"></script>
 <script src="/static/relief-covering.js"></script>

@@ -41,7 +41,7 @@
      step was taken on whose teacher is not told yet; reads: how often the day was read again for what is being sent; said: what came
      of that; lines, acts: the lines above the rows and the buttons at the top as drawn; date: the day shown, empty until the first
      answer (the page asks for none: the server says which day it opens on); hours: the times of the last answer (its hours) */
-  const T = { pane: null, date: "", hours: null, data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
+  const T = { pane: null, date: "", want: "", hours: null, data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
               busy: new Set(), all: false, open: null, free: new Map(), split: null, bot: false, follow: new Set(), reads: 0, said: "", lines: "", acts: "" };
 
   const rid = r => r.id + "\n" + r.ckey;
@@ -442,6 +442,15 @@
     paintDay(); paint(); load();
   }
 
+  /* Relief.showDay(iso): Today on that date, whether or not the tab was opened before (before its first init the date waits, and
+     init opens on it); a text that is not a date only opens the tab. */
+  function showDay(iso) {
+    const ok = /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""));
+    if (ok && T.pane) setDate(iso); else if (ok) T.want = iso;
+    R.go("today");
+  }
+  R.showDay = showDay;
+
   /* ---------------------------------------------------------------- events */
   function onClick(e) {
     const b = e.target.closest("button[data-td],button[data-pl]");
@@ -502,7 +511,7 @@
   R.tab("today", {
     init(pane) {
       T.pane = pane;
-      T.date = "";
+      T.date = T.want || ""; T.want = "";
       pane.innerHTML = `<div class="card td">
         <div class="ab-top"><div><h2 id="tdTitle">Relief today</h2><div class="small muted" id="tdSub"></div></div><div class="row td-acts" id="tdActs"></div></div>
         <div class="line td-day"><div class="seg" role="group" aria-label="Which day" id="tdSeg"></div>

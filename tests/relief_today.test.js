@@ -581,4 +581,21 @@ t("past the cut-off, on the next day: how many of today are still to arrange, an
   const o = await today(day([], { date: "2026-10-14" })); assert.ok(!o.top().some(x => x.startsWith("Today still")), "no hours: no line");
 });
 
+t("showDay before the tab was opened opens it on that date", async () => {
+  const p = await today(day([row()]), { hash: "#mine" });
+  assert.strictEqual(p.reads(), 0, "the tab is not open yet");
+  p.window.Relief.showDay("not a date"); await p.settle();
+  assert.strictEqual(p.reads(), 1, "a text that is not a date only opens the tab");
+  assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`))[0].url, `${URL}?`);
+  const q = await today(day([row()]), { hash: "#mine" });
+  q.window.Relief.showDay("2026-10-16"); await q.settle();
+  assert.strictEqual(q.calls.filter(c => c.url.startsWith(`${URL}?`))[0].url, `${URL}?date=2026-10-16`);
+});
+t("showDay on an open tab changes its date", async () => {
+  const p = await today(day([row()]));
+  p.window.Relief.showDay("2026-10-16"); await p.settle();
+  assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=2026-10-16`);
+  assert.strictEqual(p.text("#tdTitle"), "Relief on Fri 16 Oct"); assert.strictEqual(p.window.Relief.cur, "today");
+});
+
 run(all);

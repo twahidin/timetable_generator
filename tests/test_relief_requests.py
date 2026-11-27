@@ -1161,6 +1161,8 @@ def the_tabs_have_their_new_names():
     js = {f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read() for f in ("relief-inbox.js", "relief-load.js", "relief-today.js")}
     assert "<h2>All Relief Requests</h2>" in js["relief-inbox.js"] and "<h2>Term Relief Report</h2>" in js["relief-load.js"]
     assert ">show today</button>" in js["relief-today.js"] and "open Today" not in js["relief-today.js"]
+    assert 'id="tab-ahead" data-tab="ahead" aria-controls="pane-ahead" hidden>Planned Relief Assignments<' in html and 'id="pane-ahead"' in html
+    assert html.index("/static/relief-today.js") < html.index("/static/relief-ahead.js") and '["ahead", me => !!me.can_team]' in open(os.path.join(ROOT, "static", "relief.js"), encoding="utf-8").read()
     assert WB.TEAM_ONLY == "Only the relief team can open this." and TE.OPEN_TODAY == "Open Today's Relief Assignments"
 
 @t
