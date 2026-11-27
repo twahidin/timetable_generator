@@ -125,6 +125,7 @@ def the_rights():
     assert "staff.reset" in R(dict(group="hod", extras={}), "password") and "staff.reset" in R(dict(group="sh", extras={}), "password")
     assert "staff.reset" not in R(dict(group="hod", extras={}), "code")
     for g in ("teacher", "executive", "leader"): assert "staff.reset" not in R(dict(group=g, extras={"admin": True, "timetable": True}), "password"), g
+    assert "staff.reset" not in R(dict(group="sh", extras={}), "code")
 
 @t
 def the_tiles():
@@ -190,6 +191,48 @@ def student_codes_refusals():
 def student_codes_by_staff_code():
     c, _ = code_in(staff_code(BEN))                # staff codes on: a staff code session is staff
     assert c.get("/student-codes").status_code == 200
+
+RESET_HINT = "Give the new temporary password to the person yourself. They choose their own when they sign in."
+RESET_NONE = "No one in your departments can be reset here. Ask an admin."
+RESET_REFUSED = "You cannot reset this person's password. Ask an admin."
+
+@t
+def head_resets_their_department():
+    publish(TEACHERS + [dict(name=DANA, dept="Mathematics", dept2="Science")])
+    account(ALICE, group="teacher"); account(ERIC, group="hod", depts=["Science"])
+    c = signed_in(ERIC, group="hod", depts=["Science"])
+    h = c.get("/staff-reset").data.decode()
+    assert RESET_HINT in h and ALICE in h and DANA in h and BEN not in h and f'value="{ERIC}"' not in h
+    n0 = rec(ALICE)["n"]
+    r = c.post("/staff-reset", data=dict(name=ALICE)); h = r.data.decode()
+    assert r.status_code == 200 and r.headers["Cache-Control"] == "no-store" and f"New temporary password for {ALICE}" in h
+    once = re.search(r"[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}", h).group(0); SECRETS.append(once)
+    rr = rec(ALICE); assert rr["must_change"] and rr["n"] == n0 + 1 and PW.check_pw(rr["pw"], once)
+    e = last("account"); assert e["text"] == f"{ALICE}: a new one-time password from their head of department" and e["who"] == ERIC
+    r = c.post("/staff-reset", data=dict(name=DANA)); assert r.status_code == 200 and rec(DANA)["username"]   # no username yet: one is made
+    SECRETS.append(re.search(r"[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}", r.data.decode()).group(0))
+
+@t
+def head_reset_refusals():
+    account(ERIC, group="hod", depts=["Science"]); account("Ms Ada Lim", group="committee", extras={"admin": True, "timetable": True})
+    person("Mr Sid Head", group="sh", depts=["Science"]); person(ALICE, off=True)
+    c = signed_in(ERIC, group="hod", depts=["Science"])
+    for name in (ERIC, "Ms Ada Lim", "Mr Sid Head", ALICE, BEN, "Nobody At All"):
+        before = json.dumps(P.load(), sort_keys=True); n = len(H.read(kinds=["account"], limit=1000))
+        r = c.post("/staff-reset", data=dict(name=name))
+        assert r.status_code == 403 and RESET_REFUSED in r.data.decode(), name
+        assert json.dumps(P.load(), sort_keys=True) == before and len(H.read(kinds=["account"], limit=1000)) == n, name
+    person(ALICE, off=False)
+    assert signed_in(ALICE).get("/staff-reset").status_code in (302, 401)          # a teacher
+    c, _ = code_in(staff_code(ERIC)); assert c.post("/staff-reset", data=dict(name=ALICE)).status_code in (302, 401)
+    h = signed_in("Ms Noor Head", group="hod", depts=[]).get("/staff-reset").data.decode(); assert RESET_NONE in h
+
+@t
+def head_reset_with_nothing_published():
+    unpublish()
+    account(ERIC, group="hod", depts=["Science"]); person("Ms Una Kay", group="teacher", depts=["Science"], username="una.kay", added=True)
+    c = signed_in(ERIC, group="hod", depts=["Science"])
+    r = c.get("/staff-reset"); assert r.status_code == 200 and RESET_NONE in r.data.decode()   # nothing published: no department to match
 
 @t
 def nothing_typed_reaches_the_history():

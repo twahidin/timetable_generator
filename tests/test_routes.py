@@ -358,6 +358,8 @@ GUARDS = {
     "relief_tg.unlink": ('relief.save',),
     "restore_setup": ('committee',),
     "status": ('setup',),
+    "staff_reset_do": ('staff.reset',),
+    "staff_reset_page": ('staff.reset',),
     "student_codes_page": ('codes.look',),
     "student_codes_show": ('codes.look',),
     "students_published": ('committee',),

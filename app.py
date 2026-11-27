@@ -1581,6 +1581,66 @@ def student_codes_show():
     r.headers["Cache-Control"] = "no-store"
     return r
 
+# ------------------------------------------------------------------------------------------------ heads: a new temporary password
+RESET_HINT = "Give the new temporary password to the person yourself. They choose their own when they sign in."
+RESET_NONE = "No one in your departments can be reset here. Ask an admin."
+RESET_REFUSED = "You cannot reset this person's password. Ask an admin."
+
+def _resettable(pub, d, me):
+    """the staff a head may give a new temporary password, in listing order: not themselves, not switched off, not a head
+    or a school leader, not an admin, and in one of the head's own departments"""
+    mine = set(people.record(d, me)["depts"])
+    return [p for p in people.staff(pub, d) if p["name"] != me and not p["off"] and p["group"] not in ("leader", "hod", "sh")
+            and not p["extras"].get("admin") and set(p["depts"]) & mine]
+
+def _reset_page(me, shown=None, msg="", status=200):
+    back = ("/home", "Back")
+    if shown:
+        box = f"""<div class="notes"><p><strong>New temporary password for {esc(shown["name"])}</strong></p>
+<p>Username: <strong>{esc(shown["username"])}</strong></p><p>Temporary password: <strong>{esc(shown["once"])}</strong></p></div>"""
+    else: box = ""
+    items = _resettable(store.published(), people.load(), me)
+    rows = "".join(f"""<form method="post" action="/staff-reset"><p>{esc(p["name"])} <span class="muted">{esc(", ".join(p["depts"]))}</span>
+<input type="hidden" name="name" value="{esc(p["name"])}"><button type="submit">Reset</button></p></form>""" for p in items)
+    if not items: msg = msg or RESET_NONE
+    r = Response(_form_page("Reset a password", box + rows, msg, RESET_HINT, back=back, tail=""), status=status, mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.get("/staff-reset")
+@need("staff.reset")
+def staff_reset_page():
+    try: return _reset_page(who()["name"])
+    except people.Unreadable: return _reset_page_unreadable()
+
+def _reset_page_unreadable():
+    r = Response(_form_page("Reset a password", "", people.UNREADABLE, back=("/home", "Back"), tail=""), status=503, mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.post("/staff-reset")
+@need("staff.reset")
+def staff_reset_do():
+    me, by_, pub = who()["name"], by(), store.published()
+    name = request.form.get("name", "")
+    once = passwords.one_time(); h = passwords.hash_pw(once)
+    def change(d):
+        if not any(p["name"] == name for p in _resettable(pub, d, me)): raise Refused(RESET_REFUSED)   # rechecked under the lock
+        r = people.record(d, name)
+        u = r["username"]
+        if not u:
+            taken = {str(x.get("username") or "").lower() for x in d["people"].values() if isinstance(x, dict)}
+            u = account_slips.make_username(name, next(p["depts"] for p in people.staff(pub, d) if p["name"] == name), taken)
+        r.update(username=u, pw=h, must_change=True, n=r["n"] + 1)
+        d["people"][name] = r
+        return u, [p["depts"] for p in people.staff(pub, d) if p["name"] == name][0]
+    try: u, depts = people.update(change)
+    except Refused: return _reset_page(me, msg=RESET_REFUSED, status=403)
+    except people.Unreadable: return _reset_page_unreadable()
+    lockout.clear(u)
+    _account_entry("reset", [name], [], f"{name}: a new one-time password from their head of department", by_=by_, where="Reset a password", depts=depts)
+    return _reset_page(me, dict(name=name, username=u, once=once))
+
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
 TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"],
             staff=["classes", "teachers", "exams"])   # staff: a teacher's own timetable (the teachers tab, as My timetable) and the classes
