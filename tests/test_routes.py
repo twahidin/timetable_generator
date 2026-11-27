@@ -322,6 +322,7 @@ GUARDS = {
     "relief_web.planned": ('relief',),
     "relief_web.planned_csv": ('relief',),
     "relief_web.relief": ('relief',),
+    "relief_web.school_days": ('relief',),
     "relief_web.seen": ('relief',),
     "relief_web.upload": ('relief',),
     "relief_web.whats_in": ('relief',),

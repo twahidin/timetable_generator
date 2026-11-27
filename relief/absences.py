@@ -29,7 +29,7 @@ IS_SPLIT = "This lesson is split: the relief team chooses for each part."
 STARTED = "This lesson has started: ask the relief team to change it."
 NO_LESSONS = "There are no lessons to cover in that time."
 TOO_MANY = "A lesson can have at most 5 files."
-MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
+MAX_DATES, MAX_TEXT, MAX_LINK = 20, 2000, 500
 COVER = ("relief", "relief_by", "pick", "approved", "sent_out", "ack", "change", "history", "parts")     # a lesson's cover (relief.cover), moved whole
 
 
@@ -101,7 +101,7 @@ def _int(v):
 
 
 def _iso_dates(v, today):
-    bad = ValueError("Choose up to 10 school days, today or later.")
+    bad = ValueError("Choose up to 20 school days, today or later.")
     if not isinstance(v, (list, tuple)) or not v or len(v) > MAX_DATES: raise bad
     out = []
     for x in v:

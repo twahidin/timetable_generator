@@ -694,6 +694,21 @@ def a_changed_username_keeps_the_password_and_signs_out():
     assert pw_in("lee.kokhwa", PWS[LEE])[1].status_code == 302
 
 @t
+def an_exams_end_date_is_checked_against_the_school_s_date():
+    from accounts import rights as R
+    school = datetime.date.today() - datetime.timedelta(days=5)       # a date the server's own clock cannot give
+    last, before = (school + datetime.timedelta(days=1)).isoformat(), (school - datetime.timedelta(days=1)).isoformat()
+    real = R.school_today; R.school_today = lambda: school
+    c = admin()
+    try:
+        r = c.post("/api/admin/person", json=dict(name=NUR, extras=dict(exams=last))); assert r.status_code == 200, r.get_json()
+        r = c.post("/api/admin/person", json=dict(name=NUR, extras=dict(exams=before))); assert r.status_code == 400, r.get_json()
+        r = c.post("/api/admin/bulk", json=dict(names=[WEI], action="give", extra="exams", until=last)); assert r.status_code == 200, r.get_json()
+    finally:
+        R.school_today = real
+        c.post("/api/admin/person", json=dict(name=NUR, extras=dict(exams=None)))
+
+@t
 def put_back_a_bulk_change():
     c = admin()
     P.update(lambda d: [d["people"].setdefault(n, {}).setdefault("extras", {}).update(exams=None) for n in (NUR, WEI)])

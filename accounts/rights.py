@@ -1,5 +1,7 @@
 """What a person may do, worked out from their record each time (never from the cookie)."""
 import datetime
+import os
+from zoneinfo import ZoneInfo
 
 STRONG = {"password", "google"}
 _SHARED = {
@@ -8,6 +10,11 @@ _SHARED = {
     "teacher": {"timetable", "files"},
     "student": {"timetable"},
 }
+
+def school_today():
+    """the school's date: the server runs on UTC, so its own date turns at 8 in the morning school time (SCHOOL_TZ, as
+    relief's lessons read it). An Exams and events extra ends at midnight school time after its last day"""
+    return datetime.datetime.now(ZoneInfo(os.environ.get("SCHOOL_TZ") or "Asia/Singapore")).date()
 
 def rights(person, via, shared=None, today=None):
     if via == "personal": return frozenset({"own"})
@@ -21,7 +28,7 @@ def rights(person, via, shared=None, today=None):
     if ex.get("timetable"): r |= {"relief.settings", "relief.save"}
     if ex.get("relief"): r |= {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team"}
     until = ex.get("exams")
-    if until and until >= (today or datetime.date.today()).isoformat(): r.add("exams")
+    if until and until >= (today or school_today()).isoformat(): r.add("exams")
     if via in STRONG:
         if ex.get("timetable"):
             r |= {"committee", "setup", "history", "codes"}
@@ -38,7 +45,7 @@ def sees_all(person, today=None):
     g, ex = person.get("group"), person.get("extras") or {}
     if g in ("leader", "hod", "sh") or ex.get("timetable") or ex.get("relief") or ex.get("admin"): return True
     until = ex.get("exams")
-    return bool(until and until >= (today or datetime.date.today()).isoformat())
+    return bool(until and until >= (today or school_today()).isoformat())
 
 def _day(iso):
     d = datetime.date.fromisoformat(iso)

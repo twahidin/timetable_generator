@@ -39,3 +39,19 @@ def school_day(cal, days, date):
         if w in ("", week) and part[:3].lower() == wd.lower():
             return name
     return None
+
+
+def school_days(cal, days, start):
+    """(the school days from start to the last day of the last term, {each other weekday of that span: why it is not one}):
+    a holiday's name ("Holiday" when it has none), "Not in a term", or "Not a school day" (a weekday the timetable does not have)"""
+    ends = [_d(t["end"]) for t in cal.get("terms", [])]
+    if not ends or start > max(ends): return [], {}
+    got, off = [], {}
+    for i in range((max(ends) - start).days + 1):
+        date = start + datetime.timedelta(days=i)
+        if school_day(cal, days, date) is not None: got.append(date)
+        elif date.weekday() < 5:
+            hol = next((h for h in cal.get("holidays", []) if _d(h["start"]) <= date <= _d(h["end"])), None)
+            if hol: off[date] = hol.get("name") or "Holiday"
+            else: off[date] = "Not in a term" if term_of(cal, date) is None else "Not a school day"
+    return got, off

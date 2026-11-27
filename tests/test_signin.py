@@ -458,6 +458,32 @@ def accounts_need_secret_key():
     _, r = pw_in(user, pw); assert went(r, "/home")
 
 @t
+def the_school_s_date_ends_the_exams_extra():
+    """the server runs on UTC: an Exams and events extra ends at midnight school time, not at 8 the next morning"""
+    import zoneinfo
+    from accounts import rights as R
+    old = os.environ.get("TZ"); os.environ["TZ"] = "UTC"; time.tzset()
+    try: assert R.school_today() == datetime.datetime.now(zoneinfo.ZoneInfo("Asia/Singapore")).date()
+    finally:
+        if old is None: os.environ.pop("TZ", None)
+        else: os.environ["TZ"] = old
+        time.tzset()
+    school = datetime.date.today() - datetime.timedelta(days=5)       # a date the server's own clock cannot give
+    last = (school + datetime.timedelta(days=1)).isoformat()          # still on by the school's date, over by the server's
+    real = R.school_today; R.school_today = lambda: school
+    try:
+        assert "exams" in R.rights(dict(group="teacher", extras=dict(relief=False, exams=last, admin=False)), "code")
+        assert "exams" not in R.rights(dict(group="teacher", extras=dict(relief=False, exams=(school - datetime.timedelta(days=1)).isoformat(), admin=False)), "code")
+        person("Ms Ida Lee", group="teacher", added=True, extras=dict(relief=False, exams=last, admin=False))
+        A._tidied_on = None; A.app.test_client().get("/healthz")
+        assert rec("Ms Ida Lee")["extras"]["exams"] == last, "the daily tidy ends it by the school's date"
+        assert A._tidied_on == school
+        assert ["Ms Ida Lee", last] in A._exams_committee(None)
+        assert "Exams and events" in (A._group_label(dict(group="teacher", extras=dict(relief=False, exams=last, admin=False))) or "")
+    finally:
+        R.school_today = real; A._tidied_on = None
+
+@t
 def the_daily_tidy():
     today = datetime.date.today(); yesterday = today - datetime.timedelta(days=1)
     person("Ms Lia Ong", group="teacher", added=True, extras=dict(relief=False, exams=yesterday.isoformat(), admin=False))

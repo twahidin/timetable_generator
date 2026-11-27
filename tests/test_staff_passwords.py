@@ -483,6 +483,11 @@ def sees_all_rules():
     assert RT.sees_all(dict(group="teacher", extras={"exams": "2026-11-25"}), today) is False
     assert RT.sees_all(dict(group="teacher", extras={"exams": "2026-11-26"}), today) is True
     for x in ("timetable", "relief", "admin"): assert RT.sees_all(dict(group="teacher", extras={x: True}), today) is True, x
+    # with no date given, the full view and the exams right both end at the school's midnight (PR #114), never apart
+    last = dict(group="teacher", extras={"exams": RT.school_today().isoformat()})
+    assert RT.sees_all(last) is True and "exams" in RT.rights(last, "password")
+    gone = dict(group="teacher", extras={"exams": (RT.school_today() - datetime.timedelta(days=1)).isoformat()})
+    assert RT.sees_all(gone) is False and "exams" not in RT.rights(gone, "password")
 
 @t
 def nothing_narrows_while_staff_codes_are_on():
