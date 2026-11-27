@@ -44,6 +44,14 @@ def _hit(spans, start, end):
     return any(a < end and b > start for a, b in spans)
 
 
+def marked(name, view, start, end) -> str:
+    """'has {name} then' for the first teacher-only period of this person that overlaps start..end, else ''. A mark, never a refusal."""
+    for a, b, what in (view.get("periods") or {}).get(name, ()):
+        if a < end and b > start:
+            return "has %s then" % what
+    return ""
+
+
 def _classes(rows):
     out = []
     for r in rows:
@@ -108,7 +116,7 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     other = _other if _other is not None else _other_minutes(sched, date[:4])
     subjects = set(subjects)
     taught = _taught(model)
-    groups = dict(freed=[], free=[], backups=[], need_backup=[])
+    groups = dict(freed=[], free=[], backups=[], period=[], need_backup=[])
     for name in pool:
         if name in exclude:
             continue
@@ -118,14 +126,18 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
         if _barred(name, running, subjects, taught, xset):
             continue
         stopped = [l for l in view["lessons"] if name in l["teachers"] and _hit(l["stopped"], start, end)]
+        mark = marked(name, view, start, end)
         c = dict(name=name, minutes=mine.get(name, 0), other=other.get(name, 0), reason="", rows=[])
         if running:
             c["rows"] = [l["row"] for l in running]
-            c["reason"] = _teaches(running)
+            c["reason"] = _teaches(running) + ("; " + mark if mark else "")
             groups["need_backup"].append(c)
         elif name in xset["backups"]:
             c["reason"] = "backup invigilator"
             groups["backups"].append(c)
+        elif mark:
+            c["reason"] = mark
+            groups["period"].append(c)
         elif stopped:
             c["reason"] = "freed: %s on the exam then" % _classes(stopped)
             groups["freed"].append(c)
@@ -178,12 +190,17 @@ def _check_names(duties, every, views, xset, elsewhere, hand_only):
     that said in its reason). hand_only: only the names chosen by hand (assign); else every name, from scratch (recheck)."""
     for d in duties:
         if not hand_only:
-            d["not_free"], d["backup"] = {}, {}
+            d["not_free"], d["backup"], d["marks"] = {}, {}, {}
+        d.setdefault("marks", {})
         for n in d["names"]:
             hand = d["reasons"].get(n) == "chosen by hand"
+            why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d, elsewhere=elsewhere)
+            if not why:
+                mark = marked(n, views[d["key"]], d["start"], d["end"])
+                if mark:
+                    d["marks"][n] = mark
             if hand_only and not hand:
                 continue
-            why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d, elsewhere=elsewhere)
             if why:
                 d["not_free"][n] = why
             elif running:
@@ -231,7 +248,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=(), elsewhere
             room_set = xset["rooms"].get(room) or {}
             n_need = need(room_set, len(ids), [students[s].get("aa") for s in ids], rules)
             duty = dict(key=sit["key"], room=room, date=sit["date"], start=sit["start"] - rules["arrive"], end=end, need=n_need,
-                        names=[], chief=None, reasons={}, backup={}, not_free={}, short=0, locked=False)
+                        names=[], chief=None, reasons={}, backup={}, not_free={}, marks={}, short=0, locked=False)
             ids_of[id(duty)] = ids
             pk = "%s|%s" % (sit["key"], room)
             pin = pins.get(pk)
@@ -274,7 +291,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=(), elsewhere
             hall = (xset["rooms"].get(d["room"]) or {}).get("hall")
             got = candidates(pub, cal, sched, xset, d["date"], d["start"], d["end"], others, subjects_of[d["key"]],
                              exclude=d["names"], _other=other[year], elsewhere=elsewhere)
-            order = [(group, c) for group in ("freed", "free", "backups", "need_backup") for c in got[group]]
+            order = [(group, c) for group in ("freed", "free", "backups", "period", "need_backup") for c in got[group]]
             if hall and not any(n in xset["chiefs"] for n in d["names"]):   # a hall: a free chief invigilator first, if any
                 chief = next(((g, c) for g, c in order if c["name"] in xset["chiefs"] and g != "need_backup"), None)
                 if chief:

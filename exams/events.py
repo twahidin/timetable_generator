@@ -83,13 +83,16 @@ def going(pub, cal, s, elsewhere) -> list:
     out = []
     for name in s.get("going") or []:
         tags = (["teacher in charge"] if name == s.get("in_charge") else []) + ["%s form teacher" % c for c in parents.get(name, [])]
-        why, lessons, stops = [], [], []
+        why, lessons, stops, marks = [], [], [], []
         for e, view in views:
             suffix = " (%s)" % _days.nice(e["date"]) if many else ""
             reason, _ = _inv._free(name, view, e["start"], e["end"], [], FREE, elsewhere=elsewhere)
             if reason:
                 why.append(reason + suffix)
                 continue
+            mark = _inv.marked(name, view, e["start"], e["end"])
+            if mark and mark not in marks:
+                marks.append(mark)
             for l, sp in sorted(_spans(view, name, e["start"], e["end"]), key=lambda x: x[1][0]):
                 lessons.append("teaches %s %s %s–%s%s" % (", ".join(l["classes"]), l["subject"], _days.hhmm(sp[0]), _days.hhmm(sp[1]), suffix))
             for l in view["lessons"]:
@@ -101,6 +104,8 @@ def going(pub, cal, s, elsewhere) -> list:
             status, text = "not_free", why[0]
         elif lessons:
             status, text = "backup", "; ".join(lessons) + " → backup"
+        elif marks:
+            status, text = "period", "; ".join(marks)
         else:
             status, text = "free", "free then: lessons with %s stop" % ", ".join(stops) if stops else "free then"
         out.append(dict(name=name, tag=" · ".join(tags), status=status, text=text))
@@ -249,30 +254,35 @@ def send_errors(pub, cal, s, elsewhere, others) -> list:
 
 
 def who_free(pub, cal, s, elsewhere) -> dict:
-    """everyone relief knows who is not going and is free for the whole event: freed (a lesson of theirs stops then) or free"""
+    """everyone relief knows who is not going and is free for the whole event: freed (a lesson of theirs stops then) or free, or period (free, with a teacher-only period then: a mark)"""
     views = _views(pub, cal, s)
     goes = set(s.get("going") or [])
-    freed, free = [], []
+    freed, free, period = [], [], []
     for p in sorted(_people(pub), key=lambda p: p["name"]):
         name = p["name"]
         if name in goes:
             continue
-        stops, ok = [], True
+        stops, ok, marks = [], True, []
         for e, view in views:
             why, _ = _inv._free(name, view, e["start"], e["end"], [], FREE, elsewhere=elsewhere)
             if why or _spans(view, name, e["start"], e["end"]):
                 ok = False
                 break
+            mark = _inv.marked(name, view, e["start"], e["end"])
+            if mark and mark not in marks:
+                marks.append(mark)
             for l in view["lessons"]:
                 if name in l["teachers"] and any(sp[0] < e["end"] and sp[1] > e["start"] for sp in l["stopped"]):
                     stops += [c for c in l["classes"] if c not in stops]
         if not ok:
             continue
-        if stops:
+        if marks:
+            period.append(dict(name=name, reason="; ".join(marks)))
+        elif stops:
             freed.append(dict(name=name, reason="freed: lessons with %s stop" % ", ".join(stops)))
         else:
             free.append(dict(name=name, reason="free then"))
-    return dict(freed=freed, free=free)
+    return dict(freed=freed, free=free, period=period)
 
 
 def _what(pub, cal, s) -> dict:

@@ -768,4 +768,31 @@ t("Plan with AI on the list only when the list says plan, and on an exam's head 
   assert.strictEqual(planBits.planLine(true, { id: "ab12cd34", status: "withdrawn" }, false, "Ended"), "", "not on an exam that has ended");
   assert(planBits.planLine(true, { id: "ab12cd34", status: "draft" }, false, "Sent back").includes("Open in Plan with AI"), "sent back, by its label");
 });
+
+// teacher-only periods: a mark, never a refusal
+{
+  const esc = x => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const hhmm = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+  const S = { duty: { key: "k", room: "3-01" }, who: null, busy: false };
+  const rigs = new Function("esc", "hhmm", "S", `
+    const fmtDate = d => d, seatsOf = () => ({}), sitLabel = () => "a · b · c";
+    const dutyEq = (d, p) => p && d.key === p.key && d.room === p.room;
+    ${cut("dutyRow")}; ${cut("whoPanel")};
+    return { dutyRow, whoPanel };`)(esc, hhmm, S);
+  t("the candidates panel lists In a teacher-only period after Free then, with its people", () => {
+    const made = { duties: [{ key: "k", room: "3-01", date: "2026-10-05", start: 900, end: 960, names: [], reasons: {} }] };
+    S.who = { freed: [], free: [{ name: "Ms F", minutes: 0, reason: "free then" }], backups: [], need_backup: [],
+              period: [{ name: "Mr P", minutes: 0, reason: "has Zone class then" }] };
+    const html = rigs.whoPanel(made);
+    assert(html.includes("In a teacher-only period") && html.includes("Mr P") && html.includes("has Zone class then"));
+    assert(html.indexOf("Free then") < html.indexOf("In a teacher-only period") && html.indexOf("In a teacher-only period") < html.indexOf("Would need a backup"));
+  });
+  t("a duty row with marks shows flag soft with the mark and no Not free", () => {
+    const d = { key: "k", room: "3-01", date: "2026-10-05", start: 900, end: 960, names: ["Mr P"], reasons: {}, marks: { "Mr P": "has Zone class then" }, not_free: {}, backup: {} };
+    const html = rigs.dutyRow(d);
+    assert(html.includes('<span class="flag soft">Mr P: has Zone class then</span>') && !html.includes("Not free:"), html);
+    const bad = rigs.dutyRow(Object.assign({}, d, { marks: {}, not_free: { "Mr P": "is not available then (a Must rule)" } }));
+    assert(bad.includes("Not free: Mr P") && !bad.includes("flag soft"));
+  });
+}
 console.log(`${n} exams page tests passed`);

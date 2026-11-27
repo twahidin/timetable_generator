@@ -3567,7 +3567,7 @@ def _exam_away(pub, s, by, now, b):
     if ap is None: raise ValueError(exams_approval.NOT_ON_SITE)
     d, got = _exam_candidates(pub, ap, key, room, approved=True)
     if d is None: raise ValueError("That duty is not on the main site.")
-    if name not in {c["name"] for g in ("freed", "free", "backups") for c in got[g]}: raise ValueError("%s is not free then." % name)
+    if name not in {c["name"] for g in ("freed", "free", "backups", "period") for c in got[g]}: raise ValueError("%s is not free then." % name)
     exams_approval.replace(s, key, room, away, name, by, now)
 
 @app.post("/api/exams/<id>/away")
@@ -3760,7 +3760,7 @@ def _event_send(pub, s, by, now, b):
     exams_approval.send(s, pub["model"], by, now, False, exams_events.send_errors(pub, _exam_cal(pub), s, busy, others))
 
 def _event_free(pub, s):
-    """who may stand in for someone going with the approved event: the names relief finds free then (freed, then free)"""
+    """who may stand in for someone going with the approved event: the names relief finds free then (freed, then free, then those in a teacher-only period)"""
     ap = exams_approval.as_schedule(s)
     if ap is None: raise ValueError(exams_approval.NOT_ON_SITE)
     return exams_events.who_free(pub, _exam_cal(pub), ap, exams_schedules.elsewhere(s.get("id"), pub["model"], own=ap))
@@ -3768,7 +3768,7 @@ def _event_free(pub, s):
 def _event_away(pub, s, by, now, b):
     away, name = b["away"], b["name"]
     if not all(isinstance(x, str) for x in (away, name)): raise ValueError(exams_schedules.EVENT_WRONG)
-    if name not in {c["name"] for g in ("freed", "free") for c in _event_free(pub, s)[g]}: raise ValueError("%s is not free then." % name)
+    if name not in {c["name"] for g in ("freed", "free", "period") for c in _event_free(pub, s)[g]}: raise ValueError("%s is not free then." % name)
     exams_approval.replace_going(s, away, name, by, now)
 
 @app.get("/api/events/<id>/review")
