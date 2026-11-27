@@ -17,13 +17,14 @@ const dayOf = (date, rows, c) => ({ date, away: new Set(rows.map(r => r.absent))
 async function open(answer, span = "weeks") {
   const els = {}, on = {}, urls = [], shows = [], gos = [];
   const el = id => els[id] || (els[id] = { innerHTML: "", querySelector: () => null });
-  const pane = { innerHTML: "", querySelector: s => (s[0] === "#" ? el(s.slice(1)) : null), addEventListener: (k, f) => { on[k] = f; } };
-  const window = {}, ctx = vm.createContext({ window, document: { querySelector: () => null } });
+  const pane = { innerHTML: "", contains: x => !!x && x.inPane, querySelector: s => (s[0] === "#" ? el(s.slice(1)) : { focus: () => focusLog.push(s) }), addEventListener: (k, f) => { on[k] = f; } };
+  const doc = { querySelector: () => null, activeElement: null }, focusLog = [];
+  const window = {}, ctx = vm.createContext({ window, document: doc });
   vm.runInContext(read("relief-form.js"), ctx);
   const RF = window.ReliefForm;
   RF.setToday(TODAY);
   let tab = null;
-  const p = { answer, urls, shows, gos, html: () => el("ahBox").innerHTML };
+  const p = { answer, doc, focusLog, urls, shows, gos, html: () => el("ahBox").innerHTML };
   window.Relief = { cur: "ahead", tab: (name, mod) => { assert.strictEqual(name, "ahead"); tab = mod; }, plural: (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`, say: m => (m ? RF.esc(m.text) : ""), json: (method, body) => ({ method, body }),
     api: async url => { urls.push(url); const a = await (typeof p.answer === "function" ? p.answer(url) : p.answer); return a.ok === false ? a : { ok: true, data: a }; },
     go: n => gos.push(n), showDay: d => shows.push(d) };
@@ -113,22 +114,72 @@ t("an empty answer says so for each span", async () => {
   await p.press({ ah: "span", v: "term" });
   assert.ok(flat(p.html()).includes("No relief for the rest of the term.") && !flat(p.html()).includes("after today."), p.html());
 });
-t("while reading it says so", async () => {
-  let release; const p = await open(answer([]));
-  p.answer = () => new Promise(f => { release = f; });
+t("the first read says Loading… under the controls", async () => {
+  const p = await open(() => new Promise(() => {})), html = p.html();
+  assert.ok(html.includes("Loading…") && html.includes("Planned Relief Assignments") && html.includes('data-v="term"') && html.includes('data-ah="reload" disabled>Reading…'), html);
+});
+t("a later read keeps the old list and Refresh reads Reading… and is off", async () => {
+  const p = await open(answer([dayOf("2026-10-13", [row()])]));
+  let release; p.answer = () => new Promise(f => { release = f; });
   const again = p.press({ ah: "reload" });
-  await new Promise(f => setImmediate(f));
-  assert.ok(p.html().includes("Loading…") || flat(p.html()).includes("Reading…"), p.html());
-  release(answer([dayOf("2026-10-13", [row()])]));
-  await again;
+  const html = p.html();
+  assert.ok(html.includes("Tue 13 Oct") && !html.includes("Loading…") && html.includes('data-ah="reload" disabled>Reading…'), html);
+  release(answer([dayOf("2026-10-14", [row()])])); await again; await new Promise(f => setImmediate(f));
+  assert.ok(p.html().includes("Wed 14 Oct") && p.html().includes(">Refresh<") && !p.html().includes("disabled"), p.html());
 });
 t("a failed read shows the server's sentence and Try again", async () => {
   const p = await open({ ok: false, error: "Only the relief team can open this.", status: 403 });
   const html = p.html();
-  assert.ok(html.includes("Only the relief team can open this.") && html.includes("Try again") && html.includes('data-ah="reload"'), html);
+  assert.ok(html.includes("Only the relief team can open this.") && html.includes("Try again") && html.includes('data-ah="reload"') && html.includes('data-v="term"') && html.includes("<h2>Planned Relief Assignments</h2>"), html);
   p.answer = answer([dayOf("2026-10-13", [row()])]);
   await p.press({ ah: "reload" });
   assert.ok(!p.html().includes("Try again") && p.html().includes("Tue 13 Oct"), p.html());
+});
+t("a failed Refresh keeps the last list under the sentence", async () => {
+  const p = await open(answer([dayOf("2026-10-13", [row()])]));
+  p.answer = { ok: false, error: "Could not reach the server.", status: 0 };
+  await p.press({ ah: "reload" });
+  const html = p.html();
+  assert.ok(html.includes("Could not reach the server.") && html.includes("Try again") && html.includes("Tue 13 Oct"), html);
+  assert.ok(html.indexOf("Try again") < html.indexOf("Tue 13 Oct"));
+});
+t("when two reads are out, the last asked one's answer stays", async () => {
+  const p = await open(answer([]));
+  const waits = []; p.answer = () => new Promise(f => waits.push(f));
+  const one = p.press({ ah: "reload" }), two = p.press({ ah: "reload" });
+  waits[1](answer([dayOf("2026-10-14", [row()])])); await two;
+  waits[0](answer([dayOf("2026-10-13", [row()])])); await one; await new Promise(f => setImmediate(f));
+  assert.ok(p.html().includes("Wed 14 Oct") && !p.html().includes("Tue 13 Oct"), p.html());
+});
+t("an answer with no days, and a day with no rows, do not throw", async () => {
+  const p = await open({ as_of: "2026-10-12T09:00:00+08:00", span: "weeks" });
+  assert.ok(flat(p.html()).includes("No relief on the school days after today."), p.html());
+  const q = await open(answer([{ date: "2026-10-13", away: 0, counts: counts() }]));
+  assert.ok(q.html().includes("Tue 13 Oct") && flat(q.html()).includes("0 teachers away · 0 lessons"), q.html());
+});
+t("the lessons of a day are counts.need, not every row", async () => {
+  const d = dayOf("2026-10-13", [row(), row({ ckey: "z", state: "stopped", stopped: "x", pick: null, out: null })]); d.counts.need = 1;
+  assert.ok(flat((await open(answer([d]))).html()).includes("1 lesson") && !flat((await open(answer([d]))).html()).includes("2 lessons"));
+});
+t("the focus stays on Refresh and on the span button after their reads", async () => {
+  const p = await open(answer([dayOf("2026-10-13", [row()])]));
+  p.focusLog.length = 0;
+  await p.press({ ah: "reload" });
+  assert.deepStrictEqual(p.focusLog, ['[data-ah="reload"]']);
+  p.focusLog.length = 0;
+  await p.press({ ah: "span", v: "term" });
+  assert.deepStrictEqual(p.focusLog, ['[data-ah="span"][data-v="term"]']);
+  p.focusLog.length = 0; p.doc.activeElement = { inPane: true, dataset: { ah: "reload" } };   /* a read started by showing the tab */
+  await p.shown();
+  assert.deepStrictEqual(p.focusLog, ['[data-ah="reload"]']);
+  p.focusLog.length = 0; p.doc.activeElement = { inPane: false, dataset: { ah: "reload" } };
+  await p.shown();
+  assert.deepStrictEqual(p.focusLog, [], "focus elsewhere is left alone");
+});
+t("every day's table has the one fixed layout", async () => {
+  const html = (await open(answer([dayOf("2026-10-13", [row()]), dayOf("2026-10-14", [row()])]))).html();
+  assert.strictEqual(html.split('<table class="rtable ah">').length - 1, 2);
+  assert.ok(/table\.ah\{[^}]*table-layout:fixed[^}]*min-width:640px/.test(fs.readFileSync(path.join(__dirname, "..", "static", "relief.html"), "utf8")));
 });
 
 (async () => {

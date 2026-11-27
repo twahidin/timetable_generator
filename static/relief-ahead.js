@@ -7,7 +7,7 @@
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day;
   const $ = (s, el = document) => el.querySelector(s);
-  const A = { pane: null, data: null, err: null, span: "weeks", seq: 0, loading: false };
+  const A = { pane: null, data: null, err: null, span: "weeks", seq: 0, loading: false, keep: "" };
   const SPANS = [["weeks", "Next 2 weeks"], ["term", "This term"]];
   const EMPTY = { weeks: "No relief on the school days after today.", term: "No relief for the rest of the term." };
   const num = v => Number(v) || 0;
@@ -56,35 +56,40 @@
     const chips = [num(c.waiting) ? `<span class="chip st-amber">${esc(`${num(c.waiting)} waiting for you`)}</span>` : "", num(c.open) ? `<span class="chip st-amber">${esc(`${num(c.open)} no relief teacher yet`)}</span>` : "",
       num(c.unsent) ? `<span class="chip">${esc(`${num(c.unsent)} approved, not sent out`)}</span>` : "",
       num(c.need) > 0 && !num(c.waiting) && !num(c.open) && !num(c.unsent) && !num(c.change) ? `<span class="chip st-ok">all approved</span>` : ""].filter(Boolean).join(" ");
-    return `<div class="ah-day"><div class="ah-h"><b>${esc(day(d.date))}</b> <span class="small muted">${esc(`${R.plural(num(d.away), "teacher")} away · ${R.plural(rows.length, "lesson")}`)}</span> ${chips}</div>
+    return `<div class="ah-day"><div class="ah-h"><b>${esc(day(d.date))}</b> <span class="small muted">${esc(`${R.plural(num(d.away), "teacher")} away · ${R.plural(typeof c.need === "number" ? c.need : rows.length, "lesson")}`)}</span> ${chips}</div>
       <button type="button" class="small" data-ah="open" data-date="${esc(d.date)}">Open this day</button></div>
-      <div class="tablewrap"><table class="rtable"><thead><tr><th>Time</th><th>Lesson</th><th>For</th><th>Relief teacher</th><th>Status</th></tr></thead><tbody>${rows.map(row).join("")}</tbody></table></div>`;
+      <div class="tablewrap"><table class="rtable ah"><thead><tr><th>Time</th><th>Lesson</th><th>For</th><th>Relief teacher</th><th>Status</th></tr></thead><tbody>${rows.map(row).join("")}</tbody></table></div>`;
+  }
+
+  const sel = b => (b.dataset.ah === "span" ? `[data-ah="span"][data-v="${b.dataset.v}"]` : b.dataset.ah === "reload" ? `[data-ah="reload"]` : "");
+  function focused() {   /* the selector of the span button or Refresh that has the focus, if it is in this pane */
+    const a = typeof document !== "undefined" ? document.activeElement : null;
+    return a && a.dataset && A.pane && A.pane.contains && A.pane.contains(a) ? sel(a) : "";
   }
 
   function paint() {
     const box = $("#ahBox", A.pane);
     if (!box) return;
-    const D = A.data;
-    if (!D) {
-      box.innerHTML = A.err ? `<div class="card"><p>${R.say(A.err)}</p><p><button type="button" data-ah="reload">Try again</button></p></div>` : `<div class="card"><p class="muted">Loading…</p></div>`;
-      return;
-    }
+    const D = A.data, days = D && Array.isArray(D.days) ? D.days : [];
     const seg = SPANS.map(([k, label]) => `<button type="button" data-ah="span" data-v="${k}" class="${k === A.span ? "on" : ""}" aria-pressed="${k === A.span ? "true" : "false"}">${esc(label)}</button>`).join("");
-    const days = Array.isArray(D.days) ? D.days : [];
+    const body = (A.err ? `<p>${R.say(A.err)} <button type="button" data-ah="reload">Try again</button></p>` : "")
+      + (D ? (days.length ? days.map(block).join("") : A.err ? "" : `<p class="muted">${esc(EMPTY[A.span] || EMPTY.weeks)}</p>`) : A.err ? "" : `<p class="muted">Loading…</p>`);
     box.innerHTML = `<div class="card">
-      <div class="ab-top"><div><h2>Planned Relief Assignments</h2><div class="small muted">${esc(`Every relief on the school days after today${stamp(D.as_of) ? ` · as of ${stamp(D.as_of)}` : ""}`)}</div></div>
+      <div class="ab-top"><div><h2>Planned Relief Assignments</h2><div class="small muted">${esc(`Every relief on the school days after today${D && stamp(D.as_of) ? ` · as of ${stamp(D.as_of)}` : ""}`)}</div></div>
         <div class="row"><div class="seg" role="group" aria-label="How far ahead">${seg}</div><button type="button" class="small" data-ah="reload" ${A.loading ? "disabled" : ""}>${A.loading ? "Reading…" : "Refresh"}</button></div></div>
-      ${days.length ? days.map(block).join("") : `<p class="muted">${esc(EMPTY[A.span] || EMPTY.weeks)}</p>`}
+      ${body}
       </div>`;
+    if (A.keep && !A.loading) { const el = $(A.keep, A.pane); A.keep = ""; if (el && el.focus) el.focus(); }
   }
 
   async function load() {
     const seq = ++A.seq;
+    A.keep = A.keep || focused();   /* a repaint rewrites the box: the control in use is given the focus again once the read is in */
     A.loading = true; paint();
     const r = await R.api(`/api/relief/ahead?span=${A.span}`);
     if (seq !== A.seq) return;
     A.loading = false;
-    if (!r.ok) { A.data = null; A.err = { text: r.error, bad: true, status: r.status }; paint(); return; }
+    if (!r.ok) { A.err = { text: r.error, bad: true, status: r.status }; paint(); return; }   /* the last list stays under the sentence */
     A.err = null; A.data = r.data || {};
     paint();
   }
@@ -95,11 +100,11 @@
     const a = b.dataset.ah;
     if (a === "span") {
       if (!SPANS.some(s => s[0] === b.dataset.v) || b.dataset.v === A.span) return;
-      A.span = b.dataset.v; A.data = null; A.err = null;
-      load().then(() => { const again = $(`[data-ah="span"][data-v="${A.span}"]`, A.pane); if (again) again.focus(); });
+      A.span = b.dataset.v; A.data = null; A.err = null; A.keep = sel(b);   /* the other span's list is not kept: it would be under the wrong name */
+      load();
       return;
     }
-    if (a === "reload") { load(); return; }
+    if (a === "reload") { A.keep = sel(b) || `[data-ah="reload"]`; load(); return; }
     if (a === "open") R.showDay(b.dataset.date);
   }
 

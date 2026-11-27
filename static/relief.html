@@ -150,6 +150,9 @@ table.inbox{min-width:860px}
 /* Planned Relief Assignments */
 .ah-day{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
 .ah-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+table.ah{table-layout:fixed;width:100%;min-width:640px}   /* one set of columns for every day, so they line up; narrower than 640px the .tablewrap scrolls */
+table.ah th:nth-child(1){width:96px}table.ah th:nth-child(2){width:24%}table.ah th:nth-child(3){width:17%}table.ah th:nth-child(4){width:21%}
+table.ah td{overflow-wrap:anywhere}table.ah .chip{white-space:normal}
 /* Today (the relief team) */
 .td-acts{justify-content:flex-end}
 .td-acts.tg{margin-bottom:12px}   /* only while a bot is connected: Remind all's place is then kept under the buttons */
