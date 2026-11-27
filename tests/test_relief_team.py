@@ -2581,24 +2581,45 @@ def ahead_includes_the_last_day_and_not_the_day_after():
     with at("2026-10-15T09:00:00+08:00"):                                        # Thu 15 + 14 = Thu 29: Fri 30 is the day after
         j = ok(team.get("/api/relief/ahead")); assert (j["until"], j["days"]) == ("2026-10-29", []), j
 
-def _ahead_passes_over():
-    team = staff(TEAMER)
-    with at("2026-10-12T09:00:00+08:00"):
-        i = absent()["id"]; k = absent(teacher=MAYA, dates=["2026-10-16"])["id"]
-        n = len(ok(team.get("/api/relief/ahead"))["days"][0]["rows"])
-        r = AB.load(k); r["lessons"].append("changed by hand"); AB._save(r)
-        j = ok(team.get("/api/relief/ahead")); assert [d["date"] for d in j["days"]] == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n, "a lesson that is not a dict"
-        r = AB.load(k); r["lessons"].pop(); AB._save(r)
-        r = AB.load(i); c = CV.covers(r["lessons"][0])[0]; c.pop("p"); AB._save(r)
-        j = ok(team.get("/api/relief/ahead")); assert [d["date"] for d in j["days"]] == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n - 1, "a cover with no p"
-        assert ok(team.get("/api/relief/ahead?span=term"))["span"] == "term"
+class app_logged:
+    """the records the app's logger gets in a block"""
+    def __enter__(s):
+        s.got = []
+        class Keep(logging.Handler):
+            def emit(h, rec): s.got.append(rec)
+        s.keep, s.level = Keep(), A.app.logger.level
+        A.app.logger.addHandler(s.keep); A.app.logger.setLevel(logging.ERROR)
+        s.handlers = A.app.logger.handlers[:]; A.app.logger.handlers[:] = [s.keep]       # nothing reaches the screen
+        return s.got
+    def __exit__(s, *a): A.app.logger.handlers[:] = s.handlers; A.app.logger.setLevel(s.level)
 
 @rt
 def ahead_passes_over_a_record_it_cannot_read():
     fresh(); team = staff(TEAMER)
-    old_level = A.app.logger.level; A.app.logger.setLevel(logging.CRITICAL)            # the passed-over lines are expected here
-    try: _ahead_passes_over()
-    finally: A.app.logger.setLevel(old_level)
+    with at("2026-10-12T09:00:00+08:00"):
+        i = absent()["id"]; k = absent(teacher=MAYA, dates=["2026-10-16"])["id"]
+        n = len(ok(team.get("/api/relief/ahead"))["days"][0]["rows"])
+        dates = lambda j: [d["date"] for d in j["days"]]
+        with app_logged() as got:
+            r = AB.load(k); r["lessons"].append("changed by hand"); AB._save(r)
+            j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n, "a lesson that is not a dict"
+            assert len(got) == 1 and "AttributeError" in got[0].getMessage() and MAYA not in got[0].getMessage() and "changed by hand" not in got[0].getMessage(), [g.getMessage() for g in got]
+        r = AB.load(k); r["lessons"].pop(); AB._save(r)
+        with app_logged() as got:
+            r = AB.load(i); c = CV.covers(r["lessons"][0])[0]; c.pop("p"); AB._save(r)
+            j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n - 1, "a cover with no p"
+            assert len(got) == 1 and EVE not in got[0].getMessage(), [g.getMessage() for g in got]
+            r = AB.load(k)
+            for x in r["lessons"]: CV.covers(x)[0].pop("p")
+            AB._save(r)
+            got.clear(); j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13"], "a day whose only cover cannot be read is left out"
+            assert len(got) == 1, [g.getMessage() for g in got]
+            r = AB.load(k); r["lessons"] = 5; AB._save(r)
+            got.clear(); j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13"], "lessons that are not a list"
+        with open(os.path.join(ADIR, "bad.json"), "w") as f: f.write("[1, 2]")      # a record file that is not a dict
+        with app_logged():
+            assert dates(ok(team.get("/api/relief/ahead"))) == ["2026-10-13"]
+            assert ok(team.get("/api/relief/ahead?span=term"))["span"] == "term"
 
 @rt
 def ahead_gives_each_part_of_a_split_lesson_its_own_row():

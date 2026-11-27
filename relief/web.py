@@ -1009,14 +1009,17 @@ def ahead():
     links = _links_or_none(pub, cal if isinstance(cal, dict) else {})
     by_day, bad = {}, set()
     for r in records:
-        if r.get("cancelled"): continue
-        for x in r.get("lessons") or []:
-            try:
-                if not x.get("needed") or not isinstance(x.get("date"), str) or not first < x["date"] <= last: continue
-                for i, c in enumerate(_cover.covers(x)):
-                    try: by_day.setdefault(x["date"], []).append(_row(pub, settings, records, r, x, c, i, links, now, light=True))
-                    except Exception as e: bad.add(type(e).__name__)
-            except Exception as e: bad.add(type(e).__name__)             # a record changed by hand: passed over, never the page's failure
+        try:
+            if r.get("cancelled"): continue
+            for x in r.get("lessons") or []:
+                try:
+                    if not x.get("needed") or not isinstance(x.get("date"), str) or not first < x["date"] <= last: continue
+                    for i, c in enumerate(_cover.covers(x)):
+                        try: row = _row(pub, settings, records, r, x, c, i, links, now, light=True)
+                        except Exception as e: bad.add(type(e).__name__); continue
+                        by_day.setdefault(x["date"], []).append(row)         # a date is made only by a row
+                except Exception as e: bad.add(type(e).__name__)             # a record changed by hand: passed over, never the page's failure
+        except Exception as e: bad.add(type(e).__name__)
     if bad: current_app.logger.error("relief: a lesson to come could not be read and was passed over (%s)", ", ".join(sorted(bad)))
     days = []
     for date in sorted(by_day):
