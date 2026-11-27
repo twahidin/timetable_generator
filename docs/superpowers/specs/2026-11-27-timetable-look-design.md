@@ -120,12 +120,17 @@ Everything across the page is placed by the clock, in minutes, not by period num
   is no longer used for drawing.
 - **A narrow box.** When the start and end do not fit the box's width, the box shows the start time only. The full time
   is in the hover text and in the lesson dialog. (My call.)
+  On the web page this is judged by the box's real width on the screen or the printed sheet (not by the lesson's
+  length), so a wide window shows more full times and a narrow one never cuts a time off. The grid's least width is
+  1.8 px a minute, about what the old grid needed, so a usual day fits a laptop screen without moving sideways. The
+  day names stay in place when the grid is moved sideways.
 - **Height.** On screen a row with lessons side by side grows with the number of lessons side by side (today it grows
   to a fixed 1.7 times, whatever the number), so that every lesson shows its three lines. On the PDF a row of the
   smallest height the page allows must still hold the three lines of a lesson that has the row to itself; make the
   type a little smaller if that is what it takes. Where lessons are side by side on a PDF row and there is no room, the
-  detail line is dropped first; when only one line fits, the start time and the title share it, and the title is cut
-  with "…" if it must be. The time is never the part that goes.
+  time and the title share one bold line when the width allows, with the detail under it, so a teacher's printout
+  still says which class and room; otherwise the detail line is dropped. When only one line fits, the start time and
+  the title share it, and the title is cut with "…" if it must be. The time is never the part that goes.
 - The hover text and the lesson dialog keep the day and the time. The dialog loses "· after school".
 
 ### 3. Breaks
