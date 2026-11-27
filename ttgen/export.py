@@ -686,7 +686,7 @@ def _box_lines(cell, w, h):
     from reportlab.pdfbase.pdfmetrics import stringWidth
     R, B = _fonts(); full = f"{_clk(cell['a'])}–{_clk(cell['b'])}"; start = _clk(cell["a"]); room = h - 3
     detail = " · ".join(cell["lines"]); title = cell["title"]
-    def time_at(sz): return full if stringWidth(full, R, sz) <= w - 5.5 else start
+    def time_at(sz): return full if stringWidth(full, B, sz) <= w - 5.5 else start
     def shrink(with_detail):
         """the largest scale from 1.0 down to 0.9 at which the lines fit the box's height, else None"""
         f = 1.0
@@ -697,14 +697,17 @@ def _box_lines(cell, w, h):
     f = shrink(bool(detail))
     if f:
         t, ti, de = 6.2 * f, 7.4 * f, 6.3 * f
-        return [(time_at(t), R, t, SUB), (title, B, ti, INK)] + ([(detail, R, de, MUTED)] if detail else [])
+        return [(time_at(t), B, t, SUB), (title, B, ti, INK)] + ([(detail, R, de, MUTED)] if detail else [])
     f = shrink(False)   # the detail goes first: time and title as large as they fit
     if f:
         t, ti = 6.2 * f, 7.4 * f
-        return [(time_at(t), R, t, SUB), (title, B, ti, INK)]
-    ti = 7.4 * 0.9; one = f"{start} {title}"
-    if stringWidth(one, B, ti) <= w - 5.5: return [(one, B, ti, INK)]
-    return [(title, B, ti, INK)]
+        return [(time_at(t), B, t, SUB), (title, B, ti, INK)]
+    ti = 7.4 * 0.9; cut = title   # one line: the start time whole, then as much of the title as fits, cut with "…"
+    if stringWidth(f"{start} {cut}", B, ti) <= w - 5.5: return [(f"{start} {cut}", B, ti, INK)]
+    while cut and stringWidth(f"{start} {cut}…", B, ti) > w - 5.5: cut = cut[:-1]
+    if cut.strip(): return [(f"{start} {cut.rstrip()}…", B, ti, INK)]
+    while ti > 4.4 and stringWidth(start, B, ti) > w - 5.5: ti -= 0.25   # only the time: smaller if it must be, never cut
+    return [(start, B, ti, INK)]
 
 def _lanes(cells):
     """cells that overlap in time share the row height"""
@@ -852,8 +855,8 @@ def draw_page(c, m, v, page=None):
         c.setFillColor(_hex(acc)); c.rect(x0 + 0.35, y0 + 0.35, 1.8, h - 0.7, stroke=0, fill=1)
         lines = _box_lines(cell, w, h)
         tot = sum(s * 1.16 for _, _, s, _ in lines); ty = y0 + h / 2 + tot / 2
-        for txt, f, s, col in lines:
-            t2, s2 = _fit(str(txt), f, s, w - 5.5, 4.4)
+        for i, (txt, f, s, col) in enumerate(lines):
+            t2, s2 = (txt, s) if i == 0 else _fit(str(txt), f, s, w - 5.5, 4.4)   # the first line holds the time, already fitted by _box_lines: never cut here
             ty -= s * 1.16; c.setFillColor(_hex(col)); c.setFont(f, s2); c.drawString(x0 + 3.6, ty + s * 0.22, t2)
     # legend
     ly = leg_top

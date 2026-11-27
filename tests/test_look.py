@@ -3,6 +3,7 @@ import copy, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 from ttgen import reader, export  # noqa: E402
 from ttgen.samples import secondary  # noqa: E402
+from reportlab.pdfbase.pdfmetrics import stringWidth  # noqa: E402
 n = 0
 def t(f): global n; f(); n += 1
 
@@ -112,10 +113,19 @@ def a_box_tries_each_fallback_in_turn():
     m = school(); c = dict(export.class_view(m, CLASS)["cells"][0])
     two = export._box_lines(c, 84, 20)                                          # three lines do not fit, time and title do at full size
     assert [x[0] for x in two] == [f"{export._clk(c['a'])}–{export._clk(c['b'])}", c["title"]] and (two[0][2], two[1][2]) == (6.2, 7.4), two
-    one = export._box_lines(c, 84, 12)
-    assert one == [(f"{export._clk(c['a'])} {c['title']}",) + one[0][1:]], one       # one line: the start only, then the title
-    long_ = dict(c, title="A title far too long to share a line")
-    assert [x[0] for x in export._box_lines(long_, 40, 12)] == [long_["title"]]       # start and title do not fit the width: the title alone
+    one = export._box_lines(c, 84, 12); st = export._clk(c["a"])
+    assert one == [(f"{st} {c['title']}",) + one[0][1:]], one                         # one line: the start only, then the title
+    assert export._box_lines(dict(c, a=480, title="EL"), 84, 12)[0][0] == "8.00 EL"    # a wide box: both whole
+    hm = dict(c, a=850, title="Higher Mother Tongue")
+    cut = export._box_lines(hm, 40, 12)
+    assert len(cut) == 1 and cut[0][0].startswith("2.10 ") and cut[0][0].endswith("…") and len(cut[0][0]) > len("2.10 …"), cut   # the title is cut, never the time
+    _, f_, sz, _ = cut[0]
+    assert stringWidth(cut[0][0], f_, sz) <= 40 - 5.5
+    only = export._box_lines(hm, 22, 12)
+    assert [x[0] for x in only] == ["2.10"], only                                         # so narrow that only the time fits
+    for L in (export._box_lines(c, 84, 38), export._box_lines(c, 84, 20), one, cut, only):
+        assert L[0][1] == export._fonts()[1], L                                          # the time line is bold
+    assert len(export._box_lines(c, 84, 25)) == 3                                        # bold is wider, not taller
 t(a_box_tries_each_fallback_in_turn)
 
 def bands_read_any_codes_safely():
@@ -131,6 +141,15 @@ def bands_read_any_codes_safely():
     assert got == [(export._mins(m, 0), export._mins(m, 2), "Assembly"), (export._mins(m, 4), export._mins(m, 6), "Recess")], got
     assert export._bands(m, dict(codes=[fr], cells=[dict(cell, a=export._mins(m, 5))]), 0) == [(export._mins(m, 0), export._mins(m, 2), "Assembly")]
 t(bands_read_any_codes_safely)
+
+def no_period_header(m, v, w):
+    """the words drawn hold no period number and no period start time above the grid: every bare number is an hour label, and a period's time only appears as a lesson's start"""
+    hours = {lab for _, lab in export._hours(*export._span(m, v))} if export._span(m, v) else set()
+    starts = {export._clk(c["a"]) for c in v["cells"]}
+    assert "0" not in w, "period 0"
+    assert all(x in hours for x in w if x.isdigit()), [x for x in w if x.isdigit() and x not in hours]
+    assert not any(x == m["times"][p][0] and x not in starts for x in w for p in range(m["NP"])), "a period start time"
+    return True
 
 class Rec:
     """a canvas that records each call as (name, args)"""
@@ -148,7 +167,7 @@ def the_printout_draws_the_clock_scale():
         assert "after school" not in text and "periods" not in text and "students" not in text and "allowance" not in text, v["title"]
         assert not any(n_ == "setDash" and a and a[0] for n_, a in drawn(v)), "no dashed edge"
         assert "8 am" in w and "Striped bands are breaks." in w
-        assert not any(w[i:i + 4] == ["0", "1", "2", "3"] for i in range(len(w))), "no period numbers"
+        assert no_period_header(m, v, w), v["title"]
     w = words(drawn(export.class_view(m, CLASS)))
     assert w.count("8 am") == 2 and "ODD WEEK" in w and "EVEN WEEK" in w            # an hour row above each week
     assert sum(x == "Lunch" for x in w) == LUNCH_DAYS                                # only on days with a lesson after lunch
@@ -156,6 +175,20 @@ def the_printout_draws_the_clock_scale():
     empty = export.room_view(m, ROOM); empty = dict(empty, cells=[])
     w = words(drawn(empty)); assert "No lessons." in w and "8 am" not in w
 t(the_printout_draws_the_clock_scale)
+
+def a_lesson_on_the_hour_lines_up_with_the_hour():
+    m = copy.deepcopy(school()); m["school"]["start_time"] = "07:40"                    # no period of school() starts on the hour; here period 1 starts at 8.00
+    m["lessons"].append(dict(m["lessons"][0], id=99, d=2, p=1, n=3, ext=False))         # Odd Wed has no other lesson
+    v = export.class_view(m, CLASS); cell = next(x for x in v["cells"] if x["d"] == 2)
+    assert cell["a"] == 480
+    c = Rec(); export.draw_page(c, m, v); lw = None; strong = []; boxes = []
+    for k, (n_, a) in enumerate(c.calls):
+        if n_ == "setLineWidth": lw = a[0]
+        if n_ == "line" and a[0] == a[2] and lw == 0.7: strong.append(a[0])
+        if n_ == "roundRect" and any(n2 == "drawString" and str(a2[-1]).startswith("8.00–") for n2, a2 in c.calls[k:k + 12]): boxes.append(a[0])
+    assert boxes and strong, (boxes, strong)                                             # every lesson at period 1 now starts at 8.00
+    assert all(any(abs(b - (x + 1)) < 1e-6 for x in strong) for b in boxes), (boxes, sorted(set(strong)))   # draw_page insets a box 1 point from its start
+t(a_lesson_on_the_hour_lines_up_with_the_hour)
 
 def every_printout_is_a_pdf():
     m = school()
