@@ -541,7 +541,7 @@ def _may_choose(r, x, by):
 
 
 def may_choose_again(r, x, me, pub) -> bool:
-    """me may choose (or choose again) the relief teacher of lesson x of record r on the Plan page: one lesson, not split,
+    """me may choose (or choose again) the relief teacher of lesson x of record r on the Relief Planning tab: one lesson, not split,
     needed, not started, and nobody approved for it yet or it is still me's own choice (choose)"""
     try:
         if r.get("cancelled") or x.get("parts") or not x.get("needed") or not _may_choose(r, x, me): return False

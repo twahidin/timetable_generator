@@ -2124,5 +2124,38 @@ def a_new_teacher_in_charge_takes_the_events_backups():
         assert [r["by"] for r in _backups(id)] == [DANIEL], "sent again by the new one"
 
 
+@t
+def stopped_lesson_is_not_unacknowledged_and_is_not_happening_ahead():
+    """a lesson an approved exam stops: never in unacked, even when its relief was approved, sent out and not acknowledged; a row of
+    the Planned Relief Assignments list with state "stopped" and its reason, out of that day's need and of away when it is the only row"""
+    _fresh(); _exam()
+    with published(PUB):
+        mine = LS.on_date(PUB, CAL, AISHA, MON)
+        stopped = [x for x in mine if "3A" in x["classes"]]
+        assert stopped
+        r = AB.new(_ask(AISHA, [dict(key=x["key"], needed=True) for x in stopped]), PUB, GRACE, "planned", may_choose=True, links=_links())
+        for x in r["lessons"]:
+            x["relief"], x["approved"] = BEN, dict(by=GRACE, at="2026-11-01T08:00:00+08:00")      # approved and (an old approval counts as) sent out, long ago
+        _put(r)
+        c, old = staff(GRACE), LS.today
+        def unacked():
+            LS.today = lambda: MON                                    # unacked reads the school's today: the exam day is today
+            try: j = ok(c.get("/api/relief/absences"))
+            finally: LS.today = old
+            return [u for a in j["absences"] if a["id"] == r["id"] for u in a["unacked"]]
+        def ahead():
+            j = ok(c.get("/api/relief/ahead?span=term"))
+            return next((d for d in j["days"] if d["date"] == ISO), None)
+        d = ahead()
+        assert d and [(v["state"], bool(v["stopped"])) for v in d["rows"]] == [("stopped", True)] * len(stopped), d
+        assert all(v["stopped"] == "3A is on " + EXAM for v in d["rows"]) and d["counts"]["need"] == 0 and d["away"] == 0, d
+        assert unacked() == [], "a lesson that does not happen is not waiting to be acknowledged"
+        _clear()                                                      # the exam withdrawn: the same record is now an ordinary one
+        assert len(unacked()) == len(stopped) and unacked()[0]["who"] == BEN
+        d = ahead()
+        assert [v["state"] for v in d["rows"]] == ["approved"] * len(stopped) and d["counts"]["need"] == len(stopped) and d["away"] == 1, d
+        AB.cancel(r["id"], "test", GRACE, team=True); _drop(r)
+
+
 _clear()
 print(f"{COUNT} exams and relief tests passed")

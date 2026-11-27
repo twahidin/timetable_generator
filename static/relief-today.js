@@ -436,17 +436,17 @@
     await load();
   }
 
-  function setDate(v) {
+  function setDate(v, quiet) {   /* quiet: the caller reads the day itself (showDay, through the tab's shown) */
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) || v === T.date) return;
     T.date = v; T.data = null; T.err = null; T.top = []; T.msg.clear(); T.open = null; T.free.clear(); T.split = null; T.follow.clear();
-    paintDay(); paint(); load();
+    paintDay(); paint(); if (!quiet) load();
   }
 
   /* Relief.showDay(iso): Today on that date, whether or not the tab was opened before (before its first init the date waits, and
      init opens on it); a text that is not a date only opens the tab. */
   function showDay(iso) {
     const ok = /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""));
-    if (ok && T.pane) setDate(iso); else if (ok) T.want = iso;
+    if (ok && T.pane) setDate(iso, true); else if (ok) T.want = iso;   /* go() then shows the tab, which reads the day once */
     R.go("today");
   }
   R.showDay = showDay;

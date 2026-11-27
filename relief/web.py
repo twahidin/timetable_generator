@@ -220,7 +220,7 @@ def _out(r, pub, me, cal=None, links=None):
     relief.team) sees a relief teacher's name only once that teacher has acknowledged it (relief and relief_by None before), and no pick,
     request to change or history, on the lesson and on each part (Decision 4). Everyone else sees the relief as it is, and
     planned: the planner's own choice, waiting for the relief team or still their own approved choice (_planned, None
-    otherwise), and may_choose: whether me may choose again for the lesson on the Plan page (absences.may_choose_again)."""
+    otherwise), and may_choose: whether me may choose again for the lesson on the Relief Planning tab (absences.may_choose_again)."""
     cal = cal if cal is not None else _cal(pub)
     v = _absences.matches_now(r, pub, cal)
     v.pop("gone", None)
@@ -991,7 +991,7 @@ def today():
 def ahead():
     """the covers of every school day after today up to until (?span=weeks: today + 14 days, the default; ?span=term: the end of the
     term today is in, else of the first term that starts later, else as weeks) -> dict(as_of, span, until, days=[dict(date,
-    away: how many teachers are absent that day, counts: as Today's, rows: one a cover of an absence not cancelled, _row light, in
+    away: how many different teachers are absent that day, not counting a row an exam or event stops, counts: as Today's, rows: one a cover of an absence not cancelled, _row light, in
     (p, absent, ckey) order)]); a date with no row is left out. Who is free is not worked out, and told and linked are left empty; relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
@@ -1024,7 +1024,7 @@ def ahead():
     days = []
     for date in sorted(by_day):
         rows = sorted(by_day[date], key=lambda v: (v["p"], v["absent"], v["ckey"]))
-        days.append(dict(date=date, away=len({v["absent"] for v in rows}), counts=_counts(rows), rows=rows))
+        days.append(dict(date=date, away=len({v["absent"] for v in rows if v["state"] not in ("stopped", "cancelled")}), counts=_counts(rows), rows=rows))
     return jsonify(as_of=_fill._when(now).isoformat(), span=span, until=last, days=days)
 
 

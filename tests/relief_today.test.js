@@ -597,5 +597,14 @@ t("showDay on an open tab changes its date", async () => {
   assert.strictEqual(p.calls.filter(c => c.url.startsWith(`${URL}?`)).pop().url, `${URL}?date=2026-10-16`);
   assert.strictEqual(p.text("#tdTitle"), "Relief on Fri 16 Oct"); assert.strictEqual(p.window.Relief.cur, "today");
 });
+t("showDay on an open tab reads the asked day once, and again once for the day already shown", async () => {
+  const p = await today(day([row()])), asked = d => p.calls.filter(c => c.method === "GET" && c.url === `${URL}?date=${d}`).length;
+  p.window.Relief.showDay("2026-10-16"); await p.settle();
+  assert.strictEqual(asked("2026-10-16"), 1, "one request for the asked date"); assert.strictEqual(p.reads(), 2);
+  assert.strictEqual(p.text("#tdTitle"), "Relief on Fri 16 Oct"); assert.strictEqual(p.find("#tdSeg button", "Today").getAttribute("aria-pressed"), "false");
+  assert.strictEqual(p.find("#tdDate") ? p.find("#tdDate").value : "2026-10-16", "2026-10-16");
+  p.window.Relief.showDay("2026-10-16"); await p.settle();
+  assert.strictEqual(asked("2026-10-16"), 2, "the same day again reads once more");
+});
 
 run(all);

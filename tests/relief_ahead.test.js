@@ -18,7 +18,7 @@ async function open(answer, span = "weeks") {
   const els = {}, on = {}, urls = [], shows = [], gos = [];
   const el = id => els[id] || (els[id] = { innerHTML: "", querySelector: () => null });
   const pane = { innerHTML: "", contains: x => !!x && x.inPane, querySelector: s => (s[0] === "#" ? el(s.slice(1)) : { focus: () => focusLog.push(s) }), addEventListener: (k, f) => { on[k] = f; } };
-  const doc = { querySelector: () => null, activeElement: null }, focusLog = [];
+  const focusLog = [], doc = { querySelector: q => (q === "#tab-today" ? { focus: () => focusLog.push("#tab-today") } : null), activeElement: null };
   const window = {}, ctx = vm.createContext({ window, document: doc });
   vm.runInContext(read("relief-form.js"), ctx);
   const RF = window.ReliefForm;
@@ -48,7 +48,7 @@ t("a day's heading counts teachers, lessons and what waits", async () => {
   assert.ok(html.includes("Tue 13 Oct") && text.includes("1 teacher away · 2 lessons") && text.includes("1 waiting for you") && text.includes("1 no relief teacher yet"), text);
   assert.ok(text.includes("Wed 14 Oct") && text.includes("1 teacher away · 1 lesson") && text.includes("all approved"), text);
   assert.strictEqual(text.split("all approved").length, 2, "only the day with nothing left says all approved");
-  assert.ok(text.includes("Planned Relief Assignments") && text.includes("Every relief on the school days after today · as of Mon 12 Oct, 09:00"), text);
+  assert.ok(text.includes("Planned Relief Assignments") && text.includes("Every relief on the school days after today, up to Mon 26 Oct · as of Mon 12 Oct, 09:00"), text);
   assert.ok(html.includes('data-ah="open" data-date="2026-10-13"') && html.includes('data-ah="open" data-date="2026-10-14"'));
 });
 t("the chip for approved and not yet sent out, and no all approved while any is unsent", async () => {
@@ -69,9 +69,11 @@ t("each status reads as Today says it", async () => {
     row({ ckey: "j", state: "cancelled", pick: null, approved: null, out: null }),
   ])];
   const text = flat((await open(answer(days))).html());
-  for (const s of ["No relief teacher yet", "Waiting for you", "Approved · not sent out", "Approved · will be sent Wed 14 Oct, 06:45", "Approved · sent out", "✓ Acknowledged", "Asked to change", "Not happening", "stopped"])
+  for (const s of ["No relief teacher yet", "Waiting for you", "Approved · not sent out", "Approved · will be sent Wed 14 Oct, 06:45", "Approved · sent out", "✓ Acknowledged", "Asked to change", "Not happening", "1A are on an exam"])
     assert.ok(text.includes(s), s + " | " + text);
-  assert.strictEqual(text.split("Approved · sent out").length - 1, 2, "a held one with no goes_at reads as sent out");
+  assert.ok(!text.includes("stopped"), "the reason is shown, never the bare word | " + text);
+  assert.strictEqual(text.split("Approved · sent out").length - 1, 1, "only a sent one reads as sent out");
+  assert.strictEqual(text.split("Approved · not sent out").length - 1, 2, "a held one with no goes_at reads as Today reads it");
 });
 t("the time, lesson, room and the relief teacher's planner are written", async () => {
   const text = flat((await open(answer([dayOf("2026-10-13", [row({ planned_by: TEAM })])]))).html());
@@ -95,6 +97,37 @@ t("Open this day hands the date to Today", async () => {
   const p = await open(answer([dayOf("2026-10-13", [row()])]));
   await p.press({ ah: "open", date: "2026-10-13" });
   assert.deepStrictEqual(p.shows, ["2026-10-13"]);
+});
+t("a stopped lesson with no reason has no small line", async () => {
+  const text = flat((await open(answer([dayOf("2026-10-13", [row({ state: "stopped", pick: null, approved: null, out: null, stopped: "" })])]))).html());
+  assert.ok(text.includes("Not happening") && !text.includes("stopped"), text);
+});
+t("a backup for an exam duty or event says which duty, as Today does", async () => {
+  const html = (await open(answer([dayOf("2026-10-13", [row({ duty: "Invigilating: Sec 3 End-of-Year Exam", state: "waiting", approved: null, out: null }), row({ ckey: "z", duty: "" })])]))).html();
+  assert.ok(flat(html).includes("(Invigilating: Sec 3 End-of-Year Exam)"), html);
+  assert.strictEqual(html.split("Invigilating").length - 1, 1, "a row with no duty has no line");
+  const bad = (await open(answer([dayOf("2026-10-13", [row({ duty: "<b>x</b>" })])]))).html();
+  assert.ok(!bad.includes("<b>x") && bad.includes("&lt;b&gt;x"), bad);
+});
+t("a day with requests to change has a chip for them", async () => {
+  const c = { why: "A talk", at: "2026-10-12T08:00:00+08:00", pick: null, stale: false };
+  const text = flat((await open(answer([dayOf("2026-10-13", [row({ state: "change", change: c }), row({ ckey: "q", state: "change", change: c })], { change: 2 }), dayOf("2026-10-14", [row()], { approved: 1 })]))).html());
+  assert.ok(text.includes("2 asked to change") && text.split("asked to change").length === 2 && !text.includes("all approved asked"), text);
+});
+t("the line under the heading says how far the list reaches", async () => {
+  const text = flat((await open(answer([dayOf("2026-10-13", [row()])], { until: "2026-10-26" }))).html());
+  assert.ok(text.includes("Every relief on the school days after today, up to Mon 26 Oct · as of Mon 12 Oct, 09:00"), text);
+  for (const until of [undefined, null, "", "soon", "26/10/2026"]) {
+    const t2 = flat((await open(answer([dayOf("2026-10-13", [row()])], { until }))).html());
+    assert.ok(t2.includes("Every relief on the school days after today · as of Mon 12 Oct, 09:00") && !t2.includes("up to"), String(until) + " | " + t2);
+  }
+});
+t("Open this day names its date, and the focus goes to the Today tab", async () => {
+  const p = await open(answer([dayOf("2026-10-13", [row()])])), html = p.html();
+  assert.ok(html.includes('aria-label="Open Tue 13 Oct on Today&#39;s Relief Assignments"'), html);
+  p.focusLog.length = 0;
+  await p.press({ ah: "open", date: "2026-10-13" });
+  assert.deepStrictEqual(p.shows, ["2026-10-13"]); assert.deepStrictEqual(p.focusLog, ["#tab-today"]);   /* the stand-in's document gives #tab-today a focus() that is logged */
 });
 t("Refresh and showing the tab read again", async () => {
   const p = await open(answer([dayOf("2026-10-13", [row()])]));
