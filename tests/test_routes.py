@@ -329,7 +329,7 @@ GUARDS = {
     "relief_web.work": ('relief',),
     # relief stage 3: the relief team's (relief.team inside, in RELIEF_INSIDE) and the relief teacher's (relief plus "this
     # cover is yours", asked inside)
-    "relief_web.today": ('relief',),
+    "relief_web.today": ('relief',), "relief_web.ahead": ('relief',),
     "relief_web.approve": ('relief',),
     "relief_web.approve_all": ('relief',),
     "relief_web.send_out": ('relief',),
@@ -634,7 +634,7 @@ RELIEF_INSIDE = {("GET", "/api/relief/free"): ("relief.plan", CHOOSE_ONLY), ("GE
 # relief stage 3: the relief team's routes (Today, approving, changing, splitting, Fill now, the load tracker)
 _X, _K = "abcdef123456", urllib.parse.quote("2026-10-13/Even Tue/5/2/1A/Science/", safe="")
 RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
-    ("GET", "/api/relief/today"), ("POST", f"/api/relief/absences/{_X}/covers/{_K}/approve"), ("POST", "/api/relief/today/approve-all"),
+    ("GET", "/api/relief/today"), ("GET", "/api/relief/ahead"), ("POST", f"/api/relief/absences/{_X}/covers/{_K}/approve"), ("POST", "/api/relief/today/approve-all"),
     ("PUT", f"/api/relief/absences/{_X}/covers/{_K}/relief"), ("GET", f"/api/relief/absences/{_X}/covers/{_K}/free"),
     ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
     ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),

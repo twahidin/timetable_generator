@@ -2505,6 +2505,48 @@ def after_the_cut_off_the_next_day_says_how_many_of_today_are_still_to_arrange()
         with at("2026-10-13T13:50:00+08:00"): assert left("?date=2026-10-14") == 0, "before the cut-off"
     finally: store.published = old
 
+from relief import calendar as RC  # noqa: E402
+
+@rt
+def ahead_lists_the_days_after_today():
+    fresh(); team = staff(TEAMER)
+    get = lambda q="": ok(team.get("/api/relief/ahead" + q))
+    with at("2026-10-12T09:00:00+08:00"):                                        # Mon 12 Oct
+        i = absent()["id"]                                                     # Tue 13
+        k = absent(teacher=MAYA, dates=["2026-10-16"])["id"]                   # Fri 16
+        j = get()
+        assert (j["span"], j["until"]) == ("weeks", "2026-10-26") and [d["date"] for d in j["days"]] == ["2026-10-13", "2026-10-16"], j
+        tue = j["days"][0]
+        assert tue["away"] == 1 and all(r["id"] == i for r in tue["rows"]) and tue["counts"]["need"] == len(tue["rows"]), tue
+        assert [r["p"] for r in tue["rows"]] == sorted(r["p"] for r in tue["rows"])
+        assert all(r["warn"] is None and r["nobody"] is False and r["stale"] is False for d in j["days"] for r in d["rows"]), "who is free is not worked out"
+        today_rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert [(r["ckey"], r["state"], r["pick"], r["out"]) for r in tue["rows"]] == [(r["ckey"], r["state"], r["pick"], r["out"]) for r in today_rows], "as Today words them"
+        CV.split(i, K2, 3, TEAMER)
+        assert len(get()["days"][0]["rows"]) == len(tue["rows"]) + 1, "a split lesson: a row a part"
+        AB.cancel(k, "Better", MAYA); assert [d["date"] for d in get()["days"]] == ["2026-10-13"], "a cancelled absence is left out"
+        assert get("?span=nonsense")["span"] == "weeks"
+    with at("2026-10-13T09:00:00+08:00"): assert get()["days"] == [], "the absence of today (Tue 13) is never in the list"
+
+@rt
+def ahead_this_term_reaches_the_end_of_the_term_and_over_a_holiday_the_next():
+    fresh(); team = staff(TEAMER)
+    term = RC.term_of(ST["calendar"], D13)
+    with at("2026-10-12T09:00:00+08:00"):
+        j = ok(team.get("/api/relief/ahead?span=term")); assert (j["span"], j["until"]) == ("term", str(term["end"])[:10]), j
+    after = (datetime.date.fromisoformat(str(term["end"])[:10]) + datetime.timedelta(days=1)).isoformat()
+    with at(after + "T09:00:00+08:00"):
+        j = ok(team.get("/api/relief/ahead?span=term"))
+        assert j["until"] == (datetime.date.fromisoformat(after) + datetime.timedelta(days=14)).isoformat(), "no later term: as weeks"
+    nxt = dict(name="Term 1", start="2027-01-04", end="2027-03-12", starts_as="Odd")
+    with saved_settings(calendar=dict(CAL, terms=CAL["terms"] + [nxt])), at(after + "T09:00:00+08:00"):
+        assert ok(team.get("/api/relief/ahead?span=term"))["until"] == "2027-03-12", "between terms: the end of the next term"
+
+@rt
+def ahead_is_the_relief_teams():
+    fresh()
+    for name in (SAM, GRACE): no(staff(name).get("/api/relief/ahead"), 403, TEAM_ONLY)
+
 assert REAL == [], "a test reached the real call"
 
 print(f"{COUNT} relief team tests passed")

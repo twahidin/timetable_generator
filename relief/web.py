@@ -819,7 +819,7 @@ def _released(settings, pub, x, c, s, now):
     return ("sent" if goes is not None and _fill._when(now) >= goes else "held"), goes.isoformat() if goes else None, dict(by=so.get("by"), at=so.get("at"))
 
 
-def _row(pub, settings, records, r, x, c, i, links=None, now=None):
+def _row(pub, settings, records, r, x, c, i, links=None, now=None, light=False):
     """one cover as Today lists it. state "stopped" (stopped: why) for a lesson an approved exam or event stops: nothing is
     to be done for it, and its pick or relief (pick) is shown as it was; duty: why its teacher is not there when they are in
     school, on an exam duty or at an event (a backup's reason), else "". stale: its relief teacher (waiting or approved) is no longer free then; over_now: the
@@ -827,7 +827,8 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
     these, and OVER_ONLY for an open cover whose free people are all over a limit (the app picks none of them); change: a
     request to change, with its new pick (stale too when that person is no longer free); away: the relief teacher it was approved
     to, who is away then, while it is open or waiting again since (cover.was_away), else None; out, goes_at and sent_out (_released, at
-    now: absences._now() when None). One free_then for the cover gives them all; never the absence's reason. told and linked:
+    now: absences._now() when None). light: the row as it stands before who is free is worked out (stale, over_now, nobody False,
+    warn None: a term's list stays quick). One free_then for the cover gives them all; never the absence's reason. told and linked:
     today() puts them there"""
     s = _cover.state(r, x, c)
     ckey, p, n = _cover.cover_key(x, i), int(c["p"]), int(c.get("n") or 1)
@@ -851,6 +852,7 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
     if s == "cancelled": return row
     why = _cover.stopped(links, x)
     if why: return dict(row, state="stopped", stopped=why, out=None, goes_at=None, sent_out=None)
+    if light: return row
     try: got = _free.free_then(pub, settings, records, dict(x, key=ckey, p=p, n=n), r["teacher"], links=links)
     except ValueError: return row                # no longer a school day in the calendar: nothing to say
     free = {q["name"]: q for g in got["groups"] for q in g["people"]}
@@ -935,6 +937,17 @@ def _today_left(pub, records, links, hrs, date, now):
     return n
 
 
+def _counts(rows):
+    """dict(need, waiting, approved, unsent, held, acknowledged, change, nobody, open) of Today's rows: a cancelled or stopped row is
+    not counted; an approved relief counts as unsent, held or approved by its out"""
+    counts = dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0)
+    for v in rows:
+        if v["state"] in ("cancelled", "stopped"): continue
+        counts["need"] += 1; counts["nobody"] += v["nobody"]
+        counts[dict(unsent="unsent", held="held").get(v["out"], "approved") if v["state"] == "approved" else v["state"]] += 1
+    return counts
+
+
 @bp.get("/api/relief/today")
 @need("relief")
 def today():
@@ -966,13 +979,43 @@ def today():
                 who = c.get("relief")
                 rows.append(dict(row, told=_told(said, r, c, row), linked=isinstance(who, str) and who in reach, asked_after=_asked_after(r, date, hrs, cut)))
     rows.sort(key=lambda v: (v["p"], v["absent"], v["ckey"]))
-    counts = dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0)
-    for v in rows:
-        if v["state"] in ("cancelled", "stopped"): continue
-        counts["need"] += 1; counts["nobody"] += v["nobody"]
-        counts[dict(unsent="unsent", held="held").get(v["out"], "approved") if v["state"] == "approved" else v["state"]] += 1
+    counts = _counts(rows)
     hrs = dict(hrs, today_left=_today_left(pub, records, links, hrs, date, now))
     return jsonify(date=date, filling=filling, counts=counts, rows=rows, telegram=_connected(), hours=hrs)
+
+
+@bp.get("/api/relief/ahead")
+@need("relief")
+def ahead():
+    """the covers of every school day after today up to until (?span=weeks: today + 14 days, the default; ?span=term: the end of the
+    term today is in, else of the first term that starts later, else as weeks) -> dict(as_of, span, until, days=[dict(date,
+    away: how many teachers are absent that day, counts: as Today's, rows: one a cover of an absence not cancelled, _row light, in
+    (p, absent, ckey) order)]); a date with no row is left out. Who is free is not worked out, and told and linked are left empty; relief.team"""
+    pub, me, err = _gate(*TEAM)
+    if err: return err
+    settings, now = _settings.load(pub), _absences._now()
+    today_ = _lessons.today()
+    span = "term" if request.args.get("span") == "term" else "weeks"
+    until, cal = today_ + datetime.timedelta(days=14), settings["calendar"]
+    if span == "term":
+        try:
+            term = term_of(cal, today_) or min((t for t in cal.get("terms", []) if datetime.date.fromisoformat(str(t["start"])[:10]) > today_), key=lambda t: str(t["start"])[:10], default=None)
+            if term: until = datetime.date.fromisoformat(str(term["end"])[:10])
+        except (TypeError, ValueError, KeyError) as e: current_app.logger.error("relief: the end of the term could not be read (%s)", type(e).__name__)
+    first, last = today_.isoformat(), until.isoformat()
+    records = _absences.all_records()
+    links = _links_or_none(pub, cal)
+    by_day = {}
+    for r in records:
+        if r.get("cancelled"): continue
+        for x in r.get("lessons") or []:
+            if not x.get("needed") or not isinstance(x.get("date"), str) or not first < x["date"] <= last: continue
+            for i, c in enumerate(_cover.covers(x)): by_day.setdefault(x["date"], []).append(_row(pub, settings, records, r, x, c, i, links, now, light=True))
+    days = []
+    for date in sorted(by_day):
+        rows = sorted(by_day[date], key=lambda v: (v["p"], v["absent"], v["ckey"]))
+        days.append(dict(date=date, away=len({v["absent"] for v in rows}), counts=_counts(rows), rows=rows))
+    return jsonify(as_of=_fill._when(now).isoformat(), span=span, until=last, days=days)
 
 
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/approve")
