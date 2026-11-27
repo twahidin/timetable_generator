@@ -552,14 +552,15 @@ def whats_in():
     since, as_of = _seen_at(me), _clock().isoformat()
     settings = _settings.load(pub)
     now, today = _fill._when(None), _lessons.today()
-    out, links = [], _links_or_none(pub, settings["calendar"])
+    out, links, bad = [], _links_or_none(pub, settings["calendar"]), set()
     for r in _absences.all_records():
         v = _out(r, pub, me, settings["calendar"])                      # _links keeps one Links for the request
         at, changed = _time(v.get("at")), _time(v.get("changed_at"))
         v["new"] = since is None or at is None or at >= since or (changed is not None and changed >= since)
         v["cover"], v["nudge"] = _cover_counts(r, links), _nudge(r, pub, settings, now, today)
-        v["unacked"] = _unacked(r, pub, settings, links, now, today)
+        v["unacked"] = _unacked(r, pub, settings, links, now, today, bad)
         out.append(v)
+    if bad: current_app.logger.error("relief: today's reliefs not yet acknowledged could not all be worked out (%s)", ", ".join(sorted(bad)))
     return jsonify(absences=out, new_since=since.isoformat() if since else None, as_of=as_of)
 
 
@@ -575,21 +576,22 @@ def _cover_counts(r, links=None):
     return n
 
 
-def _unacked(r, pub, settings, links, now, today):
+def _unacked(r, pub, settings, links, now, today, bad):
     """the covers of r dated today (the school's date), needed, not stopped, approved and not acknowledged nor asked to change,
-    that have reached their teacher, as dict(who, p, n, started: its lesson has begun), in period order; [] when the record or
-    a cover cannot be read (logged by its kind)"""
-    try:
-        out, day = [], today.isoformat()
-        for x in r.get("lessons") or []:
+    that have reached their teacher, as dict(who, p, n, started: its lesson has begun), in period order. A lesson or cover that
+    cannot be read is passed over on its own (the readable ones stay) and its error's kind is added to the set bad"""
+    out, day = [], today.isoformat()
+    for x in r.get("lessons") or []:
+        try:
             if x.get("date") != day or _cover.stopped(links, x): continue
-            for c in _cover.covers(x):
+            parts = _cover.covers(x)
+        except Exception as e: bad.add(type(e).__name__); continue
+        for c in parts:
+            try:
                 if _cover.state(r, x, c) != "approved" or not _cover.reached(r, x, c, now, settings, pub): continue
                 out.append(dict(who=c["relief"], p=int(c["p"]), n=int(c.get("n") or 1), started=_hours.starts(pub, x, c) <= now))
-        return sorted(out, key=lambda u: (u["p"], u["n"]))
-    except Exception as e:
-        current_app.logger.error("relief: today's reliefs not yet acknowledged could not be worked out (%s)", type(e).__name__)
-        return []
+            except Exception as e: bad.add(type(e).__name__)
+    return sorted(out, key=lambda u: (u["p"], u["n"]))
 
 
 @bp.post("/api/relief/absences/seen")

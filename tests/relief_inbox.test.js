@@ -57,11 +57,11 @@ t("Not acknowledged is the view's name, and it takes a head's planning or a reli
 });
 t("a row says which relief teacher has not acknowledged, and when the lesson has started", async () => {
   const html = await shown([record({ unacked: [{ who: "Mr Sam Tan", p: 6, n: 3, started: false }, { who: "Ms Maya Lee", p: 11, n: 1, started: true }] })]);
-  assert.ok(html.includes("Not acknowledged: Mr Sam Tan, P7\u2013P9") && html.includes("Not acknowledged: Ms Maya Lee, P12 \u00b7 started"), html);
+  assert.ok(html.includes("Relief not acknowledged: Mr Sam Tan, P7\u2013P9") && html.includes("Relief not acknowledged: Ms Maya Lee, P12 \u00b7 started"), html);
 });
 t("an answer without unacked (an older server) is as before", async () => {
   const html = await shown([record()]);
-  assert.ok(html.includes("Not acknowledged (0)") && !html.includes("Not acknowledged:"), html);
+  assert.ok(html.includes("Not acknowledged (0)") && !html.includes("Relief not acknowledged"), html);
 });
 
 (async () => {

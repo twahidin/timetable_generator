@@ -51,7 +51,7 @@
       const ack = r.how !== "planned" ? `<span class="small muted">their own request</span>`
         : r.acknowledged ? `<span class="chip st-ok">✓ ${esc(stamp(r.acknowledged.at) || "acknowledged")}</span>` : `<span class="chip st-amber">not acknowledged yet</span>`;
       const w = n ? `<span class="${work === n ? "chip st-ok" : ""}">${work} of ${n}</span>` : `<span class="muted">none to cover</span>`;
-      const un = (Array.isArray(r.unacked) ? r.unacked : []).map(u => `<div class="small pl-changed">${esc(`Not acknowledged: ${u.who}, ${RF.periods(u)}${u.started ? " · started" : ""}`)}</div>`).join("");
+      const un = (Array.isArray(r.unacked) ? r.unacked : []).map(u => `<div class="small pl-changed">${esc(`Relief not acknowledged: ${u.who}, ${RF.periods(u)}${u.started ? " · started" : ""}`)}</div>`).join("");
       const rel = status(r) + un;
       tail = `<td>${ack}</td><td>${w}</td><td>${rel}</td>`;
     }

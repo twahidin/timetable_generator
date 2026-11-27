@@ -2088,6 +2088,24 @@ def whats_in_lists_todays_relief_teachers_who_have_not_acknowledged():
     with at("2026-10-14T07:00:00+08:00"): assert un() == [], "the day is over"
 
 @rt
+def unacked_lists_each_part_of_a_split_lesson_and_reads_cover_by_cover():
+    fresh(); team = staff(TEAMER)
+    un = lambda i: {x["id"]: x["unacked"] for x in ok(team.get("/api/relief/absences"))["absences"]}[i]
+    i = absent()["id"]
+    with at("2026-10-13T07:00:00+08:00"):
+        CV.split(i, K2, 3, TEAMER)
+        for part, who in ((1, FLEX), (0, SAM)):
+            CV.change(i, f"{K2}#{part}", who, TEAMER, PUB, ST); CV.send_out(i, f"{K2}#{part}", who, TEAMER, PUB, ST)
+        parts = [x for x in AB.load(i)["lessons"] if x["key"] == K2][0]["parts"]
+        assert un(i) == [dict(who=w, p=c["p"], n=c["n"], started=False) for w, c in sorted(((w, parts[j]) for j, w in ((0, SAM), (1, FLEX))), key=lambda t: t[1]["p"])], un(i)
+        assert len(un(i)) == 2 and un(i)[0]["p"] < un(i)[1]["p"], "each part with its own p and n, in period order"
+        CV.change(i, K5, MAYA, TEAMER, PUB, ST); CV.send_out(i, K5, MAYA, TEAMER, PUB, ST)
+        r = AB.load(i); [x for x in r["lessons"] if x["key"] == K2][0]["parts"][0]["sent_out"]["at"] = "not a time"; AB._save(r)   # a part changed by hand: it cannot be read
+        got = un(i)
+        assert [u["who"] for u in got] == [FLEX, MAYA], got
+        AB.cancel(i, "Better", EVE); assert un(i) == [], "a cancelled absence lists none"
+
+@rt
 def an_absence_for_today_gets_its_picks_at_once():
     fresh()
     calls, real = [], FL.soon
