@@ -2071,6 +2071,23 @@ def whats_in_counts_covers_and_marks_the_nudge():
     with at("2026-10-12T15:00:00+08:00"): assert got()[i] == (dict(total=0, approved=0, waiting=0, open=0), False), "cancelled"
 
 @rt
+def whats_in_lists_todays_relief_teachers_who_have_not_acknowledged():
+    fresh(); team = staff(TEAMER)
+    i = absent()["id"]                                                         # Tue 13 Oct, as the other tests' absence
+    un = lambda: {x["id"]: x["unacked"] for x in ok(team.get("/api/relief/absences"))["absences"]}[i]
+    with at("2026-10-13T07:00:00+08:00"):
+        assert un() == [], "nobody approved"
+        CV.change(i, K5, SAM, TEAMER, PUB, ST); assert un() == [], "approved, not sent out"
+        CV.send_out(i, K5, SAM, TEAMER, PUB, ST)
+        p5 = [x for x in AB.load(i)["lessons"] if x["key"] == K5][0]
+        assert un() == [dict(who=SAM, p=p5["p"], n=p5["n"], started=False)], "as soon as it reaches them"
+    with at("2026-10-12T10:00:00+08:00"): assert un() == [], "the day before: not a relief of today"
+    with at("2026-10-13T14:55:00+08:00"): assert un()[0]["started"] is True, "its lesson has started: still listed"
+    with at("2026-10-13T07:00:00+08:00"):
+        CV.acknowledge(i, K5, SAM); assert un() == [], "acknowledged"
+    with at("2026-10-14T07:00:00+08:00"): assert un() == [], "the day is over"
+
+@rt
 def an_absence_for_today_gets_its_picks_at_once():
     fresh()
     calls, real = [], FL.soon

@@ -42,7 +42,7 @@ Stage 3 is the relief team's module and everyone's cover list:
   change**, the work and its files.
 - **Term Relief Report** (the relief team): how many relief periods each teacher has this week and this term, by department, with a
   Download; a name opens that teacher's reliefs.
-- **All Relief Requests** also shows "Needs a nudge" and each absence's relief status.
+- **All Relief Requests** also shows "Not acknowledged" (an absence a head planned that the absent teacher has not acknowledged, or one with a relief today that has reached its relief teacher and is not acknowledged) and each absence's relief status.
 
 Stage 4 is Telegram: the school's own bot tells people about relief on their phones, and they answer there. It is off
 until somebody makes the bot, sets `TELEGRAM_BOT_TOKEN` and presses **Connect the bot** in Relief settings
