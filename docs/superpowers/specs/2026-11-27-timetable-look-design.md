@@ -173,7 +173,8 @@ saved copy is my call.)
   "id · Class · level" there. A room page keeps its kind, equipment and what it is made of in words.
 - **The data follows the rule, not only the drawing** (`html_data`). A page made for anyone but the committee does not
   carry: the teachers' allowance, the classes' sizes, the after-school flag of a lesson (sent as 0), or the checks'
-  problems, after-school list and notes (today the `teacher` mode's page carries all four). With the flag gone from
+  after-school list and notes (today the `teacher` mode's page carries all four). The checks' problems stay as each
+  view has them today: the page's status pill counts them. With the flag gone from
   those pages, everything "after school" on the page can simply hang on the flag. Find every use of a class's size on
   the page and see that a blank one reads well.
 - **The PDF.** `draw_page` stops drawing `v["stats"]` for every kind of page. The line under the title loses
