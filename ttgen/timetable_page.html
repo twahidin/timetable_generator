@@ -6,11 +6,11 @@
 <title>__TITLE__</title>
 <style>
 :root{--bg:#F4F6F8;--panel:#FFFFFF;--ink:#1B2330;--sub:#4A5566;--muted:#7A8494;--line:#E1E5EA;--soft:#EEF1F4;--accent:#26364A;--link:#1F63B0;
-  --brk:#ECEFF3;--none:#F7F8FA;--slot:#FFF9EA;--ok:#2E7D32;--bad:#B3261E;--shadow:0 1px 2px rgba(20,30,45,.06),0 4px 14px rgba(20,30,45,.05);color-scheme:light}
+  --brk:#ECEFF3;--none:#F7F8FA;--stripe:#EEF1F5;--stripe2:#F7F9FB;--hourline:#B9C3D1;--hourlabel:#16202E;--ok:#2E7D32;--bad:#B3261E;--shadow:0 1px 2px rgba(20,30,45,.06),0 4px 14px rgba(20,30,45,.05);color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1318;--panel:#171C23;--ink:#E7EBF0;--sub:#B4BDC9;--muted:#8792A2;--line:#2A313B;--soft:#1F252D;
-  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--slot:#272214;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}}
+  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--stripe:#232A33;--stripe2:#1A2028;--hourline:#4B5666;--hourlabel:#E7EBF0;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#0F1318;--panel:#171C23;--ink:#E7EBF0;--sub:#B4BDC9;--muted:#8792A2;--line:#2A313B;--soft:#1F252D;
-  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--slot:#272214;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}
+  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--stripe:#232A33;--stripe2:#1A2028;--hourline:#4B5666;--hourlabel:#E7EBF0;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
 a{color:var(--link);text-decoration:none;cursor:pointer}a:hover{text-decoration:underline}
@@ -48,19 +48,21 @@ main{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;padding:16p
 a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:none}a.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
 .applinks{display:flex;gap:6px;flex-wrap:wrap}.applinks .btn{font-size:12.5px;padding:5px 9px}
 .gridwrap{overflow-x:auto;padding-bottom:4px}
-.tt{min-width:calc(var(--np)*var(--cw) + 64px)}
-.tt .head{display:grid;grid-template-columns:64px 1fr}.tt .ph{display:grid;grid-template-columns:repeat(var(--np),1fr)}
-.tt .ph div{text-align:center;font-size:10px;color:var(--muted);line-height:1.2;padding-bottom:5px}.tt .ph b{display:block;color:var(--ink);font-size:11.5px}
-.tt .row{display:grid;grid-template-columns:64px 1fr;border-top:1px solid var(--line)}.tt .row.wk{border-top:2px solid color-mix(in srgb,var(--muted) 60%,transparent)}
+.tt{min-width:calc(var(--w) + 74px)}
+.tt .ruler,.tt .row{display:grid;grid-template-columns:74px 1fr}.tt .row + .ruler{margin-top:12px}
+.tt .ruler .ax{position:relative;height:28px}.tt .wk{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted);padding:8px 0 0 4px}
+.tt .hr{position:absolute;top:6px;transform:translateX(-50%);font-weight:700;font-size:13px;color:var(--hourlabel);white-space:nowrap}.tt .hr small{font-weight:600;color:var(--muted);font-size:10.5px;margin-left:2px}
+.tt .row{border-top:1px solid var(--line)}
 .tt .row:last-child{border-bottom:1px solid var(--line)}
 .tt .dl{display:flex;flex-direction:column;justify-content:center;padding-left:4px;font-weight:700;font-size:13px}.tt .dl small{font-weight:600;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.tt .track{position:relative;height:var(--rh);background-image:linear-gradient(to right,var(--line) 1px,transparent 1px);background-size:calc(100% / var(--np)) 100%}
-.tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--muted);background:var(--brk)}
-.tt .bk.none{background:var(--none)}.tt .bk.slot{background:var(--slot)}.tt .bk span{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:100%}.tt .bk.v span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px}
-.cell{position:absolute;padding:3px 5px 3px 7px;border-radius:5px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);
-  box-shadow:inset 3px 0 0 var(--a);font-size:11px;line-height:1.25;color:var(--sub);display:flex;flex-direction:column;justify-content:center;margin:1px}
-.cell b{color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span.m{color:var(--muted)}
-.cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
+.tt .track{position:relative}
+.tt .vl{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}.tt .vl.h{background:var(--hourline)}
+.tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;font-size:11px;color:var(--muted);background:repeating-linear-gradient(135deg,var(--stripe) 0 6px,var(--stripe2) 6px 12px)}
+.tt .bk span{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:100%}.tt .bk.v span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;max-width:none;max-height:100%}
+.cell{position:absolute;padding:2px 6px 1px;border-radius:7px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);border-left:4px solid var(--a);
+  font-size:11px;line-height:1.15;color:var(--sub);display:flex;flex-direction:column;margin-left:1px}
+.cell b{color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .t{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none}.cell .m{color:var(--sub)}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
 .cell.x{opacity:.5;filter:grayscale(.7)}.cell.x b,.cell.x span{text-decoration:line-through}
@@ -117,7 +119,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
 @media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
-  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
+  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.vl,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
 </style>
 </head>
@@ -302,12 +304,11 @@ function dated(v) {
   const cls = v.kind === "class" ? v.key : v.kind === "student" ? (v.cls || (sIx.get(v.key) || {}).cls) : null;
   const inRoom = r => relatedRooms(r).flatMap(q => ((ex.rooms || {})[q] || []).map(it => q === r ? it : Object.assign({}, it, { via: q })));   /* a combined venue and its rooms count as one room */
   const items = cls ? (ex.classes || {})[cls] : v.kind === "teacher" ? (ex.teachers || {})[v.key] : v.kind === "room" ? inRoom(v.key) : null;
-  const tm = it => `${it.start}–${it.end}`;
   (items || []).forEach(it => {
     const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : it.kind === "event" ? "Event" : "Exam";
-    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), v.kind === "teacher" ? it.duty : "", it.via ? `in ${it.via}` : ""];
+    const lines = cls ? [it.room, it.seat_note] : [it.label, v.kind === "teacher" ? it.duty : "", it.via ? `in ${it.via}` : ""];
     const s0 = mins(it.start), e0 = mins(it.end), [a, b] = s0 !== null && e0 !== null ? [s0, e0] : edge(+it.p || 0, +it.n || 0);
-    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, a, b, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
+    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, a, b, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day}) ${clk(a)}–${clk(b)}` });
   });
   if (v.cells.length) v.span = [Math.min(...(v.span ? [v.span[0]] : []), ...v.cells.map(c => c.a)), Math.max(...(v.span ? [v.span[1]] : []), ...v.cells.map(c => c.b))];   /* a view with no lessons still has its exams' span */
   v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams, tests or events. This is the usual ${on.day} timetable.`;
@@ -326,20 +327,23 @@ function lanes(cells) {
   return out;
 }
 function gridHTML(v) {
-  const ln = lanes(v.cells), cw = NP > 18 ? 34 : 58, rh = NP > 18 ? 58 : 66;
+  const sp = v.span || spanOf(v); if (!sp) return "";
+  const [a0, b1] = sp, len = Math.max(1, b1 - a0), hrs = hourMarks(a0, b1), ln = lanes(v.cells);
+  const at = m => Math.min(b1, Math.max(a0, m)), pc = m => +((at(m) - a0) / len * 100).toFixed(3) + "%", wd = (a, b) => +((at(b) - at(a)) / len * 100).toFixed(3) + "%";   /* by minutes against the page's span */
   const most = Array(ND).fill(1); for (const [c, [, n]] of ln) most[c.d] = Math.max(most[c.d], n);
-  let h = `<div class="gridwrap"><div class="tt" style="--np:${NP};--cw:${cw}px;--rh:${rh}px"><div class="head"><div></div><div class="ph">${D.times.map((t, p) => `<div>${p}<b>${esc(t[0])}</b></div>`).join("")}</div></div>`;
+  const lines = uniq(PB.flat()).filter(m => m > a0 && m < b1 && m % 60).map(m => `<i class="vl" style="left:${pc(m)}"></i>`).join("") + hrs.map(x => `<i class="vl h" style="left:${pc(x.m)}"></i>`).join("");
+  const ruler = wk => `<div class="ruler"><div class="wk">${esc(wk)}</div><div class="ax">${hrs.map(x => `<span class="hr" style="left:${pc(x.m)}">${esc(x.text)}${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</span>`).join("")}</div></div>`;
+  let h = `<div class="gridwrap"><div class="tt" style="--w:${len * 2}px">`;
   for (let d = 0; d < ND; d++) {
     if (v.only != null && d !== v.only) continue;   /* a view on a date: that day's row only */
-    const [wk, dn] = weekDay(DAYS[d]); let inner = "";
-    const codes = v.codes ? v.codes[d] : null;
-    if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
-      if (BREAK[ch] || ch === "." || ch === "A") inner += `<div class="bk ${ch === "." ? "none" : ch === "A" ? "slot" : ""}${q === p && NP > 18 ? " v" : ""}" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"><span>${esc(BREAK[ch] || "")}</span></div>`; p = q + 1; }
+    const [wk, dn] = weekDay(DAYS[d]); let inner = lines;
+    if (v.only != null) h += ruler(""); else if (d % PER_WEEK === 0) h += ruler(WEEKS > 1 && wk ? `${wk.toUpperCase()} WEEK` : "");   /* an hour row above each week */
+    for (const x of bandsOf(v, d)) if (x.b > a0 && x.a < b1) inner += `<div class="bk${x.b - x.a < 40 ? " v" : ""}" style="left:${pc(x.a)};width:${wd(x.a, x.b)}"><span>${esc(x.name)}</span></div>`;
     for (const c of v.cells.filter(c => c.d === d)) {
-      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : c.ext ? D.ext : pal(c.color);   /* an exam takes its colours from .cell.exam */
-      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
+      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : pal(c.color);   /* an exam takes its colours from .cell.exam */
+      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><span class="t">${esc(cellTime(c))}</span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
     }
-    h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d && v.only == null ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
+    h += `<div class="row"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track" style="height:${most[d] > 1 ? 48 * most[d] : 62}px">${inner}</div></div>`;
   }
   return h + "</div></div>";
 }
@@ -351,7 +355,7 @@ function viewHTML(v, extra = "") {
     ${v.onLine ? `<p class="onday">${esc(v.onLine)}</p>` : ""}
     ${v.noday ? `<div class="empty"><b>Not a school day.</b><br>${esc(v.noday)}</div>` : v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}
     <div class="legend"><h3>${esc(v.lt)}</h3>${leg}</div>
-    <div class="note">Times are period start times. Grey columns are breaks; pale yellow is an after-school slot, used only when needed. Click a lesson for every group, teacher and room in it.</div></div>`;
+    <div class="note">Striped bands are breaks. Click a lesson for every group, teacher and room in it.</div></div>`;
 }
 
 function pdfLink(v) {
@@ -497,7 +501,7 @@ function drawLessonPage() {
       if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
         if (BREAK[ch] || ch === ".") inner += `<i class="b" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"></i>`; p = q + 1; }
       const on = k => !active || ids.has(k.id);
-      for (const k of v.cells.filter(k => k.d === d).sort((a, b) => on(a) - on(b))) { const [, a] = k.ext ? D.ext : pal(k.color);   // a match is drawn last, over a lesson beside it
+      for (const k of v.cells.filter(k => k.d === d).sort((a, b) => on(a) - on(b))) { const [, a] = pal(k.color);   // a match is drawn last, over a lesson beside it
         inner += `<i${on(k) ? "" : ` class="dim"`} style="left:${k.p / NP * 100}%;width:calc(${k.n / NP * 100}% - 1px)${on(k) ? `;background:#${a}` : ""}" title="${esc(`${k.title} · ${when(k)}`)}"></i>`; }
       h += `<div class="mrow${WEEKS > 1 && d % PER_WEEK === 0 && d ? " wk" : ""}">${inner}</div>`; }
     return `<a class="mcard" tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}"><span class="mhead"><b>${esc(c.name)}</b><small>${active ? `${ids.size} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></span>${h}</a>`; };
@@ -513,7 +517,7 @@ function drawLessonTable() {
   const link = (t, k, v) => `<a data-go="${t}" data-key="${esc(k)}">${esc(v)}</a>`;
   $("#ltab").innerHTML = `<p class="count">${rows.length} group lessons (${lc} lesson times)${rows.length > lim ? ` · showing ${lim} <button class="btn" data-act="all">Show all</button>` : ""}</p>
     <div class="tablebox"><table class="lt"><thead><tr>${LCOLS.map(([k, t]) => `<th data-sort="${k}">${t}${S.sort[0] === k ? (S.sort[1] > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>
-    ${rows.slice(0, lim).map(x => { const [t, a] = x.ext ? D.ext : pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td><td>${x.n}</td><td>${esc(x.level)}</td>
+    ${rows.slice(0, lim).map(x => { const [t, a] = pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td><td>${x.n}</td><td>${esc(x.level)}</td>
       <td>${x.classes.map(c => link("classes", c, c)).join(", ")}</td><td><i class="sw" style="--t:#${t};--a:#${a}"></i>${esc(x.subject)}</td><td>${esc(x.group)}${x.block ? `<br><small style="color:var(--muted)">${esc(x.block)}</small>` : ""}</td>
       <td>${x.teachers.map(tt => link("teachers", tt, tt)).join(", ")}</td><td>${x.room ? link("rooms", x.room, x.room) : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
