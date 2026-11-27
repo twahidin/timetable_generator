@@ -870,6 +870,20 @@ def test_the_preview_shows_a_teacher_only_period_from_the_setup_as_it_is_now():
     finally:
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_the_board_holds_the_teacher_only_periods_of_the_setup_and_nothing_else_changes():
+    who, other = TEACHERS[1], TEACHERS[0]; staff = [dict(_id="z3", name="Staff meeting", all=False, depts=[], teachers=[who], week="Both", days=["Mon"], times=["08:00", "09:00"], place="Hall")]
+    try:
+        fresh(); plain = draft.board(); assert plain["staff"] == []
+        assert c.put("/api/setup", json=dict(spec=dict(SPEC, staff_periods=staff), why="a staff meeting")).status_code == 200
+        fresh(); j = draft.board(); assert j["staff"], j["staff"]
+        assert all(r["teacher"] == who and r["name"] == "Staff meeting" and r["place"] == "Hall" and r["p"] is not None and r["n"] > 0 and r["d"] == 0 for r in j["staff"]), j["staff"]
+        assert set(j["staff"][0]) == {"teacher", "d", "p", "n", "name", "place", "t0", "t1", "before", "after"} and not [r for r in j["staff"] if r["teacher"] == other]
+        assert j["cards"] == plain["cards"] and j["unplaced"] == plain["unplaced"] and j["days"] == plain["days"] and j["NP"] == plain["NP"] and j["day"] == plain["day"] and j["codes"] == plain["codes"]
+        got = c.get("/api/draft/board").get_json(); assert got["staff"] == j["staff"]
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+    fresh(); assert draft.board()["staff"] == []
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

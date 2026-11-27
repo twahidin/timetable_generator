@@ -4368,8 +4368,15 @@ const bdWas = (d, c) => c.was && c.was.d !== null && c.was.d !== undefined ? `wa
 function bdCardClass(c, d, b, hit) {   // a card's classes: selected, faded by Find or by the counter being stepped through (hit: the ids it counts), outlined red when critical
   return "bdcard" + (b.sel === c.id ? " sel" : "") + (Board.matches(c, b.find, d) ? "" : " fade") + (hit && !hit.has(c.id) ? " cfade" : "") + (!bdInTray(c) && Board.critical(c) ? " crit" : "");
 }
+function bdStaff(row, d) {   // a teacher's row: each teacher-only period as a fixed box behind the cards, over the lanes of its periods (never a button, never dragged, never catches the pointer)
+  if (row.by !== "teacher" || !row.name) return "";
+  return Board.staffOf(d, row.name, row.d).map(s => {
+    const from = Math.max(0, Math.min(s.p, d.NP - 1)), to = Math.max(from, Math.min(s.p + s.n - 1, d.NP - 1)), tm = Board.staffTime(s);
+    return `<div class="bdstaff${s.before ? " before" : ""}${s.after ? " after" : ""}" title="${esc([s.name, tm, s.place].filter(Boolean).join(" \u00b7 "))}" style="grid-column:${from + 2}/${to + 3};grid-row:2/span ${row.lanes}"><b>${esc(s.name)}</b><span>${esc(tm)}</span></div>`;
+  }).join("");
+}
 function bdPieces(row, d, b, hit, warned) {   // warned: the open warnings by lesson id (Board.warned)
-  const st = [];
+  const st = [bdStaff(row, d)];
   row.cards.forEach(x => {
     const c = x.card, bx = Board.box(c, d.NP), ln = Board.lines(c, d, row), pal = bdPal(d, ln), bg = Board.flag(c, warned);
     const time = ((d.times || [])[c.p] || [])[0] || "", day = (d.days || [])[c.d] || "";

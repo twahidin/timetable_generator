@@ -505,6 +505,10 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdmark.own{background:var(--accent)}
 .bdcard.swap{outline:2px dashed #4cb87a;outline-offset:-2px}.bdcard.swap.swapprefer{outline-color:#f2b632}
 .bdcard{position:relative}
+.bdstaff{position:relative;z-index:0;pointer-events:none;contain:size;min-height:0;margin:1px;padding:2px 4px;border-radius:5px;background:#fff;border:1.5px solid #5B6677;font-size:11px;line-height:1.25;overflow:hidden;color:#2b3445}
+.bdstaff.after{border-right-style:dashed}.bdstaff.before{border-left-style:dashed}
+.bdstaff b{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bdstaff span{display:block;font-size:10px;color:#4a5568;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bdcard.crit{box-shadow:inset 0 0 0 2px #c62828}
 .bdcard.cfade{opacity:.25}
 .bdcard.tiet{outline:2px solid #7c3aed;outline-offset:-2px}   /* the four panels: a lesson of the chosen lesson's teacher */
