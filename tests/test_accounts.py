@@ -61,16 +61,17 @@ def rights_table():
     assert S("head") == {"setup", "timetable", "files"} and S("teacher") == {"timetable", "files"} and S("student") == {"timetable"}
     assert R.rights(None, "personal") == {"own"}
     base = {"timetable", "files"}
-    assert R.rights(person("executive"), "code") == base | {"history.own"}
-    assert R.rights(person("teacher"), "code") == base | {"relief", "history.own"}
-    assert R.rights(person("leader"), "code") == base | {"relief", "relief.plan", "relief.settings", "history.own"}
-    assert R.rights(person("hod"), "code") == base | {"relief", "relief.plan", "relief.settings", "history.own"}
+    pbase = base | {"codes.look"}   # anyone signed in by name looks up a student's code (Student codes)
+    assert R.rights(person("executive"), "code") == pbase | {"history.own"}
+    assert R.rights(person("teacher"), "code") == pbase | {"relief", "history.own"}
+    assert R.rights(person("leader"), "code") == pbase | {"relief", "relief.plan", "relief.settings", "history.own"}
+    assert R.rights(person("hod"), "code") == pbase | {"relief", "relief.plan", "relief.settings", "history.own"}
     c = R.rights(member(), "code")
-    assert c == base | {"relief", "relief.settings", "relief.save", "history.own"} and not c & {"committee", "setup", "admin", "history", "codes"}
+    assert c == pbase | {"relief", "relief.settings", "relief.save", "history.own"} and not c & {"committee", "setup", "admin", "history", "codes"}
     assert "relief.plan" in R.rights(person("hod"), "code") and "setup" not in R.rights(person("hod"), "code")
-    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team", "history.own"}
+    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == pbase | {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team", "history.own"}
     cs = R.rights(member(), "password")
-    assert cs == base | {"relief", "relief.settings", "relief.save", "committee", "setup", "history", "codes", "history.own"}
+    assert cs == pbase | {"relief", "relief.settings", "relief.save", "committee", "setup", "history", "codes", "history.own"}
     assert "admin" in R.rights(dict(member(), extras=dict(relief=False, exams=None, admin=True, timetable=True)), "password")
     assert "admin" not in R.rights(dict(member(), extras=dict(relief=False, exams=None, admin=True, timetable=True)), "code")
     assert "admin" not in R.rights(dict(person("hod"), extras=dict(relief=False, exams=None, admin=True, timetable=False)), "password")
@@ -221,8 +222,9 @@ def old_rights(person, via, shared=None, today=None):
         if g == "committee":
             r |= {"committee", "setup", "history", "codes"}
             if ex.get("admin"): r.add("admin")
-        if g in ("hod", "sh"): r |= {"setup", "history.dept"}
+        if g in ("hod", "sh"): r |= {"setup", "history.dept", "staff.reset"}   # staff.reset: added with Reset a password (27 Nov 2026)
     r.add("history.own")   # anyone signed in by name can change something (ask for relief, start an event), so sees their own history
+    r.add("codes.look")    # added with Student codes (27 Nov 2026): the same for everyone, so the comparison still tests the migration
     return frozenset(r)
 
 @t
@@ -252,22 +254,23 @@ def nobody_s_rights_change_on_the_day():
 def what_a_role_and_committees_give():
     T = datetime.date(2026, 11, 23)
     hod = dict(group="hod", extras=dict(timetable=False, relief=False, exams=None, admin=False), off=False)
-    assert [g["text"] for g in R.gives(hod, ["MA"], T)] == ["Sees the published timetable and the files.", "Relief: plans cover, as management.",
-        "Setup: changes the teaching groups of MA only.", "History: sees their departments' changes."]
-    assert R.gives(hod, [], T)[2] == {"text": "Setup: no department ticked yet, so nothing to change.", "strong": True}
+    assert [g["text"] for g in R.gives(hod, ["MA"], T)] == ["Sees the published timetable and the files.", "Student codes: looks up a student's forgotten code.", "Relief: plans cover, as management.",
+        "Setup: changes the teaching groups of MA only.", "History: sees their departments' changes.", "Passwords: gives staff in their departments a new temporary password."]
+    assert R.gives(hod, [], T)[3] == {"text": "Setup: no department ticked yet, so nothing to change.", "strong": True}
     full = dict(group="hod", extras=dict(timetable=True, relief=True, exams="2026-12-31", admin=True), off=False)
-    assert [g["text"] for g in R.gives(full, ["MA"], T)] == ["Sees the published timetable and the files.", "Relief: runs it, with the team's pages and settings.",
-        "Setup: every step, the upload, the edit board and Publish.", "Exams and events: plans them and approves them.", "History: sees everyone's changes.", "People and access: this page."]
+    assert [g["text"] for g in R.gives(full, ["MA"], T)] == ["Sees the published timetable and the files.", "Student codes: looks up a student's forgotten code.", "Relief: runs it, with the team's pages and settings.",
+        "Setup: every step, the upload, the edit board and Publish.", "Exams and events: plans them and approves them.", "History: sees everyone's changes.", "Passwords: gives staff in their departments a new temporary password.", "People and access: this page."]
     ex = dict(group="executive", extras=dict(timetable=False, relief=False, exams="2026-12-31", admin=False), off=False)
-    assert [g["text"] for g in R.gives(ex, [], T)] == ["Sees the published timetable and the files.", "Exams and events: plans them, until 31 Dec 2026."]
+    assert [g["text"] for g in R.gives(ex, [], T)] == ["Sees the published timetable and the files.", "Student codes: looks up a student's forgotten code.", "Exams and events: plans them, until 31 Dec 2026."]
     assert R.gives(dict(full, off=True), ["MA"], T) == [{"text": "Nothing: switched off, so they cannot sign in.", "strong": False}]
-    assert R.gives(dict(ex, extras=dict(ex["extras"], exams="2026-12-05")), [], T)[1]["text"] == "Exams and events: plans them, until 5 Dec 2026."
+    assert R.gives(dict(ex, extras=dict(ex["extras"], exams="2026-12-05")), [], T)[2]["text"] == "Exams and events: plans them, until 5 Dec 2026."
     assert [g["text"] for g in R.gives(dict(group="teacher", extras=dict(timetable=False, relief=False, exams="2026-11-22", admin=False), off=False), [], T)] == [
-        "Sees the published timetable and the files.", "Relief: opens the relief page and asks for cover."]
+        "Sees the published timetable and the files.", "Student codes: looks up a student's forgotten code.", "Relief: opens the relief page and asks for cover."]
 
 NEEDS = (("Sees the published", "timetable"), ("Relief: opens", "relief"), ("Relief: plans", "relief.plan"), ("Relief: runs", "relief.team"),
          ("Setup: changes", "setup"), ("Setup: no department", "setup"), ("Setup: every", "committee"), ("Exams and events: plans them and", "committee"),
-         ("Exams and events: plans them,", "exams"), ("History: sees everyone", "history"), ("History: sees their", "history.dept"), ("People and access", "admin"))
+         ("Exams and events: plans them,", "exams"), ("History: sees everyone", "history"), ("History: sees their", "history.dept"), ("People and access", "admin"),
+         ("Student codes:", "codes.look"), ("Passwords:", "staff.reset"))
 
 @t
 def a_marked_line_is_never_given_by_a_code():
