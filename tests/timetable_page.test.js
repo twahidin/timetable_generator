@@ -383,7 +383,9 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(h.includes('<div class="bk v"') && h.includes("<span>Recess</span>"), "a 20-minute band is turned on its side, its name whole");
     assert(h.includes('<b>EL</b><span class="m">Ms Aisha Rahman · 3-01</span></div>'), "one detail line, joined with a dot");
     assert(count(h, '<i class="vl h"') === 3 * 10 && h.includes('<i class="vl"'), "a strong line at 8, 9 and 10 on each day, faint lines at period edges");
-    assert(count(h, 'style="height:62px"') === 10, "a row with nothing side by side is 62px");
+    assert(count(h, 'class="track" style="--h:62px"') === 10, "a row with nothing side by side is 62px");
+    assert(PAGE.includes(".tt .track{position:relative;height:var(--h)}"), "the track's height comes from --h");
+    assert(/@media print\{[^\n]*\.tt \.track\{height:calc\(var\(--h\) \* 56 \/ 62\)\}\.tt \.row\{break-inside:avoid\}\.tt \.ruler\{break-after:avoid\}/.test(PAGE), "print: 56px rows, a row never split, an hour row kept with its row");
   });
 
   await t("an after-school lesson looks like any other; three lessons at once make a taller row", async () => {
@@ -401,7 +403,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
         [12, 1, 0, 2, "Sec 3", "", ["3A"], "Combined Science", E, ["Ms Grace Yeo"], "LT1", 0]);
     });
     await C.tick(); C.run('show("classes", "3A")');
-    assert(C.view().includes('style="height:144px"') && count(C.view(), 'style="height:62px"') === 9, "three side by side: 48px each");
+    assert(C.view().includes('class="track" style="--h:144px"') && count(C.view(), 'class="track" style="--h:62px"') === 9, "three side by side: 48px each");
   });
 
   await t("the grid on a date: an exam shows its time first, written as a lesson's; a duty before 8 starts the page", async () => {
