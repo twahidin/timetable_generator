@@ -124,8 +124,8 @@ Everything across the page is placed by the clock, in minutes, not by period num
   to a fixed 1.7 times, whatever the number), so that every lesson shows its three lines. On the PDF a row of the
   smallest height the page allows must still hold the three lines of a lesson that has the row to itself; make the
   type a little smaller if that is what it takes. Where lessons are side by side on a PDF row and there is no room, the
-  detail line is dropped first, then the time; when only one line fits, time and title share it if the width allows,
-  else the title stands alone.
+  detail line is dropped first; when only one line fits, the start time and the title share it, and the title is cut
+  with "…" if it must be. The time is never the part that goes.
 - The hover text and the lesson dialog keep the day and the time. The dialog loses "· after school".
 
 ### 3. Breaks
