@@ -179,9 +179,9 @@ def the_lessons_check_no_longer_tests_can_teach():
 @t
 def the_skill_version_is_pinned():
     root = os.path.dirname(HERE)
-    assert SPEC.SKILL_VERSION == "2026-11.10"
-    assert "2026-11.10" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
-    assert "2026-11.10" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
+    assert SPEC.SKILL_VERSION == "2026-11.11"
+    assert "2026-11.11" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    assert "2026-11.11" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
 
 
 

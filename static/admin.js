@@ -1,7 +1,8 @@
 "use strict";
 /* The admin page (/admin): Staff, Students and Ways in. Every check is the server's: this page shows its sentences.
    Names, notes and every server text are untrusted, so they go into the page through esc(). A one-time password is
-   kept in S.once only: never stored, never logged, and cleared when the panel closes or another person is picked. */
+   kept in S.once only: never stored, never logged, and cleared when the panel closes or another person is picked. The
+   temporary passwords of sign-in slips never reach the page's text or S: they go from the one answer straight to two files. */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -11,13 +12,13 @@
   const GONE = /is not on the published timetable or the staff list\.$/;   /* someone else removed them: the list is read again */
   const S = { tab: "staff", people: [], depts: [], groups: [], committees: [], hints: {}, moved: [], me: "", students: null, ways: null,
               q: "", fr: "", fd: "", fc: "", sq: "", ticked: new Set(), sel: null, menu: null, once: null, examsOpen: null,
-              confirmReset: null, rename: null, ask: null, rmBusy: false, pmsg: null, msg: null, out: false, token: 0 };
+              confirmReset: null, rename: null, ask: null, rmBusy: false, pmsg: null, msg: null, out: false, token: 0,
+              staffOff: false, staffAsk: false, wslip: null };
   /* the three committees from the server, then Admin: the choices of the dark bar's two committee menus */
   const committeeChoices = () => [...S.committees, ["admin", "Admin"]];
   const narrow = () => window.matchMedia("(max-width:900px)").matches;
 
   /* ---------------------------------------------------------------- small helpers */
-  const fmtDay = iso => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || ""); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]}` : String(iso || ""); };
   const dayStart = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   function fmtTime(t) {
     if (!t) return "Never";
@@ -76,6 +77,21 @@
     } catch (e) { note("The server could not be reached. Try again.", true); }
   }
 
+  /* the made slips -> two files saved: the PDF to print and the CSV for a mail merge. Nothing of them is kept */
+  function saveFile(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+  function saveSlips(d) {
+    const bin = atob(d.pdf), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    saveFile(new Blob([bytes], { type: "application/pdf" }), "sign-in slips.pdf");
+    saveFile(new Blob([d.csv], { type: "text/csv;charset=utf-8" }), "sign-in slips.csv");
+  }
+  const SLIPS = "/api/admin/staff-slips";
+
   function note(text, bad) { S.msg = text ? { text, bad: !!bad } : null; drawMsg(); }
 
   /* ---------------------------------------------------------------- loading */
@@ -86,7 +102,8 @@
     if (S.sel && !person(S.sel)) closePanel();
   }
   async function loadStudents() { S.students = await api("/api/admin/students"); }
-  async function loadWays() { S.ways = await api("/api/admin/ways"); }
+  function setWays(w) { S.ways = w; S.staffOff = !!(w && w.staff_codes && w.staff_codes.off != null); }
+  async function loadWays() { setWays(await api("/api/admin/ways")); }
 
   async function reload(which) {
     try { await Promise.all([loadPeople(), which === "all" ? loadStudents() : null]); }
@@ -155,7 +172,7 @@
   function drawTableNow() {
     const list = shown(), all = list.length && list.every(p => S.ticked.has(p.name));
     $("#tickall").textContent = `Tick all shown (${list.length})`;
-    $("#slipsAll").hidden = !!S.ticked.size;
+    $("#slipsAll").hidden = !!S.ticked.size || S.staffOff;   /* relief code slips: refused once staff codes are off */
     const rows = list.map(p => `<tr data-row="${esc(p.name)}" class="${p.name === S.sel ? "sel" : ""}${p.off ? " off" : ""}">
       <td class="ck"><input type="checkbox" data-tick="${esc(p.name)}" aria-label="Tick ${esc(p.name)}" ${S.ticked.has(p.name) ? "checked" : ""}></td>
       <td><button type="button" class="linkbtn" data-act="pick" data-name="${esc(p.name)}" aria-expanded="${p.name === S.sel}">${esc(p.name)}</button>${p.name === S.me ? `<span class="you">you</span>` : ""}${p.staff_only ? `<div class="w">added by name</div>` : ""}</td>
@@ -175,21 +192,25 @@
     if (!n) { bar.innerHTML = ""; $("#menu").innerHTML = ""; return; }
     const k = S.menu && S.menu.kind, b = (kind, text, cls) => `<button type="button" data-act="menu" data-kind="${kind}" class="${k === kind ? "on " : ""}${cls || ""}">${text}</button>`;
     const anyOff = ticks().some(x => (person(x) || {}).off);
+    const slips = AdminView.barSlips(S.staffOff).map(x => x.kind ? b(x.kind, esc(x.text)) : `<button type="button" data-act="${esc(x.act)}">${esc(x.text)}</button>`).join("");
     bar.innerHTML = `<div class="bar"><b>${n} ticked</b>${b("give", "Add to a committee ▾")}${b("take", "Take off a committee ▾")}${b("group", "Set role ▾")}
-      <button type="button" data-act="slips">Print their code slips</button>${b("off", "Switch off", "warn")}${anyOff ? b("on", "Switch on") : ""}
+      ${slips}${b("off", "Switch off", "warn")}${anyOff ? b("on", "Switch on") : ""}
       <button type="button" class="clr" data-act="clear">Clear ticks</button></div>`;
     drawMenu();
   }
 
   const these = n => n === 1 ? "this person" : `these ${n} people`;   /* not "Add 3 people", which reads like Add a person */
   const VERB = { give: n => `Add ${these(n)}`, take: n => `Take off ${these(n)}`,
-                 group: n => `Set the role for ${plural(n, "person", "people")}`, off: n => `Switch off ${plural(n, "person", "people")}`, on: n => `Switch on ${plural(n, "person", "people")}` };
+                 group: n => `Set the role for ${plural(n, "person", "people")}`, off: n => `Switch off ${plural(n, "person", "people")}`, on: n => `Switch on ${plural(n, "person", "people")}`,
+                 uslips: () => "Print" };
+  const SLIP_SAYS = "Each slip has a username and a temporary password: the person chooses their own when they first sign in.";
 
   function menuSum() {
     const m = S.menu;
     const fail = m.fail ? `<div class="sum bad">${esc(m.fail)}</div>` : "";
     const sum = fail + (m.err ? `<div class="sum bad">${esc(m.err)}</div>` : m.lines ? `<div class="sum">${m.lines.map(l => `<p>${esc(l)}</p>`).join("")}</div>` : m.hold ? `<div class="sum">${esc(m.hold)}</div>` : `<div class="sum">Reading what it would do…</div>`);
-    return `${sum}<div class="go"><button type="button" class="primary" data-act="apply" ${m.lines && !m.busy ? "" : "disabled"}>${esc(VERB[m.kind](S.ticked.size))}</button><button type="button" data-act="cancelmenu">Cancel</button></div>`;
+    const ready = m.lines && !m.busy && (m.kind !== "uslips" || m.count > 0);   /* no slip to print: Print stays off */
+    return `${sum}<div class="go"><button type="button" class="primary" data-act="apply" ${ready ? "" : "disabled"}>${esc(VERB[m.kind](S.ticked.size))}</button><button type="button" data-act="cancelmenu"${m.busy && m.kind === "uslips" ? " disabled" : ""}>Cancel</button></div>`;
   }
 
   /* full: rebuild the choices too; otherwise only the preview and buttons, so a date being typed keeps its focus */
@@ -201,6 +222,8 @@
     if (m.kind === "give" || m.kind === "take") {
       opts = committeeChoices().map(([k, t]) => `<div class="it"><label><input type="radio" name="bx" data-bx="${esc(k)}" ${m.extra === k ? "checked" : ""}> ${esc(t)}</label>
         ${m.kind === "give" && k === "exams" && m.extra === "exams" ? `until <input type="date" data-until="1" value="${esc(m.until)}" aria-label="Last day of the exams and events access">` : ""}</div>`).join("");
+    } else if (m.kind === "uslips") {
+      opts = `<div class="w">${esc(SLIP_SAYS)}</div>`;
     } else if (m.kind === "group" && m.mgmt) {
       opts = `<div class="w">Each person gets the role step 4 names for them: HOD or SH.</div>`;
     } else if (m.kind === "group") {
@@ -229,6 +252,12 @@
     if (m.kind === "give" && m.extra === "exams" && !m.until) { m.hold = "Pick the last day first."; drawMenu(false); return; }
     drawMenu(false);
     try {
+      if (m.kind === "uslips") {
+        const d = await api(SLIPS, { names: ticks(), preview: true });
+        if (my !== S.token || S.menu !== m) return;
+        m.lines = d.lines; m.chosen = d.chosen; m.count = d.count;
+        drawMenu(false); return;
+      }
       const lines = [];
       for (const b of bulkBodies(true)) {
         const d = await api("/api/admin/bulk", b);
@@ -263,12 +292,14 @@
   function openMenu(kind, mgmt) {
     if (S.menu && S.menu.kind === kind && !mgmt) { S.menu = null; drawBar(); return; }
     const first = ticks().map(person).filter(Boolean)[0], r = first && String(first.role || "").trim().toLowerCase();
-    S.menu = { kind, extra: "relief", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt };
+    S.menu = { kind, extra: "relief", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt,
+               chosen: [], count: 0 };
     drawBar(); previewMenu();
   }
 
   async function applyMenu() {
     const m = S.menu; if (!m || !m.lines || m.busy) return;
+    if (m.kind === "uslips") return printUsernameSlips(m);
     m.busy = true; m.fail = null; drawMenu(false);
     const said = []; let did = false;
     try {
@@ -288,6 +319,28 @@
     note(did ? said.join(" ") : "Nothing changed: " + said.join(" "), false);
     try { await loadPeople(); }
     catch (e) { if (!S.out) note((did ? said.join(" ") + " " : "") + "The list could not be refreshed. Reload the page.", true); }
+    drawAll();
+  }
+
+  /* the dark bar's Print username slips, after its preview: the ticked people who chose a password are sent back as the
+     preview named them, so a person who chose one since is refused (409) and the preview is read again with them named */
+  async function printUsernameSlips(m) {
+    if (!m.count) return;
+    m.busy = true; m.fail = null; drawMenu(false);
+    let n;
+    try { const d = await api(SLIPS, { names: ticks(), preview: false, chosen: m.chosen }); saveSlips(d); n = d.count; }
+    catch (e) {
+      if (S.out) { m.busy = false; drawMenu(false); return; }
+      if (GONE.test(e.message) && await barGone(e.message)) return;
+      m.busy = false; m.fail = e.message;
+      if (S.menu === m) previewMenu();
+      else note(e.message, true);   /* the menu was replaced meanwhile: the failure still reaches the message line */
+      return;
+    }
+    if (S.menu === m) { S.menu = null; S.ticked.clear(); S.token++; }
+    note(AdminView.slipsSaved(n), false);
+    try { await Promise.all([loadPeople(), loadWays()]); }
+    catch (e) { if (!S.out) note(AdminView.slipsSaved(n) + " The list could not be refreshed. Reload the page.", true); }
     drawAll();
   }
 
@@ -472,32 +525,84 @@
       || `<tr><td colspan="3" class="w" style="padding:14px">${total ? "No one matches." : "No students list is published yet."}</td></tr>`}</tbody></table>${list.length > shownRows.length ? `<div class="w" style="padding:8px">Showing the first 500. Search to narrow it.</div>` : ""}`;
   }
 
-  const SHARED_NAMES = { committee: "Shared committee code", head: "Shared heads' code", teacher: "Shared teacher code", student: "Shared student code" };
+  const SHARED_NAMES = AdminView.SHARED_NAMES;
+
+  function wayButton(b) {
+    return `<button type="button" class="${esc(b.cls)}" data-act="${esc(b.act)}"${b.code ? ` data-code="${esc(b.code)}"` : ""}${b.off != null ? ` data-off="${b.off ? 1 : 0}"` : ""}>${esc(b.text)}</button>`;
+  }
+
+  /* the box under the table: the question before staff codes go off, or the preview of the sign-in slips */
+  function waysBox() {
+    const w = S.ways, m = S.wslip;
+    if (S.staffAsk) return `<div class="menu" role="alert"><div>${esc(AdminView.staffOffAsk((w.staff_codes || {}).waiting || 0))}</div>
+      <div class="go"><button type="button" class="danger" data-act="staffcodes" data-off="1">Turn off staff codes</button><button type="button" data-act="staffno">Cancel</button></div></div>`;
+    if (!m) return "";
+    const fail = m.fail ? `<div class="sum bad">${esc(m.fail)}</div>` : "";
+    const sum = m.err ? `<div class="sum bad">${esc(m.err)}</div>` : m.busy ? `<div class="sum">Making the slips…</div>`
+      : m.lines ? `<div class="sum">${m.lines.map(l => `<p>${esc(l)}</p>`).join("")}</div>` : `<div class="sum">Reading what it would do…</div>`;
+    return `<div class="menu"><div class="w">${esc(SLIP_SAYS)}</div><div role="status" id="wsum" tabindex="-1">${fail}${sum}</div>
+      <div class="go"><button type="button" class="primary" data-act="wslipgo" ${m.lines && m.count && !m.busy ? "" : "disabled"}>Print</button><button type="button" data-act="wslipno"${m.busy ? " disabled" : ""}>Cancel</button></div></div>`;
+  }
 
   function drawWays() {
     const w = S.ways;
     if (!w) { $("#view").innerHTML = `<p class="muted">Loading…</p>`; return; }
-    const sh = w.shared.map(r => {
-      const off = r.off != null, used = plural(r.used_week, "time", "times");
-      const state = !r.set ? `<span class="w">Not set</span>` : off ? `<span class="on">Off since ${esc(fmtDay(new Date(r.off * 1000).toISOString().slice(0, 10)))}</span>` : `<span class="stillon">Still on · used ${esc(used)} this week</span>`;
-      const btn = !r.set ? "" : off ? `<button type="button" class="small" data-act="shared" data-code="${esc(r.code)}" data-off="0">Turn on</button>` : `<button type="button" class="small danger" data-act="shared" data-code="${esc(r.code)}" data-off="1">Turn off</button>`;
-      return `<tr><td>${esc(SHARED_NAMES[r.code] || r.code)}</td><td>${state}</td><td>${btn}</td></tr>`;
-    }).join("");
-    const recovery = w.recovery_set ? "Set in Railway variables" : w.recovery_short ? "Too short: recovery is off" : "Not set";
+    const rows = AdminView.waysRows(w).map(r => `<tr><td>${r.bold ? `<b>${esc(r.name)}</b>` : esc(r.name)}</td><td>${r.cls ? `<span class="${esc(r.cls)}">${esc(r.state)}</span>` : esc(r.state)}</td>
+      <td><span style="display:inline-flex;gap:6px;flex-wrap:wrap">${r.buttons.map(wayButton).join("")}</span></td></tr>`).join("");
     $("#view").innerHTML = `${w.secret_key ? "" : `<div class="hint">Accounts need SECRET_KEY in Railway variables.</div>`}
       ${w.recovery_warn ? `<div class="hint">${esc(w.recovery_warn)}</div>` : ""}
       <div class="tw ways"><table><thead><tr><th style="width:34%">Way in</th><th>State</th><th></th></tr></thead><tbody>
-      <tr><td><b>Personal codes</b> (staff and students)</td><td>${w.personal_codes ? "On" : "Off"}</td><td><button type="button" class="small" data-act="slipsall">Print slips</button></td></tr>
-      <tr><td><b>Username and password</b></td><td>${w.secret_key ? "On" : "Off"} · ${esc(plural(w.password_accounts, "account", "accounts"))}</td><td></td></tr>
-      <tr><td><b>Recovery code</b></td><td>${esc(recovery)}</td><td></td></tr>
-      ${sh}</tbody></table></div>
+      ${rows}</tbody></table></div>
+      <div id="wbox" style="margin-top:10px">${waysBox()}</div>
       <div class="w" style="margin-top:8px">"Used … times" counts sign-ins with the shared code in the last week, so you can see when it is safe to turn off.</div>`;
+  }
+  const onWays = () => S.tab === "ways";
+  function drawWaysFocus(sel) {   /* redraw, and put focus on sel when the pressed button has gone */
+    if (!onWays()) return;
+    drawWays();
+    if (sel && focusLost()) { const el = $(sel); if (el) el.focus(); }
   }
 
   async function turnShared(code, off) {
-    try { S.ways = await api("/api/admin/shared-off", { code, off }); note(`${SHARED_NAMES[code] || "The code"} is ${off ? "off" : "on"}.`, false); }
+    try { setWays(await api("/api/admin/shared-off", { code, off })); note(`${SHARED_NAMES[code] || "The code"} is ${off ? "off" : "on"}.`, false); }
     catch (e) { if (!S.out) note(e.message, true); }
-    drawWays();
+    if (onWays()) drawWays();
+  }
+
+  async function turnStaff(off) {
+    S.staffAsk = false;
+    try { setWays(await api("/api/admin/staff-codes", { off })); note(off ? "Staff codes are off: staff sign in with a username and password." : "Staff codes are on.", false); }
+    catch (e) { if (!S.out) note(e.message, true); }
+    drawWaysFocus('[data-act="staffask"],[data-act="staffcodes"]');
+  }
+
+  /* Make accounts and print slips: a preview of everyone who gets a slip, then Print makes them and saves the two files */
+  async function previewWays(fail) {
+    const m = { lines: null, chosen: [], count: 0, err: null, fail: fail || null, busy: false };
+    S.wslip = m; S.staffAsk = false; drawWaysFocus();
+    try {
+      const d = await api(SLIPS, { names: null, preview: true });
+      if (S.wslip !== m) return;
+      m.lines = d.lines; m.chosen = d.chosen; m.count = d.count;
+    } catch (e) { if (S.wslip !== m) return; m.err = S.out ? AGAIN : e.message; }
+    drawWaysFocus('[data-act="wslipgo"]:not([disabled]),[data-act="wslipno"]');
+  }
+
+  async function printWays() {
+    const m = S.wslip; if (!m || !m.lines || !m.count || m.busy) return;
+    m.busy = true; m.fail = null; drawWaysFocus("#wsum");   /* both buttons are off until the answer: the server cannot be stopped */
+    let n;
+    try { const d = await api(SLIPS, { names: null, preview: false, chosen: m.chosen }); saveSlips(d); n = d.count; }
+    catch (e) {
+      if (S.wslip !== m) { if (!S.out) note(e.message, true); return; }
+      if (S.out) { m.busy = false; drawWaysFocus(); return; }
+      return previewWays(e.message);   /* the error stays above the preview, read again */
+    }
+    if (S.wslip === m) S.wslip = null;
+    note(AdminView.slipsSaved(n), false);
+    try { await Promise.all([loadWays(), loadPeople()]); }
+    catch (e) { if (!S.out) note(AdminView.slipsSaved(n) + " The counts could not be refreshed. Reload the page.", true); }
+    drawWaysFocus('[data-act="mkslips"]');
   }
 
   /* ---------------------------------------------------------------- drawing it all */
@@ -511,11 +616,11 @@
 
   async function showTab(tab) {
     if (tab === S.tab) return;
-    S.tab = tab; S.menu = null; S.once = null; S.confirmReset = null; S.rename = null; note(null);
+    S.tab = tab; S.menu = null; S.once = null; S.confirmReset = null; S.rename = null; S.staffAsk = false; S.wslip = null; note(null);
     if (tab === "staff") skeleton();
     if (tab === "ways") { S.ways = null; }
     drawAll();
-    if (tab === "ways") { try { await loadWays(); } catch (e) { if (!S.out) note(e.message, true); } drawWays(); }
+    if (tab === "ways") { try { await loadWays(); } catch (e) { if (!S.out) note(e.message, true); } if (onWays()) drawWays(); }
   }
 
   /* ---------------------------------------------------------------- events */
@@ -567,6 +672,12 @@
     else if (a === "rmno") { S.ask = null; drawPanel(); const r = $('[data-act="rmask"]'); if (r) r.focus(); }
     else if (a === "rmgo") removePerson(p);
     else if (a === "shared") turnShared(t.dataset.code, t.dataset.off === "1");
+    else if (a === "staffask") { S.staffAsk = true; S.wslip = null; drawWays(); const c = $('[data-act="staffno"]'); if (c) c.focus(); }
+    else if (a === "staffno") { S.staffAsk = false; drawWays(); const b = $('[data-act="staffask"]'); if (b) b.focus(); }
+    else if (a === "staffcodes") turnStaff(t.dataset.off === "1");
+    else if (a === "mkslips") previewWays();
+    else if (a === "wslipgo") printWays();
+    else if (a === "wslipno") { S.wslip = null; drawWays(); const b = $('[data-act="mkslips"]'); if (b) b.focus(); }
   });
 
   document.addEventListener("keydown", e => {   /* Enter in the new username saves it; Esc closes the panel */
@@ -617,5 +728,9 @@
     drawAll();
     try { await loadStudents(); } catch (e) { S.students = null; }
     drawTabs();
+    if (!S.ways) {   /* whether staff codes are off: the Staff tab's code slip buttons go once they are */
+      try { await loadWays(); } catch (e) { /* the Ways in tab reads it again */ }
+      if (S.tab === "staff" && $("#tbl")) { drawTable(); drawBar(); }
+    }
   })();
 })();

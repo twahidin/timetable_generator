@@ -1345,12 +1345,7 @@ def the_pages_carry_the_words():
 NOW = "2026-10-01T09:00:00"
 
 def _approved(access=None, rooms=None):
-    s = _made_sched()
-    if access is not None: s["access"] = list(access)
-    s = _mk(s) if rooms is None else _mk(s, rooms=rooms)
-    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
-    AP.approve(s, "Timetable committee", NOW)
-    return s
+    return F.approved_exam(_PUB, access=access, **({} if rooms is None else dict(rooms=rooms)))
 
 @t
 def dates_read_as_on_the_page():
@@ -3086,6 +3081,23 @@ def student_code_sees_name_where_time_only():
     assert f["duties"] == [dict(duty="Bus marshal", who="Mr Hafiz Rahman", time="07:45")], f["duties"]
     assert f["days"] == [dict(date="2026-10-05", start="07:40", end="10:40")], f["days"]
     assert out["banner"] == "Sec 3 Learning Journey: Mon 5 Oct.", out["banner"]
+
+@t
+def a_plain_teacher_gets_only_their_own_duties():
+    own = PB.day(_PUB, F.CAL, [A1], D5, False, only="Mr Ben Ong")["exams"]
+    full = PB.day(_PUB, F.CAL, [A1], D5, True)["exams"]
+    assert own["teachers"] == {"Mr Ben Ong": full["teachers"]["Mr Ben Ong"]} and own["rooms"] == {}, own
+    assert own["teachers"]["Mr Ben Ong"][0]["room"] == "3-01" and own["teachers"]["Mr Ben Ong"][0]["role"] == "Invigilate"
+    import copy
+    c = copy.deepcopy(A1); d0 = c["made"]["duties"][0]; d0["chief"] = d0["names"][0]; boss = d0["chief"]
+    got = PB.day(_PUB, F.CAL, [c], D5, False, only=boss)["exams"]["teachers"][boss]
+    assert got[0]["role"] == "Chief invigilator" and got[0]["room"] == d0["room"], got
+    none = PB.day(_PUB, F.CAL, [A1], D5, False)["exams"]
+    assert none["teachers"] == {} and none["rooms"] == {}
+    assert PB.day(_PUB, F.CAL, [A1], D5, True, only="Mr Ben Ong")["exams"] == full
+    ev = PB.day(_PUB, F.CAL, [E1], "2026-10-05", False, only="Mr Hafiz Rahman")["exams"]
+    assert list(ev["teachers"]) == ["Mr Hafiz Rahman"] and ev["rooms"] == {}, ev
+    assert PB.day(_PUB, F.CAL, [A1], D5, False, only="Ms Nobody Here")["exams"]["teachers"] == {}
 
 @t
 def event_and_exam_on_one_date():

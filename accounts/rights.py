@@ -37,6 +37,16 @@ def rights(person, via, shared=None, today=None):
     r.add("history.own")   # anyone signed in by name can change something (ask for relief, start an event), so sees their own history
     return frozenset(r)
 
+def sees_all(person, today=None):
+    """the whole published timetable (every teacher, room and student, Who's free) once staff codes are off: management
+    (School leader, HOD, SH) and anyone with a committee tick (timetable, relief, admin, or exams until today or later).
+    Everyone else signed in by name sees their own timetable and the classes"""
+    if not person: return False
+    g, ex = person.get("group"), person.get("extras") or {}
+    if g in ("leader", "hod", "sh") or ex.get("timetable") or ex.get("relief") or ex.get("admin"): return True
+    until = ex.get("exams")
+    return bool(until and until >= (today or school_today()).isoformat())
+
 def _day(iso):
     d = datetime.date.fromisoformat(iso)
     return f"{d.day} {d.strftime('%b %Y')}"

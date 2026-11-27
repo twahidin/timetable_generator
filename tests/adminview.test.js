@@ -92,4 +92,63 @@ t("wholeDay: only a whole date from the year 2000 on", () => {
   assert.strictEqual(AdminView.wholeDay("2026-13-01"), false);
 });
 
+/* a ways answer in the shape GET /api/admin/ways sends; times are seconds, at noon UTC so the day is the same in every time zone */
+const NOON = Date.UTC(2026, 10, 26, 12) / 1000;
+const WAYS = o => Object.assign({ secret_key: true, personal_codes: true, password_accounts: 9, staff_codes: { off: null, waiting: 92 },
+  students: 1284, staff: 99, staff_chosen: 7,
+  shared: [{ code: "committee", set: true, off: NOON, used_week: 0 }, { code: "head", set: true, off: null, used_week: 1 }, { code: "teacher", set: false, off: null, used_week: 0 }],
+  recovery_set: false, recovery_short: false, recovery_warn: null }, o || {});
+const brief = rows => rows.map(r => [r.name, r.state, r.cls, r.buttons.map(b => b.text)]);
+
+t("waysRows: student codes, staff codes and username and password come first, then the rows there were", () => {
+  assert.deepStrictEqual(brief(AdminView.waysRows(WAYS())), [
+    ["Student codes", "On · 1,284 students", "", ["Print slips"]],
+    ["Staff codes", "On · 92 staff without a password yet", "", ["Print code slips", "Turn off"]],
+    ["Username and password", "On · 7 of 99 staff", "", ["Make accounts and print slips"]],
+    ["Recovery code", "Not set", "", []],
+    ["Shared committee code", "Off since 26 Nov 2026", "on", ["Turn on"]],
+    ["Shared heads' code", "Still on · used 1 time this week", "stillon", ["Turn off"]],
+    ["Shared teacher code", "Not set", "w", []]]);
+});
+t("waysRows: the buttons say what they do", () => {
+  const [stu, staff, pw, , shared] = AdminView.waysRows(WAYS());
+  assert.deepStrictEqual(stu.buttons.map(b => b.act), ["slipsstu"]);
+  assert.deepStrictEqual(staff.buttons.map(b => b.act), ["slipsall", "staffask"]);
+  assert.deepStrictEqual(pw.buttons.map(b => b.act), ["mkslips"]);
+  assert.deepStrictEqual(shared.buttons.map(b => [b.act, b.code, b.off]), [["shared", "committee", false]]);
+  assert.deepStrictEqual([stu.bold, staff.bold, pw.bold, shared.bold], [true, true, true, false]);
+});
+t("waysRows: staff codes off show the day in green and Turn on; their code slips go", () => {
+  const staff = AdminView.waysRows(WAYS({ staff_codes: { off: NOON, waiting: 12 } }))[1];
+  assert.deepStrictEqual(brief([staff]), [["Staff codes", "Off since 26 Nov 2026", "on", ["Turn on"]]]);
+  assert.deepStrictEqual(staff.buttons.map(b => [b.act, b.off]), [["staffcodes", false]]);
+});
+t("waysRows: one of each, none, and no accounts", () => {
+  const rows = AdminView.waysRows(WAYS({ students: 1, staff_codes: { off: null, waiting: 1 }, staff: 0, staff_chosen: 0, secret_key: false, personal_codes: false, recovery_set: true }));
+  assert.deepStrictEqual(rows.slice(0, 4).map(r => r.state), ["Off · 1 student", "Off · 1 staff without a password yet", "Off · 0 of 0 staff", "Set in Railway variables"]);
+  assert.strictEqual(AdminView.waysRows(WAYS({ students: 0 }))[0].state, "On · 0 students");
+  assert.strictEqual(AdminView.waysRows(WAYS({ recovery_short: true }))[3].state, "Too short: recovery is off");
+});
+
+t("offSince: the day a code was turned off", () => {
+  assert.strictEqual(AdminView.offSince(NOON), "Off since 26 Nov 2026");
+  assert.strictEqual(AdminView.offSince(Date.UTC(2027, 0, 5, 12) / 1000), "Off since 5 Jan 2027");
+});
+
+t("staffOffAsk: the question before staff codes are turned off", () => {
+  assert.strictEqual(AdminView.staffOffAsk(12), "Staff codes stop working at once, on every device. 12 staff have not signed in with a password yet: they will need their slip.");
+  assert.strictEqual(AdminView.staffOffAsk(1), "Staff codes stop working at once, on every device. 1 staff has not signed in with a password yet: they will need their slip.");
+  assert.strictEqual(AdminView.staffOffAsk(0), "Staff codes stop working at once, on every device. Every staff member has chosen their own password.");
+});
+
+t("barSlips: Print username slips always; Print their code slips only while staff codes are on", () => {
+  assert.deepStrictEqual(AdminView.barSlips(false), [{ act: "slips", text: "Print their code slips" }, { act: "menu", kind: "uslips", text: "Print username slips" }]);
+  assert.deepStrictEqual(AdminView.barSlips(true), [{ act: "menu", kind: "uslips", text: "Print username slips" }]);
+});
+
+t("slipsSaved: what the message line says once the two files are saved", () => {
+  assert.strictEqual(AdminView.slipsSaved(3), "Sign-in slips for 3 staff are saved: sign-in slips.pdf to print, and sign-in slips.csv for a mail merge.");
+  assert.strictEqual(AdminView.slipsSaved(1), "Sign-in slips for 1 staff are saved: sign-in slips.pdf to print, and sign-in slips.csv for a mail merge.");
+});
+
 console.log(`adminview: ${n} passed`);

@@ -13,7 +13,7 @@ SHARED = ("committee", "head", "teacher", "student")
 _lock = threading.RLock()
 
 def blank():
-    return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": []}, "moved": None, "migrated": False,
+    return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": [], "staff_off": None}, "moved": None, "migrated": False,
             "migrated_exams": False, "removed": {}}
 
 def _defaults():
@@ -89,6 +89,7 @@ def _fill(d):
         w = d["ways"]
         if isinstance(w.get("off"), dict): b["ways"]["off"].update(w["off"])
         if isinstance(w.get("recovery_used"), list): b["ways"]["recovery_used"] = w["recovery_used"]
+        if isinstance(w.get("staff_off"), (int, float)) and not isinstance(w.get("staff_off"), bool): b["ways"]["staff_off"] = w["staff_off"]
     b["moved"] = d.get("moved")
     b["migrated"] = d.get("migrated") is True
     b["migrated_exams"] = d.get("migrated_exams") is True
@@ -128,6 +129,10 @@ def listing(pub, data=None):
     4's), role, teaches and staff_only only, never an account field (group, extras, username, a password, sign-ins).
     In relief's order: by first department, people with none last, then by name"""
     return sorted(_listing(pub, load() if data is None else data)[0], key=lambda p: (not p["depts"], p["depts"][0] if p["depts"] else "", p["name"]))
+
+def staff_codes_off(data):
+    """True once an admin has turned the staff's personal codes off (staff then sign in with a username and password)"""
+    return data["ways"]["staff_off"] is not None
 
 def staff(pub, data=None):
     """the people with their account fields, for the admin page and the server's own checks only"""

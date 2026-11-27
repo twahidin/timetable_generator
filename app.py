@@ -5,7 +5,7 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, datetime, gzip, hmac, io, json, os, re, secrets, shutil, sys, tempfile, threading, time, traceback, urllib.parse, zipfile
+import base64, copy, datetime, gzip, hmac, io, json, os, re, secrets, shutil, sys, tempfile, threading, time, traceback, urllib.parse, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -14,7 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, compare, draft, history, putback, refit, refit_plan, store, students, sync, typed, versions
-from accounts import passwords, people, renames, rights as rights_table
+from accounts import passwords, people, renames, rights as rights_table, slips as account_slips
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 from relief import links as relief_links
@@ -70,6 +70,7 @@ def _check():
         v = session.get("via", "code")
         if not isinstance(name, str) or v not in ("code", "password") or r not in (None, "staff"): return _end()
         exp = session.get("exp")
+        if v == "code" and people.readable() and people.staff_codes_off(people.load()): return _end()   # staff codes turned off
         if v == "password" and not (isinstance(exp, (int, float)) and time.time() < exp): return _end()
         if not people.readable(): return _end()    # the records cannot be read: no one is let in by name (shared codes still work)
         data, pub = people.load(), store.published()
@@ -205,11 +206,15 @@ def page(title, body):
 # ------------------------------------------------------------------------------------------------ signing in
 CODE_LABEL = "Your personal code (on the slip from the school)"
 CODE_LABEL_SHARED = "Your code (the one the school gave you)"   # while a shared code still opens the site
+TO_STUDENT = "Students: sign in with your code"
+TO_STAFF = "Staff: sign in with your username"
 TO_USERNAME = "Committee and management: sign in with your username"
 WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
 SWITCHED_OFF = "This account is switched off. Ask the timetable committee."
 NO_ACCOUNTS = "Accounts need SECRET_KEY in Railway variables."
+STAFF_USE_PASSWORD = "Staff now sign in with a username and password. Ask the timetable committee for your slip."
+STAFF_CODES_OFF = "Staff codes are off: staff sign in with a username and password."
 NO_MATCH = "That username and password do not match."
 LOCKED = "Too many wrong tries. Wait 15 minutes and try again."
 TOO_MANY = "Too many wrong tries. Wait ten minutes and try again."
@@ -236,25 +241,33 @@ def school_name():
 def _warnings():
     return "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
 
-def _code_label():
+def _staff_codes_off():
+    """staff codes are off (accounts that cannot be read count as on, as the sign-in does)"""
+    try: return people.staff_codes_off(people.load())
+    except Exception: return False
+
+def _code_label(roles=None):
     """the code box's words: the plain ones people already know while any shared code is set and not turned off (a teacher
     with the shared teacher code is not told they need a personal one); "personal code" once every shared code is off.
+    roles: the shared codes that count (every one unless given; /student counts the shared student code alone).
     Accounts that cannot be read count as on, as the sign-in does (a turned-off code works again then)"""
     have, _ = access.configured()
     try: off = people.load()["ways"]["off"]
     except Exception: off = {}
-    return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in people.SHARED) else CODE_LABEL
+    return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in (roles or people.SHARED)) else CODE_LABEL
 
-def _code_page(msg=""):
+def _code_page(msg="", student=False):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="/login"><label for="code">{esc(_code_label())}</label>
+<div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(_code_label(("student",)) if student else _code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
 <button type="submit">Open</button></form>{err}
-<p class="way"><a href="/login/password">{esc(TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
+<p class="way"><a href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
 
-def _form_page(title, form, msg="", hint="", back=("/login", "Sign in with a code"), tail=None):
-    """a small page with one form; tail: the HTML at its foot (the setup warnings unless given)"""
+def _form_page(title, form, msg="", hint="", back=None, tail=None):
+    """a small page with one form; back: its way back (the sign-in page, the student page once staff codes are off);
+    tail: the HTML at its foot (the setup warnings unless given)"""
+    if back is None: back = ("/student", TO_STUDENT) if _staff_codes_off() else ("/login", "Sign in with a code")
     err = f"<p class='err'>{esc(msg)}</p>" if msg else ""
     return page(title, f"""<main class="login"><p class="small"><a class="back" href="{back[0]}">&larr; {esc(back[1])}</a></p>
 <h1>{esc(title)}</h1><p class="muted">{esc(school_name())}</p>{form}{err}{f'<p class="muted small">{esc(hint)}</p>' if hint else ""}{_warnings() if tail is None else tail}</main>""")
@@ -323,25 +336,37 @@ def _start(**keys):
 
 @app.get("/login")
 def login_page():
-    return _code_page()   # ?as= (the old cards) is accepted and ignored
+    return _password_page() if _staff_codes_off() else _code_page()   # ?as= (the old cards) is accepted and ignored
 
 @app.post("/login")
-def login():
+def login(): return _sign_in_with_code(_code_page)
+
+@app.get("/student")
+def student_page(): return _code_page(student=True)
+
+@app.post("/student")
+def student(): return _sign_in_with_code(lambda msg: _code_page(msg, student=True))
+
+def _sign_in_with_code(page_fn):
+    """the code POST shared by /login and /student; page_fn draws the page an error shows on"""
     addr = request.remote_addr or "?"
     if limiter.blocked(addr):
-        _record_locked(("addr", addr), "code"); return _code_page(TOO_MANY_CODES), 429
+        _record_locked(("addr", addr), "code"); return page_fn(TOO_MANY_CODES), 429
     pub, data = store.published(), people.load()
     r, val = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(people.staff(pub, data)))
     if r in people.SHARED and data["ways"]["off"].get(r) is not None:   # a shared code turned off is a wrong code
-        limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return _code_page(WRONG_CODE), 401
+        limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return page_fn(WRONG_CODE), 401
     if not r:
-        limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return _code_page(WRONG_CODE), 401
+        limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return page_fn(WRONG_CODE), 401
+    if r == "staff" and people.staff_codes_off(data):   # a staff code is a wrong code once staff codes are off
+        # a real staff code, not a guess: no strike (the limiter is per address, and a school behind one address would lock out every sign-in)
+        _record_signin(False, "code", reason="staff code after staff codes were turned off"); return page_fn(STAFF_USE_PASSWORD), 401
     if r == "staff":
         if not people.readable():   # the right code, but the records cannot be read: refused, and no strike
-            _record_signin(False, "code", val, reason="accounts file unreadable"); return _code_page(PERSON_OFF), 403
+            _record_signin(False, "code", val, reason="accounts file unreadable"); return page_fn(PERSON_OFF), 403
         rec = people.record(data, val)
         if rec["off"]:   # the right code: not a guess, so no strike
-            _record_signin(False, "code", val, reason="switched off"); return _code_page(SWITCHED_OFF), 403
+            _record_signin(False, "code", val, reason="switched off"); return page_fn(SWITCHED_OFF), 403
         _note_signin(val); _start(who=val, via="code", n=rec["n"]); _record_signin(True, "code", val)
         return redirect("/home")
     if r == "personal":
@@ -582,7 +607,7 @@ def tidy_once_a_day():
         print(f"WARNING: the daily tidy of the accounts and the history failed ({type(e).__name__})", file=sys.stderr, flush=True)
     return None
 
-_OPEN = {"/login", "/login/password", "/login/recover", "/logout", "/account/password", "/healthz"}
+_OPEN = {"/login", "/login/password", "/login/recover", "/logout", "/account/password", "/student", "/healthz"}
 
 @app.before_request
 def password_first():
@@ -1502,17 +1527,34 @@ def code_slips():
     if not pub: abort(404)
     if not access.personal_codes_on(): return NO_PERSONAL, 409
     buf = io.BytesIO()
-    code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/"), buf)
+    code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/") + "/student", buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="timetable code slips.pdf", mimetype="application/pdf")
 
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
-TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"])
+TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"],
+            staff=["classes", "teachers", "exams"])   # staff: a teacher's own timetable (the teachers tab, as My timetable) and the classes
 
 def files_for(r):
     if r == "committee": return [["Excel (all)", "/files/excel"], ["PDFs (zip)", "/files/zip"]]
     if r == "teacher": return [["Class PDFs", "/files/book/classes"], ["Teacher PDFs", "/files/book/teachers"]]
+    if r == "staff": return [["Class PDFs", "/files/book/classes"]]
     return []
+
+def _narrow():
+    """the narrow published timetable (their own and the classes): only once staff codes are off, never for the committee;
+    for a person signed in by name whom rights.sees_all leaves out, and for the shared teacher code (it cannot be anyone's own)"""
+    if has("committee") or not _staff_codes_off(): return False
+    p = who()
+    if p is not None: return not rights_table.sees_all(p)
+    return shared() == "teacher"
+
+_ME = "__the viewer's own name__"   # in the cached staff page, in place of the teacher's name
+
+def _my_teacher():
+    """the signed-in person's name when it is a teacher on the published timetable, else None (an executive, a shared code)"""
+    p, pub = who(), store.published()
+    return p["name"] if p is not None and pub and p["name"] in pub["model"]["teacher_ix"] else None
 
 @app.get("/timetable")
 @need("timetable")
@@ -1528,13 +1570,23 @@ def timetable():
     elif who() is None: r, home, label = "teacher", None, None
     elif _relief_stage_1() and has("relief"): r, home, label = "teacher", "/relief", "Relief"
     else: r, home, label = "teacher", "/home", "Home"
-    key = ("view", r, home)
+    me, tabs = None, TABS[r]
+    if r == "teacher" and _narrow():   # staff codes off: a teacher's own timetable and the classes, the way back as a teacher's
+        r = "staff"; me = _my_teacher(); tabs = [x for x in TABS[r] if x != "teachers" or me]
+    # one staff page for each way back and whether it has a My timetable; the viewer's name is put in as it is served
+    key = ("view", r, home, me is not None) if r == "staff" else ("view", r, home)
     if key not in pub["views"]:
-        view = "student" if r == "student" else "full"
-        app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
-                       placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
+        view = {"student": "student", "staff": "staff"}.get(r, "full")
+        app_cfg = dict(mode=r, tabs=tabs, pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
+                       placeholder="Search a class" if r in ("student", "staff") else None, home=home, homeLabel=label)
+        if r == "staff": app_cfg["me"] = _ME if me is not None else None
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
-    return Response(pub["views"][key], mimetype="text/html")
+    text = pub["views"][key]
+    if r == "staff" and me is not None:   # escaped as render_html escapes the page's data
+        mark = '"me":' + json.dumps(_ME)
+        if text.count(mark) != 1: abort(500)
+        text = text.replace(mark, '"me":' + json.dumps(me, ensure_ascii=False).replace("</", "<\\/"))
+    return Response(text, mimetype="text/html")
 
 @app.get("/draft/preview")
 @need("committee")
@@ -1589,6 +1641,7 @@ def pdf_one(kind, key):
     if not pub: abort(404)
     m = pub["model"]
     if shared() == "student" and kind != "classes": abort(403)   # the shared student code: class timetables only
+    if _narrow() and kind != "classes" and not (kind == "teachers" and key == _my_teacher()): abort(403)   # a teacher: the classes and their own
     if kind == "classes" and key in m["class_ix"]: return _pdf(class_view(m, key), f"Class {key}")
     if kind == "teachers" and key in m["teacher_ix"]: return _pdf(teacher_view(m, key), key)
     if kind == "rooms" and key in m["room_ix"]: return _pdf(room_view(m, key), f"Room {key}")
@@ -1603,9 +1656,9 @@ def pdf_one(kind, key):
 def files(what, kind=None):
     pub = store.published()
     if not pub: abort(404)
-    f = pub["meta"].get("files", {}); r = "committee" if has("committee") else "teacher"
+    f = pub["meta"].get("files", {}); r = "committee" if has("committee") else "staff" if _narrow() else "teacher"
     if what == "book":
-        allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms")}[r]
+        allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms"), "staff": ("classes",)}[r]
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
         return send_file(os.path.join(store.PUB, f["books"][kind]), as_attachment=True, download_name=os.path.basename(f["books"][kind]))
     if r != "committee": abort(403)
@@ -1717,6 +1770,7 @@ def _relief_codes_refused():
     """the answer that refuses the staff codes to whoever is signed in, or None (the routes check what is published)"""
     if not has("codes"): return {"error": ONLY_CODES}, 403
     if not access.personal_codes_on(): return NO_PERSONAL_STAFF, 409
+    if people.staff_codes_off(people.load()): return {"error": STAFF_CODES_OFF}, 409
     return None
 
 @app.get("/api/relief/codes.csv")
@@ -2051,7 +2105,12 @@ def _bulk(d, pub, b, today):
 def _ways():
     data, (have, _) = people.load(), access.configured()
     recs = [people.record(data, n) for n in data["people"]]
+    pub = store.published()
+    on = [people.record(data, p["name"]) for p in people.staff(pub, data) if not p["off"]]   # the staff not switched off
+    chosen = sum(1 for r in on if r["pw"] and not r["must_change"])   # on a password of their own choosing
     return dict(secret_key=accounts_on(), personal_codes=access.personal_codes_on(), password_accounts=sum(1 for r in recs if r["username"] and r["pw"]),
+                staff_codes=dict(off=data["ways"]["staff_off"], waiting=len(on) - chosen),
+                students=len(((pub or {}).get("model") or {}).get("students") or []), staff=len(on), staff_chosen=chosen,
                 shared=[dict(code=x, set=bool(have.get(x)), off=data["ways"]["off"].get(x), used_week=history.uses(kind="signin", via="shared", shared=x, ok=True))
                         for x in people.SHARED],
                 recovery_set=bool(recovery_code()), recovery_short=recovery_too_short(),
@@ -2536,6 +2595,103 @@ def admin_reset():
     r = jsonify(once=once); r.headers["Cache-Control"] = "no-store"
     return r
 
+NO_SLIPS = "Everyone has chosen their own password: there is no slip to print."
+SLIPS_AT_ONCE = "Print slips for at most 200 people at a time."
+SLIPS_STALE = "Someone ticked has just chosen their own password. Look at the list again before printing."
+SLIPS_FAILED = "The slips could not be made, so nothing was changed."
+SELF_SLIP = "You cannot print a slip for yourself. Change your own password with Change password instead."
+
+class _Stale(Refused):
+    """the list the admin looked at is out of date: refused with 409"""
+
+def _slip_plan(pub, d, names):
+    """who gets a slip, in the listing's order -> (the people [{name, depts, kind}], the preview's lines); kind is
+    "none" (no password yet), "temp" (an admin's temporary one, not yet used) or "chosen" (their own, ticked by name)"""
+    staff = {p["name"]: p for p in people.staff(pub, d)}
+    order = {p["name"]: i for i, p in enumerate(people.listing(pub, d))}
+    kind = lambda n: (lambda r: "none" if not r["pw"] else "temp" if r["must_change"] else "chosen")(people.record(d, n))
+    off, chosen_skipped = [], 0
+    if names is None:
+        picked = []
+        for n in staff:
+            if staff[n]["off"]: continue
+            if kind(n) == "chosen": chosen_skipped += 1
+            else: picked.append(n)
+    else:
+        picked = []
+        for n in dict.fromkeys(names):
+            if n not in staff: raise Refused(NOT_STAFF.format(n))
+            (off if staff[n]["off"] else picked).append(n)
+    picked.sort(key=lambda n: order.get(n, len(order)))
+    todo = [dict(name=n, depts=list(staff[n]["depts"]), kind=kind(n)) for n in picked]
+    none, temp = [t for t in todo if t["kind"] == "none"], [t for t in todo if t["kind"] == "temp"]
+    lines = []
+    if none: lines.append(f"{len(none)} staff have no account yet: each gets a username made from their name and a temporary password." if len(none) > 1 else "1 staff has no account yet: they get a username made from their name and a temporary password.")
+    if temp:
+        who = ", ".join(t["name"] for t in temp)
+        lines.append(f"{len(temp)} have a temporary password from an admin that they have not used yet ({who}): each gets a new one on their slip." if len(temp) > 1
+                     else f"1 has a temporary password from an admin that they have not used yet ({who}): they get a new one on this slip.")
+    lines += [f"{t['name']} has chosen a password: their slip gives a new temporary one and their old password stops working." for t in todo if t["kind"] == "chosen"]
+    if chosen_skipped: lines.append(f"{chosen_skipped} already chose their own password: no slip.")
+    lines += [f"{n} is switched off: no slip." for n in off]
+    return todo, (lines if todo or (names is not None and lines) else [NO_SLIPS])
+
+@app.post("/api/admin/staff-slips")
+@need("admin")
+def admin_staff_slips():
+    """preview who would get a slip, or make the accounts and answer with the slips (a PDF and a CSV): the temporary
+    passwords exist only in that answer"""
+    stop = _admin_off()
+    if stop: return stop
+    me, by_, pub = who()["name"], by(), store.published()
+    try:
+        b = _body()
+        names, preview = b.get("names"), b.get("preview")
+        if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)): raise Refused(UNREAD_CHANGE)
+        if not isinstance(preview, bool): raise Refused(UNREAD_CHANGE)
+        if names is not None and len(names) > 200: raise Refused(SLIPS_AT_ONCE)
+        if names is not None and me in names: raise Refused(SELF_SLIP)   # a failed save would leave them only the recovery code
+        if not people.readable(): raise people.Unreadable(people.UNREADABLE)
+        todo, lines = _slip_plan(pub, people.load(), names)
+        if preview: return jsonify(lines=lines, count=len(todo), chosen=[t["name"] for t in todo if t["kind"] == "chosen"])
+        if not todo: raise Refused(NO_SLIPS)
+        sent = b.get("chosen", [])
+        if not (isinstance(sent, list) and all(isinstance(n, str) for n in sent)): raise Refused(UNREAD_CHANGE)
+        school, url = school_name(), request.host_url.rstrip("/") + "/login/password"   # works before and after the switch
+        once = {t["name"]: passwords.one_time() for t in todo}
+        hashed = {n: passwords.hash_pw(v) for n, v in once.items()}
+        def change(d):
+            got, _ = _slip_plan(pub, d, names)
+            if any(t["name"] not in hashed for t in got): raise Refused(UNREAD_CHANGE)
+            if names is not None and any(t["kind"] == "chosen" and t["name"] not in sent for t in got): raise _Stale(SLIPS_STALE)
+            taken = {str(r.get("username") or "").lower() for r in d["people"].values() if isinstance(r, dict)}
+            rows, changes = [], []
+            for t in got:
+                r = people.record(d, t["name"]); u = r["username"]
+                if not u:
+                    u = account_slips.make_username(t["name"], t["depts"], taken); taken.add(u)
+                    changes.append(dict(name=t["name"], field="username", was="", now=u))
+                r.update(username=u, pw=hashed[t["name"]], must_change=True, n=r["n"] + (1 if t["kind"] == "chosen" else 0))
+                d["people"][t["name"]] = r
+                rows.append(dict(name=t["name"], depts=t["depts"], username=u, password=once[t["name"]], kind=t["kind"]))
+            buf = io.BytesIO()   # made before the file is written: if it fails, nothing is changed
+            account_slips.slips_pdf(school, rows, url, buf)
+            return rows, changes, base64.b64encode(buf.getvalue()).decode("ascii"), account_slips.slips_csv(rows)
+        rows, changes, pdf, csv_text = _update_as(me, change)
+    except _Stale as e: return {"error": str(e)}, 409
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    except Exception as e:
+        print(f"WARNING: sign-in slips could not be made ({type(e).__name__})", file=sys.stderr, flush=True)
+        return {"error": SLIPS_FAILED}, 500
+    for r in rows: lockout.clear(r["username"])
+    new, chosen = sum(r["kind"] == "none" for r in rows), sum(r["kind"] == "chosen" for r in rows)
+    text = f"Printed sign-in slips for {len(rows)} staff: {new} new account{'' if new == 1 else 's'}" + (f"; {chosen} had chosen a password" if chosen else "")
+    _account_entry("slips", [r["name"] for r in rows], changes, text, by_=by_)
+    r = jsonify(pdf=pdf, csv=csv_text, count=len(rows))
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
 @app.get("/api/admin/ways")
 @need("admin")
 def admin_ways():
@@ -2566,6 +2722,29 @@ def admin_shared_off():
         label = SHARED_AS[r]
         _account_entry("shared-off", [], [dict(name=label, field="off", was=was, now=now)],
                        f"Turned {'off' if off else 'on'} the {label[0].lower() + label[1:]}", by_=by_, shared=r)
+    return jsonify(_ways())
+
+@app.post("/api/admin/staff-codes")
+@need("admin")
+def admin_staff_codes():
+    """turn the staff's personal codes off (open code sessions of staff end at their next request) or on again -> the ways in"""
+    stop = _admin_off()
+    if stop: return stop
+    by_ = by()
+    try:
+        off = _body().get("off")
+        if not isinstance(off, bool): raise Refused(UNREAD_CHANGE)
+        at = time.time()
+        def change(d):
+            was = d["ways"]["staff_off"]
+            d["ways"]["staff_off"] = now = (was if was is not None else at) if off else None
+            return was, now
+        was, now = people.update(change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if (was is None) != (now is None):
+        _account_entry("staff-codes", [], [dict(name="Staff codes", field="off", was=was, now=now)],
+                       "Staff codes turned off" if off else "Staff codes turned on", by_=by_)
     return jsonify(_ways())
 
 @app.get("/api/admin/students")
@@ -2757,9 +2936,11 @@ def _exams_today():
 def _published_reader():
     """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for everyone
     who sees the published timetable as staff (the committee, the heads' and teachers' codes, a person signed in by name);
+    "staff" (the classes and their own duties, no rooms or roster) for a plain teacher once staff codes are off (_narrow);
     "student" (classes, rooms and times only) for the shared student code"""
     if not has("timetable"): return None
-    return "student" if shared() == "student" else "full"
+    if shared() == "student": return "student"
+    return "staff" if _narrow() else "full"
 
 def _exams_student():
     """the student a personal code is signed in as, whose own exam timetable /api/me/exams shows; None for anyone else"""
@@ -3177,7 +3358,9 @@ def exams_day():
     except ValueError: return {"error": BAD_DATE}, 400
     cal = _exam_cal(pub)
     if not cal.get("terms"): return {"error": NO_DAY_CAL}, 409
-    return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, _published_reader() == "full"), published_at=stamp))
+    reader = _published_reader()
+    return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, reader == "full",
+                                                only=who()["name"] if reader == "staff" and who() else None), published_at=stamp))
 
 @app.get("/api/published/exams")
 @need("timetable")

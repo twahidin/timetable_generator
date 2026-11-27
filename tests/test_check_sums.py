@@ -204,11 +204,11 @@ def the_skill_copy_runs_by_itself():
 def skill_md_says_what_the_check_prints():
     from ttgen import spec as SPEC
     s = open(os.path.join(ROOT, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
-    assert SPEC.SKILL_VERSION == "2026-11.10" and "Skill version: 2026-11.10" in s
+    assert SPEC.SKILL_VERSION == "2026-11.11" and "Skill version: 2026-11.11" in s
     for words in ("**Critical** items", "**Any critical item: stop.**", "nothing is critical after choice", "`ttgen/checks.py`", "the check has done these sums",
                   "**A `[lessons]` warning that names a lesson row: tell the person and wait", "The setup could not be checked", "None of the second choices", "a group code used on two rows"): assert words in s, words
     assert "Fix or report each of these before solving" not in s
     readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
-    assert "`ttgen/checks.py`" in readme and "Skill version: 2026-11.10" in readme
+    assert "`ttgen/checks.py`" in readme and "Skill version: 2026-11.11" in readme
 
 print(f"{n} checks passed")

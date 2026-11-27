@@ -178,7 +178,7 @@ is not on step 3, and a named subject the class has only in groups.
    `python -m ttgen check` prints the same list, critical first, and ends with an error while something critical stays).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.10`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.11`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
@@ -470,7 +470,18 @@ left on the list after leaving the timetable): their username and password go, t
 Telegram chat is unlinked and every session of theirs ends; what they changed stays in the History, and a removal cannot
 be put back (add the person again with **Add a person**; the same name gets the same personal code as before). People on
 the published timetable come from it, so they are switched off instead. A renamed teacher's account is moved or removed when the timetable is published (step 9), not here. **Ways in** shows each way to sign in and lets
-you turn a shared code off or on, with its week's use. It needs `SECRET_KEY`. To make the first admin, sign in with the committee code: until an admin exists the
+you turn a shared code off or on, with its week's use. It needs `SECRET_KEY`.
+
+**Staff passwords (the Staff codes switch).** Until the switch is used nothing changes: staff sign in on `/login` with a username and password, or with a personal or shared code, and students use their code. To move staff to passwords, an admin opens **Ways in** and:
+1. presses **Make accounts and print slips** for the staff who have no account yet. Each gets a username made from their name (titles such as "Ms" are left out, so "Ms Alice Tan" becomes something like `alicetan`) and a temporary password, printed once on a slip (a PDF, with a CSV beside it). The password is not kept anywhere and cannot be shown again;
+2. hands the slips out. A person signs in with the slip and is asked to choose their own password at once;
+3. checks each head's role on the Staff tab: an HOD or SH whose role there is still Teacher gets the teacher's narrow view once staff codes are off;
+4. when everyone has chosen (the row says, for example, "7 of 99 staff"), presses **Turn off staff codes** (it asks first). From then on a staff member's personal code is refused with a line telling staff to ask the committee for a slip, and the front page `/login` asks for a username and password, with a link "Students: sign in with your code". The shared codes are not changed by this: each keeps its own row on Ways in, and `/student` still accepts the shared student code while its row is on.
+Someone who forgot their password: tick them on the Staff list and use **Print username slips**; that gives each ticked person a new temporary password and a new slip. It signs out only the people who had chosen their own password (their old one stops working, and the preview names them). When everyone has chosen a password there is no slip to print and the button says so.
+
+Students never need a password. They sign in on `/student` with their personal code or the shared student code (the shared code keeps working while the Student codes row is on); staff see a link "Staff: sign in with your username" there. A staff code typed on `/student` is refused the same way as on `/login`.
+
+Once staff codes are off, what a person sees follows their role. A plain teacher sees **My timetable** (their own lessons, first), **Classes** and **Exams and events** (with **Your duties**: their own invigilation, the room, and the classes); other teachers' timetables, rooms, the lesson search and Who's free are not theirs to open, and another teacher's name in a lesson box is plain text. Management (school leaders, HODs, SHs) and members of the Timetable committee and other committees see everything their role and committees give them, as before. Relief pages are not narrowed. To make the first admin, sign in with the committee code: until an admin exists the
 committee page says "No admin account yet. Make the first admin" (and `/admin` goes there too); you give your name, a
 username and a password, and you are signed in as the first admin, on the Timetable committee with Admin ticked and
 your role left as it was. If every admin forgets their password, set

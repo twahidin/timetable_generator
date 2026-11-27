@@ -148,7 +148,8 @@ def _duties_on(s, date):
     return ((d, ps) for d, ps in _all_duties(s) if d["date"] == date)
 
 
-def day(pub, cal, scheds, date, full) -> dict:
+def day(pub, cal, scheds, date, full, only=None) -> dict:
+    """only: with full False, the one teacher whose own duties and events are kept (no rooms): a plain teacher's page"""
     model = pub["model"]
     bnds = _days.bounds(model)
     counted = [s for s in _order(scheds) if _counts(s, date)]
@@ -165,7 +166,7 @@ def day(pub, cal, scheds, date, full) -> dict:
     for s in counted:
         for c, items in _class_items(pub, s, date, bnds).items():
             classes.setdefault(c, []).extend(items)
-        if not full:
+        if not full and only is None:
             continue
         if _event(s):
             win = next(iter(_days._windows(s, date, model, bnds).values()), None)
@@ -173,16 +174,18 @@ def day(pub, cal, scheds, date, full) -> dict:
                 span = dict(start=_hm(win[0]), end=_hm(win[1]), label=s["name"])
                 pn = _span(win[0], win[1], bnds)
                 for n in s.get("going") or []:
+                    if not full and n != only: continue
                     teachers.setdefault(n, []).append(dict(span, room=_place(s), role=EVENT_ROLE, duty=_duty_text(s, n), exam=s["name"], kind="event", **pn))
-                for v in s.get("venues") or []:
+                for v in (s.get("venues") or []) if full else []:
                     rooms.setdefault(v, []).append(dict(span, exam=s["name"], kind="event", **pn))
             continue
         for d, ps in _duties_on(s, date):
             lab = _label(ps)
             span = dict(start=_hm(d["start"]), end=_hm(d["end"]), label=lab)
             pn = dict(p=pos(bnds, d["start"]), n=round(pos(bnds, d["end"]) - pos(bnds, d["start"]), 3))
-            rooms.setdefault(d["room"], []).append(dict(span, exam=s["name"], **pn))
+            if full: rooms.setdefault(d["room"], []).append(dict(span, exam=s["name"], **pn))
             for n in d.get("names") or []:
+                if not full and n != only: continue
                 teachers.setdefault(n, []).append(dict(span, room=d["room"], role="Chief invigilator" if d.get("chief") == n else "Invigilate",
                                                        exam=s["name"], **pn))
     for lst in list(classes.values()) + list(teachers.values()) + list(rooms.values()):

@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.10 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill; the last number counts up, so 2026-11.10 is newer than 2026-11.9). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.11 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill; the last number counts up, so 2026-11.11 is newer than 2026-11.9). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -343,6 +343,7 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
     - Excel: the same grid with merged cells, one block of rows per timetable and a page break after each.
     - HTML: one file with the data embedded as JSON and plain JavaScript (no external files) for search, lists,
       grids, the lesson filter table, the free finder and the student builder.
+      In 2026-11.11 the page the app publishes also has a `staff` mode: a teacher's own timetable and the classes.
 
 ## Lessons learned
 
