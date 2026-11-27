@@ -260,7 +260,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(P.view().includes("Mr Ben Ong") && count(P.view(), 'class="row') === 10, P.view());
     assert.strictEqual(keys(P.el("list").innerHTML), "Mr Ben Ong");
     assert(!P.el("list").innerHTML.includes('class="grp"'), "no empty department heading: " + P.el("list").innerHTML);
-    assert(!P.view().includes("allowance") && P.view().includes("periods a cycle"), "no empty allowance stat");
+    assert(!P.view().includes("allowance") && !P.view().includes("periods a cycle"), "a staff page has no figures at all (planning figures are the committee's)");
     const box = id => { P.run(`lessonDialog(${id})`); return P.el("dlgB").innerHTML; };
     let b = box(3);
     assert(b.includes('<a data-go="teachers" data-key="Mr Ben Ong">Mr Ben Ong</a>') && b.includes('<a data-go="classes" data-key="4A">4A</a>') && !b.includes('data-go="rooms"') && b.includes("LT2"), b);
@@ -272,7 +272,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(keys(P.el("list").innerHTML), "3A,3B,4A");
     assert.strictEqual(P.run('INDEX_OK.filter(e => e.t === "teachers").map(e => e.k).join(",")'), "Mr Ben Ong", "the search finds only them");
     const F = boot({ "/api/published/exams": LIST }, APP);
-    F.run('show("teachers", "Mr Ben Ong")'); assert(F.view().includes("allowance"), "a teacher's page keeps the allowance stat");
+    F.run('show("teachers", "Mr Ben Ong")'); assert(!F.view().includes("allowance"), "a teacher-mode page has no allowance: it is the committee's figure");
     F.run("lessonDialog(2)"); b = F.el("dlgB").innerHTML;
     assert(b.includes('data-go="teachers" data-key="Ms Grace Yeo"') && b.includes('data-go="rooms" data-key="3-02"') && b.includes('data-go="lessons"'), "the full page keeps every link: " + b);
     const ST = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "student", tabs: ["classes", "students", "exams"] }), cut);
@@ -424,5 +424,48 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     R.run('const cv0 = classView; classView = c => c === "3B" ? Object.assign(cv0(c), { cells: [] }) : cv0(c); show("lessons", null)'); await R.tick();
     const g = (R.el("ltab") || {}).innerHTML || "";
     assert(/Class 3B<\/a><small><\/small><\/h2><div class="empty">No lessons\.<\/div><\/section>/.test(g), "an empty class grid says No lessons.: " + g.slice(0, 400));
+  });
+
+  await t("who sees what: figures, period counts and after-school words show to the committee only", async () => {
+    const lessonsOf = d => { d.lessons[0][11] = 1; };
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], r[2], ""]); d.classes = d.classes.map(r => [r[0], r[1], "", ...r.slice(3)]); d.lessons.forEach(r => { r[11] = 0; }); d.checks.after = []; d.checks.notes = []; };   /* html_data for a page that is not the committee's */
+    const tabs = ["classes", "teachers", "rooms", "students", "lessons", "free", "exams"];
+    const COM = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "committee" }), lessonsOf);
+    const TEA = boot({ "/api/published/exams": LIST }, APP, cut);
+    const STF = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" }), cut);
+    const STU_ = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "student", tabs: ["classes", "students", "exams"] }), cut);
+    const PER = boot({ "/api/me/exams": [200, { schedules: [] }] }, { mode: "personal", exams: true, pdf: true, logout: "/logout", files: [] }, cut);
+    const SAVED = boot({}, undefined, lessonsOf);
+    for (const X of [COM, TEA, STF, STU_, SAVED]) { X.run('show("classes", "3A")'); const h = X.view();
+      assert(!h.includes("periods a cycle") && !h.includes(" students") && !h.includes('class="stats"><div>'), "no figures on a class page: " + h);
+      assert(h.includes("Sec 3 · home room 3-01")); }
+    COM.run('show("teachers", "Mr Ben Ong")'); assert(COM.view().includes("periods a cycle") && COM.view().includes("most in a day") && / · \d+ periods/.test(COM.view()));
+    SAVED.run('show("teachers", "Mr Ben Ong")'); assert(SAVED.view().includes("periods a cycle") && / · \d+ periods/.test(SAVED.view()), "a saved copy with no APP is the committee's");
+    COM.run('show("rooms", "3-01")'); assert(COM.view().includes("periods used") && COM.view().includes("of lesson time"));
+    for (const X of [TEA, STF]) { X.run('show("teachers", "Mr Ben Ong")'); const h = X.view();
+      assert(!h.includes("periods a cycle") && !h.includes("allowance") && !h.includes("most in a day") && !/\d+ periods/.test(h), h); }
+    for (const X of [TEA, STU_]) { X.run('show("rooms", "3-01")'); assert(!X.view().includes("periods used") && !/\d+ periods/.test(X.view()), X.view()); }
+    COM.run('show("classes", "3A")'); assert(/ · \d+ periods/.test(COM.view()), "the committee's list under a class has the count");
+    COM.run('show("classes", "3A")'); COM.run("S.current.legend.forEach(e => { if (!e.count || /periods/.test(e.text)) throw new Error('legend entry ' + JSON.stringify(e)); })");
+    COM.run('const bv = classView("3A"); if (!bv.legend.every(e => /^\\d+ periods$/.test(e.count))) throw new Error("count")');
+    COM.run("lessonDialog(3)"); assert(/ · \d+ periods/.test(COM.el("dlgT").innerHTML) && !COM.el("dlgT").innerHTML.includes("after school"), COM.el("dlgT").innerHTML);
+    TEA.run("lessonDialog(3)"); assert(!TEA.el("dlgT").innerHTML.includes("periods") && !TEA.el("dlgT").innerHTML.includes("after school"), TEA.el("dlgT").innerHTML);
+    COM.run('show("lessons", null)'); assert(COM.view().includes("After school only"));
+    TEA.run('show("lessons", null)'); assert(!TEA.view().includes("After school only") && !TEA.view().includes("after school"));
+    /* the Table's small words and the CSV */
+    for (const X of [COM, TEA]) X.run('S.lview = "table"; show("lessons", null)');
+    assert.strictEqual(count(COM.el("ltab").innerHTML, "after school</small>"), 1, "one lesson is marked after school");
+    assert(!TEA.el("ltab").innerHTML.includes("after school") && TEA.el("ltab").innerHTML.includes("--t:#"), "the Table's swatch has the subject's colour");
+    const csv = X => { X.run('globalThis.__csv = null; Blob = function (a) { globalThis.__csv = a[0]; }; URL = { createObjectURL: () => "blob:x", revokeObjectURL() {} }; document.createElement = () => ({ click() {} }); csvDownload(filteredLessons(), "x")'); return X.run("globalThis.__csv").split("\r\n"); };
+    const cc = csv(COM), tc = csv(TEA);
+    assert(cc[0].includes("After school") && !tc[0].includes("After school"), cc[0] + " | " + tc[0]);
+    assert.strictEqual(cc[1].split(",").length - 1, tc[1].split(",").length, "each row has one value fewer");
+    /* the filter and the link */
+    COM.run("S.lf = { ext: true }"); assert.strictEqual(COM.run("filteredLessons().length"), 1);
+    TEA.run("S.lf = { ext: true }"); assert.strictEqual(TEA.run("filteredLessons().length"), 4, "the filter does nothing for others");
+    TEA.run('location.hash = "#lessons?ext=true"; route()'); assert.strictEqual(TEA.run("JSON.stringify(S.lf)"), "{}", "the link does nothing");
+    /* a student's own page: no figures, no counts */
+    PER.run("showPersonal()"); const ph = PER.view();
+    assert(!ph.includes('class="stats"') && !/\d+ periods/.test(ph) && !ph.includes("periods a cycle"), ph);
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });
