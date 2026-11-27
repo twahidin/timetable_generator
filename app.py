@@ -1604,8 +1604,8 @@ def _reset_page(me, shown=None, msg="", status=200):
 <p>Username: <strong>{esc(shown["username"])}</strong></p><p>Temporary password: <strong>{esc(shown["once"])}</strong></p></div>"""
     else: box = ""
     items = _resettable(store.published(), people.load(), me)
-    rows = "".join(f"""<form method="post" action="/staff-reset"><p>{esc(p["name"])} <span class="muted">{esc(", ".join(p["depts"]))}</span>
-<input type="hidden" name="name" value="{esc(p["name"])}"><button type="submit">Reset</button></p></form>""" for p in items)
+    rows = "".join(f"""<form class="srow" method="post" action="/staff-reset"><span>{esc(p["name"])} <span class="muted small">{esc(", ".join(p["depts"]))}</span></span>
+<input type="hidden" name="name" value="{esc(p["name"])}"><button type="submit">Reset</button></form>""" for p in items)
     if not items: msg = msg or RESET_NONE
     r = Response(_form_page("Reset a password", box + rows, msg, RESET_HINT, back=back, tail=""), status=status, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
