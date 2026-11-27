@@ -6,7 +6,7 @@
 
 The model comes from the solver result in memory (model_from_result) or from the setup workbook plus a timetable
 workbook whose Lessons sheet uses LESSON_HEADERS (model_from_files), so a timetable made another way exports too."""
-import collections, copy, datetime, json, os, re, zipfile
+import collections, copy, datetime, json, math, os, re, zipfile
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter as CL
@@ -498,8 +498,8 @@ def class_view(m, c):
     nper = len(used)
     stats = [(info["level"], "level"), (str(info["size"] or "-"), "students"), (info["home"] or "-", "home room"), (str(nper), "periods a cycle")]
     sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}"; pl = _parents_text(m, c)
-    return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub + (f" · {pl}" if pl else ""), pdf_subtitle=sub, parents_line=pl, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
-                cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"])
+    return _look(m, dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub + (f" · {pl}" if pl else ""), pdf_subtitle=sub, parents_line=pl, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
+                cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"]), f"{info['level']} · home room {info['home'] or '-'}")
 
 def teacher_view(m, t):
     info = m["teacher_ix"][t]; rows = [x for x in m["lessons"] if t in x["teachers"]]
@@ -520,12 +520,12 @@ def teacher_view(m, t):
         legend.append(dict(color=_color(m, s), label=abbrev(s), text=f"{who}{extra} · {e['periods']} periods · {_common(e['rooms']) or '-'}"))
     busiest = max(per_day.values()) if per_day else 0
     stats = [(str(total), "periods a cycle"), (str(info.get("allowance") or "-"), "allowance"), (str(busiest), "most in a day"), (str(len(per_day)), "days teaching")]
-    sub = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "",
-                                     f"{ext} after-school periods" if ext else "") if x)
+    own = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "") if x)
+    sub = " · ".join(x for x in (own, f"{ext} after-school periods" if ext else "") if x)
     lv = [x["level"] for x in rows]; mine = [c["name"] for c in m["classes"] if t in (c.get("parents") or [])]
     pl = f"{m.get('parents_name') or 'Form teachers'} of {', '.join(mine)}" if mine else ""
-    return dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=((sub or "Teacher") + f" · {pl}") if pl else (sub or "Teacher"), pdf_subtitle=sub or "Teacher", parents_line=pl, stats=stats, codes=_codes_for(m, lv), cells=cells,
-                legend=legend, legend_title="Teaching", group=info["dept"] or "Other")
+    return _look(m, dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=((sub or "Teacher") + f" · {pl}") if pl else (sub or "Teacher"), pdf_subtitle=sub or "Teacher", parents_line=pl, stats=stats, codes=_codes_for(m, lv), cells=cells,
+                legend=legend, legend_title="Teaching", group=info["dept"] or "Other"), own or "Teacher")
 
 def room_view(m, r):
     info = m["room_ix"][r]; parts = m.get("room_parts") or {}; rows = [x for x in m["lessons"] if x["room"] == r or r in single_rooms(x["room"], parts)]   # a lesson in a combined venue is in each of its rooms
@@ -547,8 +547,8 @@ def room_view(m, r):
     eq, cf = ", ".join(info.get("equipment") or []), info.get("configuration") or ""   # read with .get: a model published before this has neither
     more = " · ".join(x for x in (f"Equipment: {eq}" if eq else "", f"Configuration: {cf}" if cf else "") if x)
     made = f" · made of {' + '.join(info['parts'])}" if info.get("parts") else ""   # a combined venue says which rooms it is made of
-    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else "") + made, pdf_subtitle=plain + made, extra_line=more,
-                stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"])
+    return _look(m, dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else "") + made, pdf_subtitle=plain + made, extra_line=more,
+                stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"]), plain + made)
 
 def student_rows(m, cls, groups):
     gs = set(groups)
@@ -567,8 +567,8 @@ def student_view(m, s):
               for s_, e in ent.items()]
     lv = m["class_ix"].get(s["cls"], {}).get("level") or s["level"]; pl = _parents_text(m, s["cls"])
     stats = [(s["cls"], "class"), (lv, "level"), (str(len(s["groups"])), "groups"), (str(len(used)), "periods a cycle")]
-    return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}" + (f" · {pl}" if pl else ""), pdf_subtitle=f"{s['id']} · Class {s['cls']} · {lv}", parents_line=pl,
-                stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"])
+    return _look(m, dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}" + (f" · {pl}" if pl else ""), pdf_subtitle=f"{s['id']} · Class {s['cls']} · {lv}", parents_line=pl,
+                stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"]), f"{s['id']} · Class {s['cls']} · {lv}")
 
 def all_views(m, kind):
     if kind == "classes":
@@ -628,22 +628,94 @@ def _wrap(text, font, size, width, first_width=None):
     if cur: lines.append(cur)
     return lines
 
+# ----------------------------------------------------------------------------------------------- the printout's clock sums and words
+def _mins(m, p):
+    """minutes after midnight at the start of period p (p = NP is the end of the day)"""
+    h, mi = map(int, str(m["school"]["start_time"]).split(":")[:2])
+    return h * 60 + mi + p * int(m["school"]["period_minutes"])
+
+def _clk(t):
+    """minutes after midnight as the school writes a time: 780 is "1.00" """
+    return f"{(t // 60 - 1) % 12 + 1}.{t % 60:02d}"
+
+def _plain(text):
+    """a legend entry without its count of periods"""
+    return re.sub(r"^\d+ periods · ", "", re.sub(r" · \d+ periods(?= · |$)", "", text))
+
+def _look(m, v, print_subtitle):
+    """what the printout reads besides the Excel file's keys: each cell's start and end in minutes, the plain subtitle, each legend entry without its periods"""
+    NP = m["NP"]
+    for c in v["cells"]:
+        c["a"] = _mins(m, max(0, min(NP - 1, int(c["p"])))); c["b"] = _mins(m, max(1, min(NP, math.ceil(c["p"] + c["n"]))))
+    v["print_subtitle"] = print_subtitle
+    for e in v["legend"]: e["plain"] = _plain(e["text"])
+    return v
+
+def _bands(m, v, d):
+    """the runs of assembly, recess and lunch on day d as (start, end, name) in minutes, kept only when a cell of the view that day starts at or after the run's end"""
+    row = v["codes"][d] if v.get("codes") else None; out = []; NP = m["NP"]; p = 0
+    while row and p < NP:
+        q = p
+        while q + 1 < NP and row[q + 1] == row[p]: q += 1
+        if row[p] in BREAK:
+            a, b = _mins(m, p), _mins(m, q + 1)
+            if any(c["d"] == d and c["a"] >= b for c in v["cells"]): out.append((a, b, BREAK[row[p]]))
+        p = q + 1
+    return out
+
+def _span(m, v):
+    """the page's length in minutes: the earliest start of a cell or kept band to the latest end of a cell, over all days; None when there is nothing to draw"""
+    if not v["cells"]: return None
+    a0 = min(c["a"] for c in v["cells"]); b1 = max(c["b"] for c in v["cells"])
+    for d in range(m["ND"]):
+        for a, _, _ in _bands(m, v, d): a0 = min(a0, a)
+    return a0, b1
+
+def _hours(a0, b1):
+    """a mark for each whole hour in a0..b1: "8 am" first, then "9", "12 noon", "1 pm", "2" """
+    out = []; h = -(-a0 // 60)
+    while h * 60 <= b1:
+        n = (h + 11) % 12 + 1
+        out.append((h * 60, f"{n} noon" if h == 12 else f"{n} pm" if h == 13 else f"{n} {'am' if h < 12 else 'pm'}" if not out else str(n))); h += 1
+    return out
+
+def _box_lines(cell, w, h):
+    """the lines a lesson box w wide and h tall (points) draws, top to bottom, as (text, font, size, colour): the time, the title, the detail"""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    R, B = _fonts(); full = f"{_clk(cell['a'])}–{_clk(cell['b'])}"; start = _clk(cell["a"]); room = h - 3
+    detail = " · ".join(cell["lines"]); title = cell["title"]
+    def time_at(sz): return full if stringWidth(full, R, sz) <= w - 5.5 else start
+    f = 1.0
+    while True:
+        t, ti, de = 6.2 * f, 7.4 * f, 6.3 * f
+        if (t + ti + (de if detail else 0)) * 1.16 <= room: break
+        if f <= 0.9 + 1e-9: f = None; break
+        f = max(0.9, f - 0.02)
+    if f:
+        out = [(time_at(t), R, t, SUB), (title, B, ti, INK)] + ([(detail, R, de, MUTED)] if detail else [])
+        return out
+    t, ti = 6.2 * 0.9, 7.4 * 0.9
+    if (t + ti) * 1.16 <= room: return [(time_at(t), R, t, SUB), (title, B, ti, INK)]
+    one = f"{start} {title}"
+    if stringWidth(one, B, ti) <= w - 5.5: return [(one, B, ti, INK)]
+    return [(title, B, ti, INK)]
+
 def _lanes(cells):
     """cells that overlap in time share the row height"""
     out = {}
     for d in {c["d"] for c in cells}:
-        cs = sorted((c for c in cells if c["d"] == d), key=lambda c: (c["p"], -c["n"]))
+        cs = sorted((c for c in cells if c["d"] == d), key=lambda c: (c["a"], -c["b"]))
         cluster, end = [], -1
         def flush(cl):
             lanes = []
             for c in cl:
                 for i, e in enumerate(lanes):
-                    if e <= c["p"]: lanes[i] = c["p"] + c["n"]; out[id(c)] = [i, 0]; break
-                else: lanes.append(c["p"] + c["n"]); out[id(c)] = [len(lanes) - 1, 0]
+                    if e <= c["a"]: lanes[i] = c["b"]; out[id(c)] = [i, 0]; break
+                else: lanes.append(c["b"]); out[id(c)] = [len(lanes) - 1, 0]
             for c in cl: out[id(c)][1] = len(lanes)
         for c in cs:
-            if cluster and c["p"] >= end: flush(cluster); cluster, end = [], -1
-            cluster.append(c); end = max(end, c["p"] + c["n"])
+            if cluster and c["a"] >= end: flush(cluster); cluster, end = [], -1
+            cluster.append(c); end = max(end, c["b"])
         if cluster: flush(cluster)
     return out
 
@@ -1044,7 +1116,7 @@ def custom_view(m, cls, groups):
     """a student's timetable from their class and chosen groups (the finder's 'Build a timetable')"""
     info = m["class_ix"][cls]
     v = student_view(m, dict(id="custom", name=f"Class {cls}", cls=cls, level=info["level"], groups=list(groups)))
-    v["subtitle"] = f"Class {cls} · {info['level']} · groups {', '.join(groups) or '-'}"; v.pop("pdf_subtitle", None); v.pop("parents_line", None)
+    v["subtitle"] = f"Class {cls} · {info['level']} · groups {', '.join(groups) or '-'}"; v.pop("pdf_subtitle", None); v.pop("print_subtitle", None); v.pop("parents_line", None)
     return v
 
 def group_options(m, cls):
