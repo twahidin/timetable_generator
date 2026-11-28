@@ -45,6 +45,7 @@ function serve(p, call) {   /* p.preview, p.save: an answer, a promise of one, a
   if (call.url === "/api/relief/school-days") return ok(DAYS);
   if (call.url.endsWith("/change/preview")) return give(p.preview);
   if (call.url.endsWith("/change")) return give(p.save);
+  if (call.url.includes("/lessons/") || call.url.endsWith("/cancel")) return give(p.step);
   return null;
 }
 const previews = p => p.calls.filter(c => c.url.endsWith("/change/preview"));
@@ -53,16 +54,16 @@ const fireChange = el => { const e = { type: "change", target: el }; for (let x 
 async function choose(p, sel, v) { const el = p.find(sel); el.value = String(v); fireChange(el); await p.settle(); }
 
 /* the editor alone, open on r; me: who is signed in; preview / save: the answers (or functions of the call) */
-async function editor(r, { me = EVE, preview = answer({ unchanged: true }), save = ok({}) } = {}) {
+async function editor(r, { me = EVE, preview = answer({ unchanged: true }), save = ok({}), step = ok({}), opts = {} } = {}) {
   const p = open("relief.html", { now: NOW, server: call => serve(p, call) });
-  Object.assign(p, { preview, save, done: [] });
+  Object.assign(p, { preview, save, step, done: [] });
   p.run("relief-form.js", "relief-dates.js", "relief-change.js");
   const RF = p.window.ReliefForm;
   RF.setToday(TODAY);
   p.window.Relief = { me: { name: me }, api: apiOf(p), json: (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }),
     say: m => (m && m.text ? `<span class="msg ${m.bad ? "bad" : "ok"}" role="status">${RF.esc(m.text)}</span>` : "") };
   p.document.body.insertAdjacentHTML("beforeend", `<div id="rcBox"></div>`);
-  p.ed = p.window.ReliefChange.mount(p.$("#rcBox"), r, { onDone: (got, said) => p.done.push([got, said]) });
+  p.ed = p.window.ReliefChange.mount(p.$("#rcBox"), r, Object.assign({ onDone: (got, said) => p.done.push([got, said]) }, opts));
   await p.settle();
   p.box = () => p.text("#rcBox");
   p.saveBtn = () => p.find("#rcBox button", "Save the change");
@@ -218,6 +219,145 @@ t("Close: nothing is sent", async () => {
 t("someone else saving it: the absent teacher is told on Telegram", async () => {
   const p = await editor(rec({ how: "planned", by: GRACE }), { me: GRACE });
   has(p, `${EVE} is told on Telegram what changed.`);
+});
+
+/* ---------------------------------------------------------------- Or change one lesson, or cancel the whole request (the relief team's Edit) */
+const lesson = (key, date, p, n, more) => Object.assign({ key, date, p, n, classes: ["1A"], subject: "Science", group: "", room: "R1", start: "", end: "", needed: true, not_needed: null, stopped: "", work: {},
+  covers: [{ ckey: key, p, n, start: "", end: "", state: "open", relief: null }] }, more);
+const cover = (ckey, p, n, state, relief) => ({ ckey, p, n, start: "", end: "", state, relief });
+const LESSONS = [
+  lesson("old", PAST, 1, 1),
+  lesson("k5", TODAY, 5, 2, { covers: [cover("k5", 5, 2, "approved", SAM)] }),
+  lesson("k9", TOMORROW, 8, 1, { classes: ["2C"] }),
+  lesson("k6", TOMORROW, 2, 1, { classes: ["2B"], covers: [cover("k6", 2, 1, "waiting", GRACE)] }),
+  lesson("k7", TOMORROW, 3, 1, { classes: ["3A"], covers: [cover("k7", 3, 1, "acknowledged", SAM)] }),
+  lesson("k8", TOMORROW, 4, 1, { classes: ["3B"], covers: [cover("k8", 4, 1, "change", SAM)] }),
+  lesson("k2", TOMORROW, 1, 1, { classes: ["2A"], needed: false, not_needed: { by: GRACE, why: "Class out", at: NOW }, covers: [cover("k2", 1, 1, "cancelled", null)] }),
+  lesson("k3", TOMORROW, 0, 1, { classes: ["4A"], needed: false, not_needed: { by: "app", why: "Mr Sam Tan is there", at: NOW }, covers: [cover("k3", 0, 1, "cancelled", null)] }),
+  lesson("k10", TOMORROW, 9, 3, { classes: ["4B"], covers: [cover("k10", 9, 1, "approved", SAM), cover("k10#1", 10, 2, "open", null)], parts: [{ p: 9, n: 1 }, { p: 10, n: 2 }] }),
+];
+const team = (r = rec({ lessons: LESSONS, dates: [PAST, TODAY, TOMORROW] }), more = {}) => editor(r, Object.assign({ me: "Mr Hugo Ong", opts: { lessons: true, cancel: true } }, more));
+const lessonLines = p => p.all("#rcBox .rc-one .rc-ll").map(el => p.text(el.querySelector(".rc-lt")));
+const lessonBtns = (p, key) => p.$(`#rcBox .rc-one .rc-ll[data-key="${key}"]`).querySelectorAll("button").map(b => p.text(b));
+const NN = k => `/api/relief/absences/a1/lessons/${k}/not-needed`, NEEDED = k => `/api/relief/absences/a1/lessons/${k}/needed`, CANCEL = "/api/relief/absences/a1/cancel";
+const posted = p => p.calls.filter(c => c.url.includes("/lessons/") || c.url.endsWith("/cancel")).map(c => [c.url, c.body]);
+
+t("without lessons and cancel, the editor has neither part", async () => {
+  const p = await editor(rec({ lessons: LESSONS }));
+  hasNot(p, "Or change one lesson", "Or cancel the whole request", "Relief not needed", "Cancel the request");
+});
+t("Or change one lesson: each lesson today or later, its day, periods, title and relief in Today's words", async () => {
+  const p = await team();
+  has(p, "Or change one lesson");
+  same(lessonLines(p), [
+    "Mon 12 Oct · P6–P7 · 1A Science · Mr Sam Tan, approved",
+    "Tue 13 Oct · P1 · 4A Science · relief not needed",
+    "Tue 13 Oct · P2 · 2A Science · relief not needed",
+    "Tue 13 Oct · P3 · 2B Science · Ms Grace Wong, waiting for you",
+    "Tue 13 Oct · P4 · 3A Science · Mr Sam Tan, acknowledged",
+    "Tue 13 Oct · P5 · 3B Science · Mr Sam Tan, asked to change",
+    "Tue 13 Oct · P9 · 2C Science · no relief teacher yet",
+    "Tue 13 Oct · P10–P12 · 4B Science · P10: Mr Sam Tan, approved; P11–P12: no relief teacher yet"]);
+  same(lessonBtns(p, "k5"), ["Relief not needed"]);
+  same(lessonBtns(p, "k9"), ["Relief not needed"]);
+  same(lessonBtns(p, "k2"), ["Needed again"], "a person marked it");
+  same(lessonBtns(p, "k3"), [], "the app marked it: a co-teacher is there");
+});
+t("Relief not needed: Why? (optional), then Mark relief not needed sends the reason; Back closes it", async () => {
+  const p = await team();
+  await p.click(p.$('#rcBox .rc-ll[data-key="k9"]').querySelector("button"));
+  has(p, "Why? (optional)");
+  assert.strictEqual(p.find('#rcBox input[data-rc="nn-why"]').getAttribute("maxlength"), "200");
+  assert.strictEqual(p.focus(), p.find('#rcBox input[data-rc="nn-why"]'), "the focus is on the reason");
+  same(lessonBtns(p, "k9"), ["Mark relief not needed", "Back"]);
+  same(lessonBtns(p, "k5"), ["Relief not needed"]);
+  await p.click("#rcBox button", "Back");
+  same(lessonBtns(p, "k9"), ["Relief not needed"]);
+  assert.strictEqual(p.focus(), p.$('#rcBox .rc-ll[data-key="k9"]').querySelector("button"));
+  same(posted(p), []);
+  await p.click(p.$('#rcBox .rc-ll[data-key="k5"]').querySelector("button"));
+  await p.type('#rcBox input[data-rc="nn-why"]', "  Class on a trip ");
+  const got = rec({ lessons: LESSONS.map(x => (x.key === "k5" ? Object.assign({}, x, { needed: false }) : x)) });
+  p.step = ok(got);
+  await p.click("#rcBox button", "Mark relief not needed");
+  same(posted(p), [[NN("k5"), { why: "Class on a trip" }]]);
+  same(p.done, [[got, "1A Science: relief not needed."]]);
+});
+t("Relief not needed: one open at a time, Return sends it, a refusal shows beside it", async () => {
+  const p = await team();
+  await p.click(p.$('#rcBox .rc-ll[data-key="k9"]').querySelector("button"));
+  await p.click(p.$('#rcBox .rc-ll[data-key="k5"]').querySelector("button"));
+  same(lessonBtns(p, "k9"), ["Relief not needed"]); same(lessonBtns(p, "k5"), ["Mark relief not needed", "Back"]);
+  p.step = no(400, "That lesson is before today: it stays as it was.");
+  await p.key(p.find('#rcBox input[data-rc="nn-why"]'), "Enter");
+  same(posted(p), [[NN("k5"), { why: "" }]]);
+  has(p, "That lesson is before today: it stays as it was.");
+  same(p.done, []);
+  same(lessonBtns(p, "k5"), ["Mark relief not needed", "Back"], "still open, to try again");
+});
+t("Needed again sends nothing but the step", async () => {
+  const p = await team(), got = rec();
+  p.step = ok(got);
+  await p.click(p.$('#rcBox .rc-ll[data-key="k2"]').querySelector("button"));
+  same(posted(p), [[NEEDED("k2"), {}]]);
+  same(p.done, [[got, "2A Science: relief needed again."]]);
+});
+t("Needed again refused: its sentence beside the lesson, and the focus back on the button", async () => {
+  const p = await team();
+  p.step = no(400, "Ms Evelyn Koh already has an absence then.");
+  await p.click(p.$('#rcBox .rc-ll[data-key="k2"]').querySelector("button"));
+  assert.ok(p.text(p.$('#rcBox .rc-ll[data-key="k2"]')).includes("Ms Evelyn Koh already has an absence then."));
+  assert.strictEqual(p.focus(), p.$('#rcBox .rc-ll[data-key="k2"]').querySelector("button"));
+  assert.strictEqual(p.text(p.focus()), "Needed again");
+  same(p.done, []);
+});
+t("while a lesson's step is on its way, nothing else can be pressed", async () => {
+  const p = await team(), wait = later();
+  p.step = () => wait.answer;
+  await p.click(p.$('#rcBox .rc-ll[data-key="k2"]').querySelector("button"));
+  const off = () => [...p.all("#rcBox .rc-one button"), ...p.all("#rcBox .rc-cancel button"), p.saveBtn(), p.find("#rcBox button", "Close")];
+  assert.ok(off().every(b => b.disabled), "off");
+  await p.click("#rcBox button", "Tomorrow");
+  assert.strictEqual(previews(p).length, 1, "nothing is read while it is on its way");
+  wait.give(200, rec()); await p.settle();
+  assert.strictEqual(p.done.length, 1);
+  assert.strictEqual(posted(p).length, 1);
+});
+t("Or cancel the whole request: the reason is needed, Cancel the request sends it", async () => {
+  const p = await team();
+  has(p, "Or cancel the whole request", "Say why in a line (needed)", "Everyone already told (the relief teachers and Ms Evelyn Koh) gets a message that it is cancelled.");
+  const input = p.find('#rcBox input[data-rc="cwhy"]'), go = () => p.find("#rcBox button", "Cancel the request");
+  assert.strictEqual(input.getAttribute("maxlength"), "200");
+  assert.ok(go().disabled, "off while there is no reason");
+  await p.type('#rcBox input[data-rc="cwhy"]', "   ");
+  assert.ok(go().disabled, "spaces are no reason");
+  await p.key(p.find('#rcBox input[data-rc="cwhy"]'), "Enter");
+  same(posted(p), []);
+  await p.type('#rcBox input[data-rc="cwhy"]', " Appointment moved ");
+  assert.ok(!go().disabled);
+  p.find("#rcBox button", "Keep it");
+  p.step = no(400, "Say why in a line.");
+  await p.click(go());
+  has(p, "Say why in a line.");
+  same(p.done, []);
+  const got = rec({ cancelled: { by: "Mr Hugo Ong", why: "Appointment moved", at: NOW } });
+  p.step = ok(got);
+  await p.click(go());
+  same(posted(p), [[CANCEL, { why: "Appointment moved" }], [CANCEL, { why: "Appointment moved" }]]);
+  same(p.done, [[got, "Cancelled."]]);
+});
+t("Keep it: the reason goes, and Cancel the request is off again", async () => {
+  const p = await team();
+  await p.type('#rcBox input[data-rc="cwhy"]', "Appointment moved");
+  await p.click("#rcBox button", "Keep it");
+  assert.strictEqual(p.find('#rcBox input[data-rc="cwhy"]').value, "");
+  assert.ok(p.find("#rcBox button", "Cancel the request").disabled);
+  same(posted(p), []); same(p.done, []);
+});
+t("everything a lesson or a name says is escaped", async () => {
+  const p = await team(rec({ teacher: "<b>Ms X</b>", lessons: [lesson("k<1>", TODAY, 5, 1, { classes: ["<i>1A</i>"], covers: [cover("k<1>", 5, 1, "approved", "<u>Mr Y</u>")] })] }));
+  assert.ok(!p.all("#rcBox b").some(b => p.text(b) === "Ms X") && !p.all("#rcBox i").length && !p.all("#rcBox u").length, p.box());
+  has(p, "<i>1A</i> Science · <u>Mr Y</u>, approved", "(the relief teachers and <b>Ms X</b>)");
 });
 
 /* ---------------------------------------------------------------- on My absences (relief.js) */
