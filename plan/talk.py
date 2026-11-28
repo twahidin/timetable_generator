@@ -511,25 +511,38 @@ def confirm_list(talk, env, list_id, yes):
     listjob.confirm(talk, env, list_id, yes)
 
 
+def _shot(talk, after) -> tuple:
+    """(under the talk's lock) the talk's own part of a view, read in one go: (the lines after n, whether an answer runs,
+    its progress, the highest n, whether a list is being read, the list that waits, whether the talk is long)"""
+    lines = [copy.deepcopy(l) if l["kind"] == "list" else dict(l, quick=list(l["quick"]), buttons=list(l["buttons"]))
+             for l in talk.lines if l["n"] > after]
+    for l in lines:
+        st = talk.steps.get(l["step"]) if l["step"] else None
+        if st is not None:
+            l["undo"] = True if st.get("can_undo") and not st.get("undone") else False if st.get("undone") else None   # None: no Take it back, and never "Taken back"
+    return (lines, talk.working, talk.progress if talk.working else "", talk._n, talk.reading, talk.waiting,
+            sum(l["kind"] == "me" for l in talk.lines) >= LIMITS["messages"])
+
+
 def view(talk, env, after=0) -> dict:
     """what the page draws: the lines after n, whether an answer runs and its progress, the exam, the checklist, what is
-    missing, what may be done now and the highest n"""
-    ex = talk.exam                                      # read once: the answer's thread may start the exam meanwhile
-    s = _exam_of(env, ex) if ex else None
+    missing, what may be done now and the highest n.
+
+    The order matters. The talk's own part is read first and the exam only after it, so a view that says no answer runs
+    holds all that the answer left: the exam it started, the papers it put in. The page asks no more after such a view,
+    so nothing in it may be older than its "not working" (an answer's thread ends by taking working off, last of all)"""
+    after = after if isinstance(after, int) and not isinstance(after, bool) else 0
     with talk.lock:
-        if ex and s is None and not talk.gone_said:
-            talk.gone_said = True
-            talk.add("sys", GONE)
-        after = after if isinstance(after, int) and not isinstance(after, bool) else 0
-        lines = [copy.deepcopy(l) if l["kind"] == "list" else dict(l, quick=list(l["quick"]), buttons=list(l["buttons"]))
-                 for l in talk.lines if l["n"] > after]
-        for l in lines:
-            st = talk.steps.get(l["step"]) if l["step"] else None
-            if st is not None:
-                l["undo"] = True if st.get("can_undo") and not st.get("undone") else False if st.get("undone") else None   # None: no Take it back, and never "Taken back"
-        working, progress, last = talk.working, talk.progress if talk.working else "", talk._n
-        reading, waiting = talk.reading, talk.waiting
-        long = sum(l["kind"] == "me" for l in talk.lines) >= LIMITS["messages"]
+        shot = _shot(talk, after)
+    ex = talk.exam                                      # after the shot, never before it; read once
+    s = _exam_of(env, ex) if ex else None
+    if ex and s is None:                                # a talk's exam that is gone stays gone: no answer starts another
+        with talk.lock:
+            if not talk.gone_said:
+                talk.gone_said = True
+                talk.add("sys", GONE)
+                shot = _shot(talk, after)               # again, with the line just added
+    lines, working, progress, last, reading, waiting, long = shot
     pub, cal, xset = env.pub(), env.cal(), env.settings()
     exam, checklist = None, []
     try:
