@@ -2,7 +2,7 @@
 import datetime
 
 from exams.days import rule_on_day
-from ttgen.spec import family
+from ttgen.spec import family, rules_with_staff
 from relief import cover as _cover        # cover imports this module too: neither reads the other's names at import
 from relief import lessons as _lessons
 from relief.calendar import school_day, term_of, week_of
@@ -117,7 +117,7 @@ def free_then(pub, settings, records, lesson, absent, links=None):
     date, p, n, subject = _date(lesson["date"]), int(lesson["p"]), int(lesson.get("n") or 1), lesson.get("subject") or ""
     iso = date.isoformat()
     day = lesson.get("day") or school_day(cal, model.get("days") or [], date)
-    rules = (model.get("setup") or {}).get("rules") or []
+    rules = rules_with_staff(model.get("setup") or {})   # a teacher-only period is a marked Must block-out: busy, with its name, not dropped silently
     term = term_of(cal, date)
     term_dates = []
     if term:
@@ -140,13 +140,14 @@ def free_then(pub, settings, records, lesson, absent, links=None):
         if why:
             busy.append(dict(name=name, why=why)); continue
         if _absent_then(records, name, iso, p, n, links=links) or _chosen_then(records, name, iso, p, n, lesson.get("key"), absent, links=links) or name in never: continue
-        marks, blocked = [], False
+        marks, blocked, staff = [], False, ""
         for r in rules:
             if r.get("rule") == "Not available" and r.get("scope") == "Teacher" and r.get("target") == name and _rule_hits(r, day, p, n):
-                if str(r.get("strength") or "Must") == "Must": blocked = True
+                if str(r.get("strength") or "Must") == "Must": blocked = True; staff = staff or r.get("staff") or ""
                 elif "prefers not" not in marks: marks.append("prefers not")
             elif r.get("rule") == "Keep free together" and r.get("scope") == "Department" and r.get("target") in who["depts"] and _rule_hits(r, day, p, n):
                 if "department meeting time" not in marks: marks.append("department meeting time")
+        if staff: busy.append(dict(name=name, why=f"Teacher-only period: {staff}")); continue
         if blocked: continue
         skip = (absent, lesson.get("key"))
         today = relief_periods(records, name, {date}, skip=skip, links=links)   # this lesson's own periods are added below, not counted twice

@@ -822,4 +822,23 @@ t("panelsWith: the panels to open always show a class of the chosen lesson", () 
   const p = ["1A", "", ""]; assert.notStrictEqual(Board.panelsWith(p, ["1A"]), p); assert.deepStrictEqual(p, ["1A", "", ""]);   // never changes the list given
 });
 
+t("staffOf gives a teacher's boxes on a day, by period", () => {
+  const A = { teacher: "A", d: 1, p: 22, n: 4, name: "Zone", place: "", t0: "3.00", t1: "5.30", before: false, after: true };
+  const B = { teacher: "B", d: 1, p: 0, n: 2, name: "Briefing", place: "", t0: "7.40", t1: "8.20", before: false, after: false };
+  const bd = { staff: [B, A, Object.assign({}, A, { p: 3, n: 1, name: "Early" })] };
+  const { teacher, d, ...rest } = A;
+  assert.deepStrictEqual(Board.staffOf(bd, "A", 1).map(x => x.name), ["Early", "Zone"]);
+  assert.deepStrictEqual(Board.staffOf({ staff: [A] }, "A", 1), [rest]);
+  assert.deepStrictEqual(Board.staffOf(bd, "A", 0), []);
+  assert.deepStrictEqual(Board.staffOf({}, "A", 1), []);
+});
+
+t("staffTime words the box like the teacher's published page", () => {
+  const f = Object.assign({ t0: "3.00", t1: "4.20", before: false, after: false });
+  assert.strictEqual(Board.staffTime(f), "3.00\u20134.20");
+  assert.strictEqual(Board.staffTime(Object.assign({}, f, { t1: "5.30", after: true })), "3.00 (to 5.30)");
+  assert.strictEqual(Board.staffTime(Object.assign({}, f, { t0: "7.00", t1: "8.00", before: true })), "(from 7.00) 8.00");
+  assert.strictEqual(Board.staffTime(Object.assign({}, f, { t0: "7.00", t1: "5.30", before: true, after: true })), "(from 7.00 to 5.30)");
+});
+
 console.log(`${n} cases passed`);

@@ -7,6 +7,7 @@ import datetime
 import re
 
 from relief.calendar import school_day
+from ttgen.spec import plain_rules as _plain_rules, staff_items as _staff_items
 
 
 def minutes(t):
@@ -196,9 +197,10 @@ def day_view(pub, cal, sched, date):
     day = school_day(cal, model["days"], _date(date))
     window = _windows(sched, date, model, bnds)
     lessons = _rows(model, bnds, day, {c: [w] for c, w in window.items()})
-    blocked = {}
+    blocked, periods = {}, {}
+    setup = model.get("setup") or {}
     if day is not None:
-        for r in model.get("setup", {}).get("rules", []):
+        for r in _plain_rules(setup):
             if r.get("rule") != "Not available" or r.get("scope") != "Teacher" or str(r.get("strength") or "Must") != "Must":
                 continue
             if not rule_on_day(day, r):
@@ -210,7 +212,11 @@ def day_view(pub, cal, sched, date):
             if spans:
                 blocked.setdefault(r["target"], []).extend(spans)
         blocked = {t: _merge(sorted(s)) for t, s in blocked.items()}
-    return dict(date=date, day=day, window=window, lessons=lessons, blocked=blocked)
+        for it in _staff_items(setup):   # teacher-only periods never block: carried beside blocked, as a mark
+            if rule_on_day(day, it):
+                periods.setdefault(it["teacher"], []).append((it["minutes"][0], it["minutes"][1], it["name"]))
+        periods = {t: sorted(v) for t, v in periods.items()}
+    return dict(date=date, day=day, window=window, lessons=lessons, blocked=blocked, periods=periods)
 
 
 def edge_cuts(view):

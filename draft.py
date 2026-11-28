@@ -2,7 +2,7 @@
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
 import copy, hashlib, json, os, re, secrets, shutil, sys, threading, uuid
-from ttgen.export import ENTIRE, PALETTE, model_from_files
+from ttgen.export import ENTIRE, PALETTE, model_from_files, staff_cells
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
@@ -486,7 +486,8 @@ def board():
     unplaced.sort(key=lambda x: ((x["classes"] or [""])[0], x["id"]))
     return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
                 subjects={k: [v.get("short") or k, v.get("color"), v.get("dept") or ""] for k, v in m["subjects"].items()},
-                palette=[list(c) for c in PALETTE], cards=cards, unplaced=unplaced, teachers=_teacher_groups(m, pool, tshort), rooms=_room_groups(m, pool), room_parts=m.get("room_parts") or {},
+                palette=[list(c) for c in PALETTE], cards=cards, unplaced=unplaced,
+                staff=[{k: v for k, v in x.items() if k not in ("key", "m0", "m1")} for x in staff_cells(m) if x["p"] is not None], teachers=_teacher_groups(m, pool, tshort), rooms=_room_groups(m, pool), room_parts=m.get("room_parts") or {},
                 day=["".join("L" if any(g[d][p] in "LA" for g in m["grid"].values()) else "." for p in range(NP)) for d in range(nd)],
                 short=[dict(s, classes=list(_planned(m["checked_setup"], s["key"])["classes"])) for s in fixes.short(m, m["checked_setup"], pool)])
 

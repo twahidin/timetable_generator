@@ -84,6 +84,20 @@ var Board = (function () {
       function (c) { return inRow(c, by, name); }, { by: by, name: name });
   }
 
+  /* a teacher's teacher-only periods on one day, by first period: [{p, n, name, place, t0, t1, before, after}]; none when the board has no staff list */
+  function staffOf(board, name, d) {
+    return (board.staff || []).filter(function (s) { return s.teacher === name && s.d === d; }).sort(function (a, b) { return a.p - b.p; })
+      .map(function (s) { return { p: s.p, n: s.n, name: s.name, place: s.place, t0: s.t0, t1: s.t1, before: s.before, after: s.after }; });
+  }
+
+  /* the box's time words, as on the teacher's published page: "3.00\u20134.20", "3.00 (to 5.30)" past the last period, "(from 7.00) 8.00" before the first */
+  function staffTime(s) {
+    if (s.before && s.after) return "(from " + s.t0 + " to " + s.t1 + ")";
+    if (s.after) return s.t0 + " (to " + s.t1 + ")";
+    if (s.before) return "(from " + s.t0 + ") " + s.t1;
+    return s.t0 + "\u2013" + s.t1;
+  }
+
   /* names of teachers (or rooms) the day's cards use, sorted */
   function used(board, by, d) {
     var seen = {};
@@ -729,7 +743,7 @@ var Board = (function () {
     };
   }
 
-  return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
+  return { staffOf: staffOf, staffTime: staffTime, lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, CLASH: CLASH, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,

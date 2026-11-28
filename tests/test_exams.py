@@ -2605,7 +2605,7 @@ def event_send_errors():
 @t
 def who_may_replace_someone_going():
     assert EV.who_free(_PUB, F.CAL, _ev(), []) == dict(freed=[dict(name="Mr Ben Ong", reason="freed: lessons with 3A, 3B stop"),
-                                                               dict(name="Ms Chloe Tan", reason="freed: lessons with 3B stop")], free=[])
+                                                               dict(name="Ms Chloe Tan", reason="freed: lessons with 3B stop")], free=[], period=[])
 
 @t
 def a_multi_date_event_names_each_date():
@@ -3516,6 +3516,127 @@ def the_change_of_teacher_in_charge_keeps_to_the_save_check():
         r = c.post("/api/history/back", json=dict(id=e["id"])); assert r.status_code == 409 and r.get_json() == {"error": A.CANT_BACK}, r.data
         assert SC.load(id)["rev"] == r0 + 2 and SC.load(id)["in_charge"] == "Mr Ben Ong"
     _reset()
+
+# ---- teacher-only periods: a mark, never a refusal ----
+import contextlib  # noqa: E402
+import copy  # noqa: E402
+
+TP = "Mr Ben Ong"
+TP_NAME = "Zone computing class"
+TP_MARK = "has Zone computing class then"
+MONDAY = "2026-10-05"
+
+def _with_period(pub, times=("15:00", "17:30")):
+    """a copy of pub whose setup holds one teacher-only period for TP on Mondays"""
+    pub = copy.deepcopy(pub)
+    st = pub["model"]["setup"]
+    st["school"] = dict(start_time="07:40", period_minutes=20, periods_per_day=26)
+    st["staff_periods"] = [dict(_id="z1", name=TP_NAME, all=False, depts=[], teachers=[TP], week="Both", days=["Mon"], times=list(times), place="")]
+    return pub
+
+@contextlib.contextmanager
+def _period_published(times):
+    """the shared _PUB with the period in its setup, put back after"""
+    old = dict(_PUB["model"]["setup"])
+    try:
+        _PUB["model"]["setup"].update(_with_period(_PUB, times)["model"]["setup"])
+        yield
+    finally:
+        _PUB["model"]["setup"].clear(); _PUB["model"]["setup"].update(old)
+
+@t
+def a_teacher_only_period_marks_and_never_blocks():
+    pub = _with_period(F.sample_pub())
+    P = TP
+    view = D.day_view(pub, F.CAL, _sched(days=SEC3), MONDAY)
+    assert P not in view["blocked"] and view["periods"][P] == [(900, 1050, TP_NAME)] and view["blocked"]["Mr Ivan Lee"] == [(460, 580)], view
+    xset = _xset()
+    assert IV._free(P, view, 930, 990, [], xset)[0] == "" and IV.marked(P, view, 930, 990) == TP_MARK
+    assert IV.marked(P, view, 1050, 1100) == "" and IV.marked(P, view, 990, 1080) == TP_MARK      # an exam that runs after the last period
+    assert D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-06")["periods"] == {}
+    got = IV.candidates(pub, F.CAL, _sched(days=SEC3), xset, MONDAY, 930, 990, [])
+    assert [c["name"] for c in got["period"]] == [P] and got["period"][0]["reason"] == TP_MARK, got["period"]
+    assert P not in [c["name"] for g in ("freed", "free", "backups", "need_backup") for c in got[g]]
+    # a marked row of the setup never blocks, and a setup with no school gives no periods and no error
+    pub["model"]["setup"]["rules"].append(dict(rule="Not available", scope="Teacher", target=P, strength="Must", day="Mon", week="Both", staff="x", **{"from": 0, "to": 5}))
+    assert P not in D.day_view(pub, F.CAL, _sched(days=SEC3), MONDAY)["blocked"]
+    assert F.sample_pub()["model"]["setup"].get("school") is None and D.day_view(F.sample_pub(), F.CAL, _sched(days=SEC3), MONDAY)["periods"] == {}
+
+@t
+def make_calls_them_only_when_the_free_run_out():
+    s = _sit([_paper(who="level", date=MONDAY, start="15:30")], days=dict(SEC3))
+    pub = _with_period(_PUB)
+    names = [p["name"] for p in ACC.staff(pub)]
+    F_ = "Ms Aisha Rahman"
+    x = _xset(("3-01",)); x["rules"]["per_classroom"] = 1
+    x["never"] = [n for n in names if n not in (TP, F_)]
+    MK.make(pub, F.CAL, s, x, only=None, elsewhere=[])
+    d = _duty(s, "%s 15:30" % MONDAY, "3-01")
+    assert d["names"] == [F_] and d["marks"] == {}, d
+    x["never"] = [n for n in names if n != TP]
+    s = _sit([_paper(who="level", date=MONDAY, start="15:30")], days=dict(SEC3))
+    MK.make(pub, F.CAL, s, x, only=None, elsewhere=[])
+    d = _duty(s, "%s 15:30" % MONDAY, "3-01")
+    assert d["names"] == [TP] and d["marks"] == {TP: TP_MARK} and not d.get("not_free"), d
+
+@t
+def a_name_chosen_by_hand_is_kept_with_a_mark():
+    s = _sit([_paper(who="level", date=MONDAY, start="15:30")], days=dict(SEC3))
+    pub = _with_period(_PUB)
+    key = "%s 15:30" % MONDAY
+    MK.make(pub, F.CAL, s, _xset(("3-01", "3-02")), only=None, elsewhere=[])
+    MK.set_invigilators(s, key, "3-01", [TP, "Mr Ivan Lee"])
+    MK.make(pub, F.CAL, s, _xset(("3-01", "3-02")), only=key, elsewhere=[])
+    d = _duty(s, key, "3-01")
+    assert d["names"] == [TP, "Mr Ivan Lee"] and d["marks"] == {TP: TP_MARK}, d
+    assert TP not in d["not_free"] and not d["not_free"], d["not_free"]
+    # a Monday morning: the plain Must rule still refuses and carries no mark
+    s = _sit([_paper(who="level", date=MONDAY, start="07:50")], days=dict(SEC3))
+    key = "%s 07:50" % MONDAY
+    MK.make(pub, F.CAL, s, _xset(("3-01", "3-02")), only=None, elsewhere=[])
+    MK.set_invigilators(s, key, "3-01", ["Mr Ivan Lee"])
+    MK.make(pub, F.CAL, s, _xset(("3-01", "3-02")), only=key, elsewhere=[])
+    d = _duty(s, key, "3-01")
+    assert d["not_free"] == {"Mr Ivan Lee": "is not available then (a Must rule)"} and d["marks"] == {}, d
+
+@t
+def an_event_with_such_a_person_can_be_sent():
+    pub = _with_period(_PUB, ("08:00", "09:00"))
+    e = _ev(going=["Ms Aisha Rahman", TP])
+    got = {g["name"]: g for g in EV.going(pub, F.CAL, e, [])}
+    assert got[TP]["status"] == "period" and got[TP]["text"] == TP_MARK, got
+    assert got["Ms Aisha Rahman"]["status"] == "free"
+    assert EV.people_lines(pub, F.CAL, e, []) == [] and EV.clashes(pub, F.CAL, e, [], []) == []
+    assert not any("Fix the clashes" in x for x in EV.send_errors(pub, F.CAL, e, [], []))
+    w = EV.who_free(pub, F.CAL, _ev(going=["Ms Aisha Rahman"]), [])
+    assert [x["name"] for x in w["period"]] == [TP] and w["period"][0]["reason"] == TP_MARK, w
+    assert TP not in [x["name"] for g in ("freed", "free") for x in w[g]]
+    # a plain Must rule still stops it
+    assert EV.going(pub, F.CAL, _ev(going=["Mr Ivan Lee"]), [])[0]["status"] == "not_free"
+
+@t
+def a_replacement_in_a_period_is_accepted():
+    _setup()
+    with published(_PUB), _period_published(("08:00", "09:00")):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        # the exam: Mr Ben Ong has the period during the duty, Mr Ivan Lee is still refused on a Monday morning
+        s = _made_exam(c); id = s["id"]
+        assert c.post(f"/api/exams/{id}/send").status_code == 200 and c.post(f"/api/exams/{id}/approve").status_code == 200
+        who = c.get(f"/api/exams/{id}/who?key={KEY1}&room=3-01&copy=approved").get_json()
+        assert TP in [x["name"] for x in who["period"]] and TP not in [x["name"] for g in ("freed", "free", "backups") for x in who[g]], who
+        body = dict(key=KEY1, room="3-01", away="Ms Chloe Tan", name="Mr Ivan Lee")
+        r = c.post(f"/api/exams/{id}/away", json=body); assert r.status_code == 400 and r.get_json() == {"error": "Mr Ivan Lee is not free then."}, r.data
+        r = c.post(f"/api/exams/{id}/away", json=dict(body, name=TP)); assert r.status_code == 200, r.data
+        # the event (on a fresh setup: the exam above would clash with it)
+        _setup()
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _approved_event(a, c); eid = e["id"]
+        w = a.get(f"/api/events/{eid}/who").get_json()
+        assert [x["name"] for x in w["period"]] == [TP], w
+        r = a.post(f"/api/events/{eid}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Ivan Lee")); assert r.status_code == 400 and r.get_json() == {"error": "Mr Ivan Lee is not free then."}, r.data
+        r = a.post(f"/api/events/{eid}/away", json=dict(away="Mr Hafiz Rahman", name=TP)); assert r.status_code == 200, r.data
+    _reset()
+
 
 @t
 def today_says_only_the_school_day():

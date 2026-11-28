@@ -11,7 +11,7 @@
 var Sync = (function () {
   "use strict";
   var LISTS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons",
-    "rules", "students", "combinations", "roles", "choices"];
+    "rules", "staff_periods", "students", "combinations", "roles", "choices"];
   var MERGE = { teachers: ["can_teach"], students: ["groups"] };
   var ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
   var RESERVED_TOP = LISTS.concat(["school", "day_structure"]);

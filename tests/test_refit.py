@@ -9,6 +9,7 @@ sys.path.insert(0, ROOT)
 import openpyxl  # noqa: E402
 import app as A, draft, fixes, helper, refit, refit_plan, store  # noqa: E402
 from ttgen import export, verify  # noqa: E402
+from ttgen import spec as spec_mod  # noqa: E402
 from ttgen.export import ENTIRE  # noqa: E402
 from ttgen.template import write_template  # noqa: E402
 
@@ -2610,6 +2611,17 @@ def test_info_says_whether_there_is_anything_to_refit():
     with scene():   # the one warning answered: step 8 counts it settled
         draft.decide(TEACH, "step5"); j, i = flag(); assert j["refit"] is False and i["refit"] is False
 
+
+def test_a_plan_never_puts_a_lesson_into_a_teacher_only_period():
+    assert DAYS[0] == "Mon" and SPEC["school"]["start_time"] == "07:30" and int(SPEC["school"]["period_minutes"]) == 30   # period 1 of Monday is 8.00 to 8.30
+    staff = [dict(_id="z1", name="Staff meeting", all=False, depts=[], teachers=[T1], week="Both", days=["Mon"], times=["08:00", "08:30"], place="")]
+    def change(spec): gives(T1)(spec); spec["staff_periods"] = staff
+    m, spec, days, pool, ts = case([one(1, 0, 1)], change, rules=spec_mod.staff_blocks(dict(SPEC_CHECKED, staff_periods=staff)))   # 1A's English is to go to T1, who has the meeting then
+    got, stats = solved(m, spec, days, ts[TEACH], pool)
+    said = f"{T1} has {EL} for {CLS} on {DAYS[0]} period 1 during Staff meeting (8.00 to 8.30)."   # the plan names it as step 8 lists it
+    assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE] and got["why"][0] == said, got
+    L = helper.chain(m, spec, days, got["fixes"])["lessons"]; assert not [x for x in L if T1 in x["teachers"] and x["d"] == 0 and x["p"] <= 1 < x["p"] + x["n"]], L
+    got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1}); assert got is None and stats["reason"] == f"{T1} has Staff meeting then (Mon 8.00 to 8.30).", (got, stats)   # the judge's sentence, as the board's
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]

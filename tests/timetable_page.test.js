@@ -310,6 +310,127 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const F = boot({ "/api/published/exams": LIST }, APP);
     await F.tick(); assert(!F.fetched.includes("/api/exams/my-duties"), "only staff mode asks");
   });
+  await t("a teacher-only period: a box on the teacher's own timetable, its line in the legend, nothing in the counts, none on a class, and the teacher busy in Who's free", async () => {
+    const ROW = ["Mr Ben Ong", 1, 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", false, true];   /* Odd Tue, periods 22 to 25, runs on to 5.30 */
+    const LINE = "Zone computing class · Tue · 3.00 to 5.30 · West Zone centre";
+    const withStaff = d => { d.staff = [ROW, ["Mr Ben Ong", 0, null, 0, "Briefing", "", "7.00", "7.30", true, false]]; d.staff_lines = { "Mr Ben Ong": [LINE, "Briefing · Mon · 7.00 to 7.30"] }; };
+    const P = boot({ "/api/published/exams": LIST }, APP, withStaff), Q = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick(); await Q.tick();
+    const tv = P.run('teacherView("Mr Ben Ong")'), tq = Q.run('teacherView("Mr Ben Ong")');
+    assert.strictEqual(JSON.stringify(tv.stats), JSON.stringify(tq.stats)); assert.strictEqual(tv.rows.length, tq.rows.length);
+    const boxes = tv.cells.filter(c => c.staff);
+    assert.strictEqual(boxes.length, 1, "the period with no periods has no box"); assert.strictEqual(boxes[0].title, "Zone computing class");
+    assert.strictEqual(JSON.stringify(boxes[0].lines), JSON.stringify(["West Zone centre"])); assert.strictEqual(boxes[0].time, "3.00 (to 5.30)"); assert.strictEqual(boxes[0].after, true);   /* the look: the time words are the box's first line, the place its one detail line */
+    assert.strictEqual(JSON.stringify(tv.legend.filter(e => e.staff).map(e => e.text)), JSON.stringify([LINE, "Briefing · Mon · 7.00 to 7.30"]));
+    assert.strictEqual(tv.cells.length, tq.cells.length + 1);
+    P.run('show("teachers", "Mr Ben Ong")'); const h = P.view();
+    const box = h.match(/<div class="cell staff cut-r"[^>]*>.*?<\/div>/)[0];
+    assert(!box.includes("data-id") && box.includes("Zone computing class") && box.includes("to 5.30") && box.includes("West Zone centre"), box);
+    assert(h.includes('<i class="sw staff"></i><span>Zone computing class · Tue · 3.00 to 5.30 · West Zone centre</span>'), "the legend line");
+    assert(!Q.view().includes("staff"), "no staff data: as it was");
+    const cv = P.run('classView("4A")'); assert(!cv.cells.some(c => c.staff) && !cv.legend.some(e => e.staff));
+    P.run('S.ff = { d: 1, from: 22, to: 23 }; show("free", null)'); assert(!P.view().includes('data-key="Mr Ben Ong"'), "busy in the period: " + P.view());
+    P.run('S.ff = { d: 1, from: 1, to: 3 }; show("free", null)'); assert(P.view().includes('data-key="Mr Ben Ong"'), "free at the start of the day");
+    P.run('S.ff = { d: 0, from: 22, to: 23 }; show("free", null)'); assert(P.view().includes('data-key="Mr Ben Ong"'), "another day");
+    P.run('S.ff = { d: 1, from: 18, to: 21 }; show("free", null)'); assert(P.view().includes('data-key="Mr Ben Ong"'), "the period has not begun");
+  });
+
+  await t("a teacher-only period on the new look: placed by its minutes (cut to the day), counted by the page's span, and a lesson for the break rule", async () => {
+    const BOX = ["Mr Ben Ong", 1, 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", false, true, 900, 980];   /* Tue 3.00 to the day's end 4.20 */
+    const LATE = d => { d.staff = [BOX]; d.staff_lines = { "Mr Ben Ong": ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"] }; };
+    const P = boot({ "/api/published/exams": LIST }, APP, LATE), Q = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick(); await Q.tick();
+    const tv = P.run('teacherView("Mr Ben Ong")'), tq = Q.run('teacherView("Mr Ben Ong")');
+    const box = tv.cells.find(c => c.staff);
+    assert.strictEqual(JSON.stringify([box.a, box.b]), JSON.stringify([900, 980]), "placed by its own minutes, cut at the day's end");
+    assert.strictEqual(box.time, "3.00 (to 5.30)"); assert.strictEqual(box.start, "3.00"); assert.strictEqual(box.after, true);
+    assert.strictEqual(JSON.stringify(P.run('(v => [cellTime(v.cells.find(c => c.staff)), cellStart(v.cells.find(c => c.staff))])(teacherView("Mr Ben Ong"))')), JSON.stringify(["3.00 (to 5.30)", "3.00"]));
+    /* the span: the page runs to the box when it ends after the last lesson; a period with no box does not stretch it */
+    const last = Math.max(...tq.cells.map(c => c.b)), spanQ = Q.run('spanOf(teacherView("Mr Ben Ong"))'), spanP = P.run('spanOf(teacherView("Mr Ben Ong"))');
+    assert(last < 980 && spanQ[1] === last, "the lessons end before 4.20: " + last);
+    assert.strictEqual(spanP[1], 980, "the page reaches the box");
+    const ONLYLINE = d => { d.staff = [["Mr Ben Ong", 0, null, 0, "Briefing", "", "7.00", "7.30", true, false, null, null]]; d.staff_lines = { "Mr Ben Ong": ["Briefing · Mon · 7.00 to 7.30"] }; };
+    const R = boot({ "/api/published/exams": LIST }, APP, ONLYLINE); await R.tick();
+    assert.strictEqual(JSON.stringify(R.run('spanOf(teacherView("Mr Ben Ong"))')), JSON.stringify(spanQ), "a legend-only period does not stretch the page");
+    assert.strictEqual(R.run('teacherView("Mr Ben Ong").cells.filter(c => c.staff).length'), 0);
+    /* a break before a box: drawn on that day when the box is what follows it, not without the box */
+    const day = box.d, bandsP = P.run(`bandsOf(teacherView("Mr Ben Ong"), ${day})`), bandsQ = Q.run(`bandsOf(teacherView("Mr Ben Ong"), ${day})`);
+    const lastQ = Math.max(0, ...tq.cells.filter(c => c.d === day).map(c => c.a));
+    assert(bandsP.length >= bandsQ.length, "the box can only add bands");
+    const early = P.run(`(v => { v.cells = v.cells.filter(c => c.staff || c.d !== ${day}); return [bandsOf(v, ${day}).map(x => x.name), v.cells.filter(c => c.d === ${day}).length]; })(teacherView("Mr Ben Ong"))`);
+    assert.strictEqual(early[1], 1, "the box alone on its day"); assert(early[0].length > 0, "bands before a box that is all that follows them: " + JSON.stringify(early));
+    const none = P.run(`(v => { v.cells = v.cells.filter(c => !c.staff && c.d !== ${day}); v.cells.push({ d: ${day}, a: 460, b: 480, title: "x", lines: [] }); return bandsOf(v, ${day}).map(x => x.name); })(teacherView("Mr Ben Ong"))`);
+    assert.strictEqual(none.length, 0, "no later lesson or box: no band: " + JSON.stringify(none));
+    /* the page: a staff box has its own look, no data-id, the time first, then the name, then the place */
+    P.run('show("teachers", "Mr Ben Ong")'); const h = P.view(), cell = h.match(/<div class="cell staff cut-r[^"]*"[^>]*>.*?<\/div>/)[0];
+    assert(!cell.includes("data-id") && /class="tf">3\.00 \(to 5\.30\)/.test(cell) && /class="ts">3\.00</.test(cell), cell);
+    const inner = cell.slice(cell.indexOf('><span class="t">')); assert(inner.indexOf("3.00 (to 5.30)") < inner.indexOf("<b>Zone computing class</b>") && inner.indexOf("<b>") < inner.indexOf("West Zone centre"), cell);
+    assert(cell.includes('title="Zone computing class\n3.00 (to 5.30)\nWest Zone centre"'), "the hover holds the name, the time words and the place: " + cell);
+  });
+
+  await t("in staff mode a teacher's own periods come by a request of their own; a failed answer changes nothing", async () => {
+    const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" });
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], "", ""]); d.rooms = []; d.students = []; };
+    const ROW = ["Mr Ben Ong", 1, 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", false, true];
+    const EL = [200, { schedules: [], banner: null }];
+    const P = boot({ "/api/published/exams": EL, "/api/exams/my-duties": [200, { schedules: [], lessons: [] }], "/api/timetable/my-periods": [200, { staff: [ROW], lines: ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"] }] }, STAFF, cut);
+    await P.tick(); P.run('show("teachers", "Mr Ben Ong")'); await P.tick();
+    const v = P.view(); assert(P.fetched.includes("/api/timetable/my-periods"));
+    assert(v.includes('class="cell staff cut-r"') && v.includes("Zone computing class") && v.includes("Zone computing class · Tue · 3.00 to 5.30"), v);
+    const F = boot({ "/api/published/exams": EL, "/api/timetable/my-periods": [403, { error: "x" }] }, STAFF, cut);
+    await F.tick(); F.run('show("teachers", "Mr Ben Ong")'); assert(!F.view().includes("staff") && F.view().includes('class="cell'), "a refusal leaves the page as it was");
+    const G = boot({ "/api/published/exams": EL }, STAFF, cut); await G.tick(); G.run('show("teachers", "Mr Ben Ong")'); assert(!G.view().includes("cell staff"), "no answer at all");
+    const O = boot({ "/api/published/exams": LIST }, APP); await O.tick(); assert(!O.fetched.includes("/api/timetable/my-periods"), "only staff mode asks");
+  });
+
+  await t("a teacher-only period in the phone's day list: in time order with the time words, no lesson id, a lesson for the break rule, only on the teacher's own page, and in staff mode after the fetch", async () => {
+    const BOX = ["Mr Ben Ong", 1, 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", false, true, 900, 980];   /* Odd Tue */
+    const MON = ["Mr Ben Ong", 0, 3, 2, "Staff meeting", "Hall", "9.40", "10.20", false, false, 580, 620];   /* Odd Mon, beside the date's lesson */
+    const LATE = d => { d.staff = [BOX, MON, ["Mr Ben Ong", 0, null, 0, "Briefing", "", "7.00", "7.30", true, false, null, null]]; d.staff_lines = { "Mr Ben Ong": ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre", "Briefing · Mon · 7.00 to 7.30"] }; };
+    const P = boot({ "/api/published/exams": LIST }, APP, LATE); await P.tick();
+    P.run('show("teachers", "Mr Ben Ong")'); P.run("pickDay(1)");
+    const L = list(P.view()), ITEM = '<div class="tm">3.00 (to 5.30)</div><div class="it staff"><b>Zone computing class</b><span>West Zone centre</span></div>';
+    assert(L.includes(ITEM), "the time words at the left, the name, the place; no lesson id, no tab stop: " + L);
+    assert(!/class="it staff"[^>]*(data-id|tabindex|style)/.test(L), "no id, no subject colour");
+    assert(!L.includes("Briefing") && count(L, "Zone computing class") === 1, "a period with no box is not listed");
+    assert(PAGE.includes(".dlist .it.staff") && /\.dlist \.it\.staff[^{]*\{[^}]*background:#fff;border:1\.5px solid #5B6677/.test(PAGE), "white with the dark outline");
+    assert(/:root\[data-theme="dark"\] \.dlist \.it\.staff/.test(PAGE) && /\.dlist \.it\.staff b\{color:#1B2330\}/.test(PAGE), "the same in the dark theme, with dark text");
+    /* time order with a lesson at the same time beside it; neither hides the other */
+    const order = P.run(`(v => { v.cells.push({ d: 1, a: 905, b: 940, title: "Sample lesson", lines: [], color: "Sample", id: 99, ix: [] }); return dayItems(v, 1).map(x => [x.a, x.name || x.c.title, !!(x.c && x.c.staff)]); })(teacherView("Mr Ben Ong"))`);
+    const ia = order.findIndex(x => x[1] === "Zone computing class"), ib = order.findIndex(x => x[1] === "Sample lesson");
+    assert(ia >= 0 && ib === ia + 1 && order[ia][2] === true && order.every((x, i) => !i || x[0] >= order[i - 1][0]), "both listed, in time order: " + JSON.stringify(order));
+    /* a tap on it opens nothing: it does not match the list's lesson selector, and no dialog text appears */
+    P.el("dlgT").innerHTML = ""; P.el("dlgB").innerHTML = "";
+    P.on.click[0]({ target: { dataset: {}, closest: () => null, matches: () => false, classList: { contains: () => false } } });
+    for (const f of P.on.keydown) f({ key: "Enter", target: { closest: () => null } });
+    assert.strictEqual(P.el("dlgT").innerHTML + P.el("dlgB").innerHTML, "", "no dialog");
+    assert.strictEqual(P.run("lessonDialog(NaN)"), undefined, "a period has no lesson to open");
+    assert.strictEqual(P.el("dlgT").innerHTML, "");
+    /* it is no lesson: nothing counts it */
+    const Q = boot({ "/api/published/exams": LIST }, APP); await Q.tick();
+    assert.strictEqual(JSON.stringify(P.run('teacherView("Mr Ben Ong").stats')), JSON.stringify(Q.run('teacherView("Mr Ben Ong").stats')));
+    /* a break before it: listed when the period is the only thing after the break */
+    const only = P.run(`(v => { v.cells = v.cells.filter(c => c.staff || c.d !== 1); return dayItems(v, 1).map(x => x.name || x.c.title); })(teacherView("Mr Ben Ong"))`);
+    assert(only.length > 1 && only[only.length - 1] === "Zone computing class" && only.slice(0, -1).every(x => x !== "Zone computing class"), "the breaks before the period: " + JSON.stringify(only));
+    const none = P.run(`(v => { v.cells = v.cells.filter(c => !c.staff && c.d !== 1); v.cells.push({ d: 1, a: 460, b: 480, title: "x", lines: [] }); return dayItems(v, 1).map(x => x.name || x.c.title); })(teacherView("Mr Ben Ong"))`);
+    assert.strictEqual(JSON.stringify(none), JSON.stringify(["x"]), "no later lesson or period: no break");
+    /* a class's list holds no period; the grid keeps it for the teacher */
+    P.run('show("classes", "4A")'); P.run("pickDay(1)"); assert(!list(P.view()).includes("Zone computing class"), "no period on a class's list");
+    /* the view on one date: that timetable day's period */
+    const D = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP, LATE); await D.tick();
+    D.run('show("teachers", "Mr Ben Ong")'); await D.pick("2026-10-05");
+    assert(list(D.view()).includes('<div class="tm">9.40–10.20</div><div class="it staff"><b>Staff meeting</b><span>Hall</span></div>'), "the date's list: " + list(D.view()));
+    /* staff mode: after the fetch answers, the viewer's own period is in the list */
+    const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" });
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], "", ""]); d.rooms = []; d.students = []; };
+    const S2 = boot({ "/api/published/exams": LIST, "/api/exams/my-duties": [200, { schedules: [], lessons: [] }], "/api/timetable/my-periods": [200, { staff: [BOX], lines: ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"] }] }, STAFF, cut);
+    S2.run('show("teachers", "Mr Ben Ong")'); assert(!list(S2.view()).includes("Zone computing class"), "before the answer");
+    await S2.tick(); S2.run("pickDay(1)"); assert(list(S2.view()).includes(ITEM), "after the answer: " + list(S2.view()));
+    await S2.tick(); S2.run("S.pd = 0; redraw()");
+    const S3 = boot({ "/api/published/exams": LIST, "/api/exams/my-duties": [200, { schedules: [], lessons: [] }], "/api/timetable/my-periods": [200, { staff: [BOX], lines: [] }] }, STAFF, cut);
+    S3.run('show("teachers", "Mr Ben Ong")'); S3.run("S.pd = 1"); await S3.tick(); assert(list(S3.view()).includes(ITEM), "the fetch's own redraw draws the list too: " + list(S3.view()));
+  });
+
   await t("the clock sums: times in minutes, breaks kept only before a later lesson, the page's span and hour marks", async () => {
     const P = boot({ "/api/published/exams": LIST }, APP);
     await P.tick();

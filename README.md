@@ -146,7 +146,7 @@ Stage 4 adds **events** (a learning journey, a camp): anyone signed in by name (
 **The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 Teacher & TG deployment ·
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
 7 Download · 8 Upload and edit · 9 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
-step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
+step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Teacher-only periods (a weekly period for teachers with no students), Fixed lessons and More
 rules sheets. Step 4 shows the teachers two ways, **Cards** (a column per department, a card per teacher; with one department shown its cards go across in three columns) and **Table**; the choice is
 remembered in your browser. The **Roles** card is below the teachers: the teacher list is checked against it. A teacher can
 have a **second department** beside their own (the committee gives it, and a head cannot): drag a department chip from
@@ -208,7 +208,7 @@ is not on step 3, and a named subject the class has only in groups.
    `python -m ttgen check` prints the same list, critical first, and ends with an error while something critical stays).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.11`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.12`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`

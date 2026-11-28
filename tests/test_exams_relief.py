@@ -268,7 +268,7 @@ def free_route_uses_links():
 @t
 def relief_plan_page_shows_the_busy_fold():
     js = open(os.path.join(ROOT, "static", "relief-plan.js"), encoding="utf-8").read()
-    assert "on an exam duty or at an event then" in js
+    assert "busy then (an exam duty, an event or a teacher-only period)" in js
 
 # ---- Task 3: asking for and planning relief on an exam or event day
 from relief import absences as AB  # noqa: E402
@@ -2123,6 +2123,21 @@ def a_new_teacher_in_charge_takes_the_events_backups():
         ok(d.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=False)))
         assert [r["by"] for r in _backups(id)] == [DANIEL], "sent again by the new one"
 
+
+@t
+def relief_busies_and_a_period_together_give_the_mark_only():
+    import copy
+    from exams import invigilate as INV, settings as ES
+    pub = copy.deepcopy(PUB)
+    st = pub["model"]["setup"]
+    st["school"] = dict(start_time="07:40", period_minutes=20, periods_per_day=26)
+    st["staff_periods"] = [dict(_id="z1", name="Zone computing class", all=False, depts=[], teachers=[BEN], week="Both", days=["Mon"], times=["08:00", "09:00"], place="")]
+    view = D.day_view(pub, CAL, dict(levels=["Sec 3"], classes=[], start=ISO, end=ISO, days={}), ISO)
+    other = dict(id="x", name="Sec 4 Learning Journey", status="approved", date=ISO, start=600, end=660, room="", names=[BEN, AISHA], classes=[], kind="event")
+    relief = dict(id="r", name="Relief", status="approved", date=ISO, start=600, end=660, room="", names=[BEN], classes=[], kind="relief", why="is on relief then")
+    assert INV._free(BEN, view, 480, 540, [], ES.defaults(), elsewhere=[other, relief])[0] == ""
+    assert INV.marked(BEN, view, 480, 540) == "has Zone computing class then"
+    assert INV._free(BEN, view, 600, 660, [], ES.defaults(), elsewhere=[other, relief])[0] != "" and INV.marked(BEN, view, 600, 660) == ""
 
 @t
 def stopped_lesson_is_not_unacknowledged_and_is_not_happening_ahead():

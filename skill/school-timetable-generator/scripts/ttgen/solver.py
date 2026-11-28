@@ -760,6 +760,7 @@ def rule_problems(spec, P=None):
                  Subject=subjects, Block={str(b["block"]) for b in spec.get("blocks", [])}, Group=codes, Room=set(P.room_kind))
     out = []
     for i, r in enumerate(spec.get("rules", [])):
+        if r.get("staff"): continue   # a teacher-only period's block-out: step 6 reports its faults
         rule, scope, target, subj = r.get("rule"), r.get("scope"), r.get("target"), r.get("subject")
         say = lambda t: out.append((i, t))
         if rule not in types:
