@@ -202,7 +202,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(v.includes('<p class="onday">On Mon 5 Oct (Odd Mon): Sec 3 Learning Journey. Lessons that don&#39;t happen are crossed out.</p>') && count(v, 'class="cell x"') === 1, v);
     P.run('show("teachers", "Ms Grace Yeo")');
     v = P.view();
-    assert(v.includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>At event · Off site (museum)</b><span class="m">Sec 3 Learning Journey · Bus marshal 07:45</span>'), v);
+    assert(v.includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>At event · Off site (museum)</b><span class="m">Sec 3 Learning Journey · Bus marshal 7.45</span>') && !v.includes("07:45"), v);
     P.run('show("rooms", "LT2")');
     assert(P.view().includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>Event</b><span class="m">Sec 3 Learning Journey</span>') && !P.view().includes("<b>Exam</b>"), P.view());
     P.run('show("rooms", "LT1&2")');
@@ -229,11 +229,11 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const v = P.view(), [one, two] = v.split("<h2>").slice(1);
     assert(v.includes('<h1 style="margin:0 0 4px;font-size:20px">Exams and events</h1>'), v);
     assert(one.startsWith("Sec 3 Learning Journey<small>Event · Mon 5 Oct</small></h2>") && one.includes("Classes 3A, 3B · Off site (museum)"), one);
-    assert(one.includes("<th>Date</th><th>Time</th>") && one.includes("<tr><td>Mon 5 Oct</td><td>07:40–10:40</td></tr>"), one);
+    assert(one.includes("<th>Date</th><th>Time</th>") && one.includes("<tr><td>Mon 5 Oct</td><td>7.40–10.40</td></tr>"), one);
     assert(one.includes("Teacher in charge: Ms Grace Yeo") && one.includes("Going: Ms Grace Yeo, Mr Ben Ong"), one);
-    assert(one.includes("<th>Duty</th><th>Who</th><th>Time</th>") && one.includes("<tr><td>Bus marshal</td><td>Ms Grace Yeo</td><td>07:45</td></tr>"), one);
+    assert(one.includes("<th>Duty</th><th>Who</th><th>Time</th>") && one.includes("<tr><td>Bus marshal</td><td>Ms Grace Yeo</td><td>7.45</td></tr>") && !/\d\d:\d\d/.test(one), one);
     assert(two.startsWith("Sec 3 &lt;i&gt;Trip&lt;/i&gt;<small>Event · Tue 6 Oct–Wed 7 Oct</small></h2>") && two.includes("Classes 3B · Science Centre &amp; museum"), "names are escaped: " + two);
-    assert(two.includes("<tr><td>Tue 6 Oct</td><td>07:40–13:00</td></tr><tr><td>Wed 7 Oct</td><td>07:40–10:40</td></tr>"), two);
+    assert(two.includes("<tr><td>Tue 6 Oct</td><td>7.40–1.00</td></tr><tr><td>Wed 7 Oct</td><td>7.40–10.40</td></tr>"), two);
     assert(!two.includes("Teacher in charge") && !two.includes("Going") && !two.includes("<th>Duty</th>") && !v.includes("<i>"), "a student's row: no one going: " + two);
     const Q = boot({ "/api/published/exams": [200, { schedules: [], banner: null }] }, APP);
     await Q.tick(); Q.run("show('exams', null)");
@@ -245,7 +245,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const m = R.view();
     assert(R.fetched.includes("/api/me/exams") && !R.fetched.includes("/api/published/exams"), R.fetched.join(", "));
     assert(m.startsWith('<div class="card myexams" id="myexams"><h2>My exam timetable</h2><h3>Sec 3 Learning Journey</h3>'), m);
-    assert(m.includes("<tr><td>Mon 5 Oct</td><td>Sec 3 Learning Journey · Off site (museum) · 07:40–10:40</td><td>then lessons from 10:40</td></tr>"), m);
+    assert(m.includes("<tr><td>Mon 5 Oct</td><td>Sec 3 Learning Journey · Off site (museum) · 7.40–10.40</td><td>then lessons from 10:40</td></tr>"), m);
     assert(!m.includes("Sec 4 Exam"), "a schedule with no papers and no days does not show");
     const N = boot({ "/api/me/exams": [200, { schedules: [Object.assign({}, trip, { days: [] })] }] }, ME);
     await N.tick();
@@ -297,8 +297,8 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     await P.tick(); P.run("show('exams', null)");
     const v = P.view(), i = v.indexOf("Your duties");
     assert(i > 0 && i < v.indexOf("Science Centre"), "the duties come above the exam list: " + v);
-    assert(v.includes("<td>07:35–09:00</td><td>3-02</td><td>Sec 3 English Paper 1 &lt;b&gt;</td><td>Invigilate</td>") && v.includes("<td>3-01</td><td>Sec 3 Pure Chemistry Paper 1</td><td>Chief invigilator</td>"), v);
-    assert(v.indexOf("07:35") < v.indexOf("09:45"), "in time order");
+    assert(v.includes("<td>7.35–9.00</td><td>3-02</td><td>Sec 3 English Paper 1 &lt;b&gt;</td><td>Invigilate</td>") && v.includes("<td>3-01</td><td>Sec 3 Pure Chemistry Paper 1</td><td>Chief invigilator</td>"), v);
+    assert(v.indexOf("7.35–9.00") < v.indexOf("9.45–11.10") && !v.includes("07:35"), "in time order");
     const N = boot({ "/api/published/exams": EL, "/api/exams/my-duties": [200, { schedules: [], lessons: [] }] }, STAFF, cut);
     await N.tick(); N.run("show('exams', null)");
     assert(!N.view().includes("Your duties") && N.view().includes("Science Centre"), N.view());
@@ -608,5 +608,46 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     /* a student's own page: no figures, no counts */
     PER.run("showPersonal()"); const ph = PER.view();
     assert(!ph.includes('class="stats"') && !/\d+ periods/.test(ph) && !ph.includes("periods a cycle"), ph);
+  });
+
+  await t("the exam parts of the page write a time as the grid does", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP); await P.tick();
+    const h = x => P.run(`hmAll(${JSON.stringify(x)})`);
+    assert.strictEqual(h("Bus marshal 07:45"), "Bus marshal 7.45");
+    assert.strictEqual(h("13:00 to 14:30"), "1.00 to 2.30");
+    assert.strictEqual(h("Hall"), "Hall"); assert.strictEqual(h("2026-10-05"), "2026-10-05");
+    assert.strictEqual(h("Room 12: 30 seats"), "Room 12: 30 seats");
+    assert.strictEqual(P.run("hmAll(null)"), ""); assert.strictEqual(P.run("hmAll(undefined)"), "");
+    /* the Exams and events tab for staff: the event, its day and its duty */
+    const STAFF = Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" });
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], "", ""]); d.rooms = []; d.students = []; };
+    const PAPER = { date: "2026-10-05", start: "07:50", end: "08:50", label: "Sec 3 English Paper 1", room: "3-01" };
+    const EXR = { id: "x1", name: "Sec 3 Exam", kind: "exam", start: "2026-10-05", end: "2026-10-05", levels: { "Sec 3": [PAPER] },
+      roster: [{ date: "2026-10-05", start: "13:00", end: "14:30", room: "3-01", label: "Sec 3 English Paper 1", names: ["Mr Ben Ong"], chief: "Mr Ben Ong" }] };
+    const S1 = boot({ "/api/published/exams": [200, { schedules: [EVROW, EXR], banner: null }] }, STAFF, cut);
+    await S1.tick(); S1.run("show('exams', null)");
+    const v = S1.view();
+    assert(v.includes("7.40–10.40") && v.includes("<td>7.45</td>") && v.includes("<td>7.50–8.50</td>") && v.includes("<td>1.00–2.30</td>"), v);
+    assert(!/\d\d:\d\d/.test(v), "no 24-hour time on the tab: " + v);
+    /* a student's My exam timetable: paper, report time, event day */
+    const ME = { mode: "personal", exams: true, pdf: true, logout: "/logout", files: [] };
+    const trip = { id: "ev1", name: TRIP, kind: "event", where: "Off site (museum)", papers: [], days: [{ date: "2026-10-05", start: "07:40", end: "13:00" }] };
+    const ex = { id: "x1", name: "Sec 3 Exam", kind: "exam", days: [], papers: [Object.assign({}, PAPER, { report: "07:30", seat: "A4" })] };
+    const R = boot({ "/api/me/exams": [200, { schedules: [ex, trip] }] }, ME); await R.tick();
+    const m = R.view();
+    assert(m.includes("report 7.30") && m.includes("<td>7.50–8.50</td>") && m.includes("Off site (museum) · 7.40–1.00"), m);
+    assert(!/\d\d:\d\d/.test(m), "no 24-hour time in My exam timetable: " + m);
+    /* a teacher's date view: the event duty */
+    const D = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, EVDAY] }, APP); await D.tick(); await D.pick("2026-10-05");
+    D.run('show("teachers", "Ms Grace Yeo")');
+    assert(D.view().includes("Bus marshal 7.45") && !D.view().includes("07:45"), D.view());
+    /* Your duties: two on one day, the morning one first although it is written second */
+    const DU = { schedules: [{ id: "a1", name: "Sec 3 Exam", kind: "exam", duties: [
+      { date: "2026-10-05", start: "13:00", end: "14:00", room: "3-01", label: "Paper B", role: "Invigilate" },
+      { date: "2026-10-05", start: "08:00", end: "09:00", room: "3-02", label: "Paper A", role: "Invigilate" }] }], lessons: [] };
+    const Y = boot({ "/api/published/exams": LIST, "/api/exams/my-duties": [200, DU] }, STAFF, cut);
+    await Y.tick(); Y.run("show('exams', null)");
+    const y = Y.view();
+    assert(y.includes("<td>8.00–9.00</td>") && y.includes("<td>1.00–2.00</td>") && y.indexOf("<td>8.00–9.00</td>") < y.indexOf("<td>1.00–2.00</td>") && !/\d\d:\d\d/.test(y), y);
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });
