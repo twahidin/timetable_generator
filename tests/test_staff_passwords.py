@@ -368,9 +368,9 @@ def the_history_says_how_many_and_never_a_password():
     assert e["text"] == "Printed sign-in slips for 1 staff: 0 new accounts; 1 had chosen a password", e
 
 TO_STUDENT = "Students: sign in with your code"
-TO_STAFF = "Staff: sign in with your username"
-STUDENT_LABEL = "Your personal code (on the slip from the school)"
-SHARED_LABEL = "Your code (the one the school gave you)"
+TO_STAFF = "Staff Sign In"
+STUDENT_LABEL = "Please enter your personal code to access your timetable."
+SHARED_LABEL = "Please enter your code to access your timetable."
 
 @t
 def while_staff_codes_are_on_the_front_page_is_as_today():
