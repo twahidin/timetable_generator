@@ -8,8 +8,10 @@
    them), then "What this change does": POST …/change/preview is read again on each change, and only the newest answer is
    shown ("Nothing changes yet." while the change is none; a refusal's sentence in its place). The reason is optional (200
    characters at most). Save the change sends the dates and times with the keys the preview showed added and gone, so a request
-   changed meanwhile is refused (its sentence shows and the preview is read again). opts: onDone(record | null, said): after a
-   save (the answered record, "Changed.") or Close (null, ""). It gives {attach(box, rec), dirty(), busy(), stop()}: attach draws
+   changed meanwhile is refused (its sentence shows, the preview is read again and opts.onStale() is called, for the card to be read
+   again). Away for is drawn again only when what it shows changed (the periods of the day, the choice), so an open From or To list
+   stays open while an answer comes. opts: onDone(record | null, said): after a save (the answered record, "Changed.") or Close
+   (null, ""); onStale(): the request changed since it was read. It gives {attach(box, rec), dirty(), busy(), stop()}: attach draws
    the same editor, as it is, into a new box (its card was drawn again), reading the preview again when the record has changed;
    stop ends it without onDone. initial, body and lines are pure, for the tests.
 
@@ -130,7 +132,10 @@ window.ReliefChange = (function () {
         else if (S.loading) under = `<div class="small muted under">Reading the periods…</div>`;
         else if (!S.err) under = `<div class="small muted under">The published timetable has no periods to choose.</div>`;
       }
-      keep(el, () => { el.innerHTML = `<div class="seg" role="group" aria-label="Away for">${segBtn("away", "whole", S.away === "whole", "Whole day")}${segBtn("away", "some", S.away === "some", "Some periods")}</div>${under}`; });
+      const html = `<div class="seg" role="group" aria-label="Away for">${segBtn("away", "whole", S.away === "whole", "Whole day")}${segBtn("away", "some", S.away === "some", "Some periods")}</div>${under}`;
+      if (S.drawn[".rc-away"] === html) return;   /* as it is: a list open under the pointer stays open */
+      S.drawn[".rc-away"] = html;
+      keep(el, () => { el.innerHTML = html; });
     }
 
     function paintLines() {
@@ -250,7 +255,9 @@ window.ReliefChange = (function () {
       if (r.ok) { finish(r.data, "Changed."); return; }   /* saved: said even when the editor was stopped meanwhile */
       if (S.gone) return;
       S.msg = { text: r.error, bad: true, status: r.status };
-      if (r.error === LOOKED) reread(); else paintSave();
+      if (r.error !== LOOKED) { paintSave(); return; }
+      reread();
+      if (o.onStale) o.onStale();   /* the card read again: it shows the request as it is now */
     }
 
     function stop() {

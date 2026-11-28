@@ -425,4 +425,61 @@ t("one editor open at a time; a redraw of the card keeps what was chosen; Close 
   same(saves(p), []);
 });
 
+/* ---------------------------------------------------------------- fix round 1 */
+t("an open From or To list is not drawn again when an answer comes with the same periods; other periods draw it again", async () => {
+  const p = await editor(rec({ periods: [5, 11] }));
+  const from = p.find('#rcBox select[data-per="from"]'), to = p.find('#rcBox select[data-per="to"]');
+  p.preview = answer({ dates: [TOMORROW], periods: [5, 11], kept: [A_PREVIEW] });
+  await p.click("#rcBox button", "Tomorrow");
+  has(p, "Kept: Tue 13 Oct");
+  assert.ok(p.find('#rcBox select[data-per="from"]') === from && p.find('#rcBox select[data-per="to"]') === to, "the same lists, never drawn again");
+  p.preview = answer({ day_periods: PERIODS.slice(0, 8), periods: [5, 7] });
+  await p.click("#rcBox button", "Today");
+  const now = p.find('#rcBox select[data-per="from"]');
+  assert.ok(now !== from, "the periods of the day changed: drawn again");
+  assert.strictEqual(now.querySelectorAll("option").length, 9, "Choose… and the eight periods");
+  await p.click("#rcBox button", "Whole day");
+  assert.ok(!p.all('#rcBox select[data-per="from"]').length, "the away choice changed: drawn again");
+});
+t("a save refused as stale: the list is read again, so the card shows the request as it is now", async () => {
+  const p = await mine([rec({ id: "a1" })]);
+  await p.click(p.card("a1").querySelector('button[data-act="change"]'));
+  p.preview = SOME;
+  await p.click("#mineList .rc button", "Tomorrow");
+  const reads = p.calls.filter(c => c.url === "/api/relief/absences/mine").length;
+  p.list = [rec({ id: "a1", dates: [TODAY, "2026-10-16"], lessons: [rec().lessons[0], Object.assign({}, rec().lessons[0], { key: "k7", date: "2026-10-16", subject: "Physics" })] })];   /* someone else changed it */
+  p.save = no(400, LOOKED);
+  await p.click("#mineList .rc button", "Save the change");
+  assert.strictEqual(p.calls.filter(c => c.url === "/api/relief/absences/mine").length, reads + 1, "the list is read again");
+  const card = p.text(p.card("a1"));
+  assert.ok(card.includes("Fri 16 Oct") && card.includes("1A Physics"), card);
+  assert.ok(p.card("a1").querySelector(".rc") && p.text(p.card("a1").querySelector(".rc")).includes(LOOKED), "the editor stays open with the sentence");
+  assert.ok(previews(p).length >= 3, "the preview is read again");
+  assert.ok(!p.find("#mineList .rc button", "Save the change").disabled, "the new preview may be saved");
+});
+t("Planned by me: an editor whose absence is closed is closed too, and is not unsaved", async () => {
+  const planned = rec({ id: "a1", how: "planned", by: GRACE, teacher: EVE });
+  const p = open("relief.html", { now: NOW, hash: "#plan", server: call => {
+    if (call.url === "/api/relief/me") return ok({ name: GRACE, depts: ["Science"], published: true, today: TODAY, can_team: false, can_plan: true, can_settings: false });
+    if (call.url === "/api/relief/absences/planned") return ok({ absences: [planned] });
+    if (call.url === "/api/relief/absences/a1") return ok(planned);
+    if (call.url === "/api/relief/people") return ok([]);
+    return serve(p, call) || ok({ absences: [], lessons: [], periods: [] });
+  } });
+  Object.assign(p, { preview: answer({ unchanged: true }), save: ok({}) });
+  p.run("relief-form.js", "relief-dates.js", "relief-change.js", "relief.js", "relief-plan.js");
+  await p.settle();
+  await p.click('#plPlannedList button[data-pl="open"]');
+  await p.click('#plDetail .ab[data-id="a1"] button[data-act="change"]');
+  p.preview = SOME;
+  await p.click("#plDetail .rc button", "Tomorrow");
+  assert.strictEqual(p.window.Relief.dirtyAny(), true, "a change on screen is unsaved");
+  await p.click("#plBack");
+  assert.ok(!p.all("#plDetail .rc").length);
+  assert.strictEqual(p.window.Relief.dirtyAny(), false, "nothing hidden counts as unsaved");
+  await p.click('#plPlannedList button[data-pl="open"]');
+  assert.ok(!p.all("#plDetail .rc").length && p.find('#plDetail .ab[data-id="a1"] button[data-act="change"]'), "opened again: closed, with its button");
+  same(saves(p), []);
+});
+
 run(all);

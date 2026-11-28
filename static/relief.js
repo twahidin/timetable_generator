@@ -260,15 +260,17 @@
     }
 
     /* the open editor, into its card's box once the card is drawn: the same editor, as it was; it ends when its record can no
-       longer be changed (cancelled, its dates past, gone from the list) */
+       longer be changed (cancelled, its dates past, gone from the list) or its card is no longer drawn. A save refused as stale
+       reads the list again (onStale), so the card shows the request as it is now */
     function placeChange() {
       if (!M.change) return;
       const id = M.change.id, r = find(id);
       if (!r || !changeable(r)) { if (M.change.ed) M.change.ed.stop(); M.change = null; return; }
       const c = M.box && [...M.box.querySelectorAll(".ab")].find(el => el.dataset.id === id), box = c && c.querySelector(".rc-box");
-      if (!box) return;   /* its card is not drawn now (Planned by me shows one): it is placed again when it is */
+      if (!c) { if (M.change.ed) M.change.ed.stop(); M.change = null; return; }   /* its card left the view (Planned by me shows one): closed, so nothing hidden counts as unsaved */
+      if (!box) return;   /* its card is drawn, the editor's box not yet (it is being opened) */
       if (M.change.ed) M.change.ed.attach(box, r);
-      else M.change.ed = window.ReliefChange.mount(box, r, { onDone: (rec, said) => changeDone(id, rec, said) });
+      else M.change.ed = window.ReliefChange.mount(box, r, { onDone: (rec, said) => changeDone(id, rec, said), onStale: () => load() });
     }
 
     function openChange(r) {
