@@ -143,7 +143,7 @@ def _must_change_first():
 
 # every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
 RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "history.dept", "history.own", "codes", "admin", "own", "exams",
-                    "relief", "relief.plan", "relief.settings", "relief.save", "relief.team"})
+                    "relief", "relief.plan", "relief.settings", "relief.save", "relief.team", "codes.look", "staff.reset"})
 
 def need(*names):
     """the route needs one of these rights: the server decides, from the records, on every request. Without one, the
@@ -204,11 +204,11 @@ def page(title, body):
 <link rel="stylesheet" href="/static/login.css"></head><body>{body}</body></html>"""
 
 # ------------------------------------------------------------------------------------------------ signing in
-CODE_LABEL = "Your personal code (on the slip from the school)"
-CODE_LABEL_SHARED = "Your code (the one the school gave you)"   # while a shared code still opens the site
+CODE_LABEL = "Please enter your personal code to access your timetable."
+CODE_LABEL_SHARED = "Please enter your code to access your timetable."   # while a shared code still opens the site
 TO_STUDENT = "Students: sign in with your code"
-TO_STAFF = "Staff: sign in with your username"
-TO_USERNAME = "Committee and management: sign in with your username"
+TO_STAFF = "Staff Sign In"
+TO_USERNAME = "Staff Sign In"   # the same button while staff codes are on
 WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
 SWITCHED_OFF = "This account is switched off. Ask the timetable committee."
@@ -259,10 +259,10 @@ def _code_label(roles=None):
 def _code_page(msg="", student=False):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(_code_label(("student",)) if student else _code_label())}</label>
+<div class="logins"><div class="login one"><form method="post" action="{"/student" if student else "/login"}"><label for="code">{esc(_code_label(("student",)) if student else _code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
-<button type="submit">Open</button></form>{err}
-<p class="way"><a href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
+<button type="submit" class="open">Open</button></form>{err}</div>
+<div class="login one other"><a class="btn" href="{"/login" if student and _staff_codes_off() else "/login/password"}">{esc(TO_STAFF if student else TO_USERNAME)}&nbsp;&rarr;</a></div></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
 
 def _form_page(title, form, msg="", hint="", back=None, tail=None):
     """a small page with one form; back: its way back (the sign-in page, the student page once staff codes are off);
@@ -480,12 +480,14 @@ def logout():
 TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("setup",)),
          ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
+         ("Student codes", "Look up a student's forgotten code", "/student-codes", ("codes.look",)),
+         ("Reset a password", "A new temporary password for staff in your department", "/staff-reset", ("staff.reset",)),
          ("Exams and events", "", "/exams", ("exams", "committee")),
          ("Plan with AI", "Plan an exam or a common test by talking it through", "/plan", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
 OWN_HISTORY = "Your own changes"
-GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
+GREYED = ("Committee page", "Admin", "Reset a password")   # signed in with a code, these wait for the password
 DUTIES_TILE = ("My exam and event duties", "Your duties, your events and the lessons that don't happen")   # in place of Exams and events for everyone else
 TO_PASSWORD = "Sign in with your password to open this."
 _HOW = {"code": "Signed in with your code", "password": "Signed in with your password"}
@@ -1530,6 +1532,119 @@ def code_slips():
     code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/") + "/student", buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="timetable code slips.pdf", mimetype="application/pdf")
+
+# ------------------------------------------------------------------------------------------------ staff: a student's forgotten code
+CODES_HINT = "Pick the class, then press Show code beside the student. Each look-up is recorded."
+CODES_NOT_PUBLISHED = "The timetable is not published yet, so there are no student codes."
+CODES_EMPTY_CLASS = "This class has no students on the published timetable."
+CODES_NO_STUDENT = "That student is not on the published timetable."
+
+def _codes_page(cls=None, shown=None, msg=""):
+    """the Student codes page: the classes; a picked class with its students; shown: the one student whose code is open"""
+    back = ("/home", "Back")
+    if not access.personal_codes_on(): return _form_page("Student codes", "", NO_PERSONAL, back=back, tail="")
+    pub = store.published()
+    if not pub: return _form_page("Student codes", "", CODES_NOT_PUBLISHED, back=back, tail="")
+    students = pub["model"].get("students") or []
+    classes = sorted({str(x.get("cls", "")) for x in students})
+    box = ""
+    if shown:
+        box = f"""<div class="notes"><p><strong>{esc(shown["name"])}</strong> ({esc(shown["cls"])})</p>
+<p>Code: <strong>{esc(access.personal_code(shown["id"]))}</strong></p></div>"""
+    links = " ".join(f'<a href="/student-codes?cls={urllib.parse.quote(c, safe="")}">{esc(c)}</a>' for c in classes)
+    rows = ""
+    if cls is not None:
+        mine = sorted((x for x in students if str(x.get("cls", "")) == cls), key=lambda x: (str(x.get("name", "")).lower(), str(x.get("id", ""))))
+        if not mine: msg = msg or CODES_EMPTY_CLASS
+        rows = "".join(f"""<form class="srow" method="post" action="/student-codes"><span>{esc(x.get("name", ""))}</span><input type="hidden" name="id" value="{esc(x.get("id", ""))}">
+<button type="submit">Show code</button></form>""" for x in mine)
+    return _form_page("Student codes", f"{box}<p class='classes'>{links}</p><div class='students'>{rows}</div>", msg, CODES_HINT, back=back, tail="")
+
+@app.get("/student-codes")
+@need("codes.look")
+def student_codes_page():
+    r = Response(_codes_page(request.args.get("cls")), mimetype="text/html"); r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.post("/student-codes")
+@need("codes.look")
+def student_codes_show():
+    pub = store.published()
+    sid = request.form.get("id", "")
+    st = next((x for x in (pub["model"].get("students") or []) if str(x.get("id")) == sid), None) if pub and access.personal_codes_on() else None
+    if not st:
+        r = Response(_codes_page(msg=CODES_NO_STUDENT) if pub and access.personal_codes_on() else _codes_page(), status=404 if pub and access.personal_codes_on() else 200, mimetype="text/html")
+    else:
+        try: history.add({"kind": "look", "where": "Student codes", "text": f"Looked up the code of {st['name']} ({st['cls']})", "people": [], **by()})
+        except Exception as e: print(f"WARNING: a code look-up could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+        r = Response(_codes_page(str(st["cls"]), st), mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+# ------------------------------------------------------------------------------------------------ heads: a new temporary password
+RESET_HINT = "Give the new temporary password to the person yourself. They choose their own when they sign in."
+RESET_NONE = "No one in your departments can be reset here. Ask an admin."
+RESET_REFUSED = "You cannot reset this person's password. Ask an admin."
+
+def _resettable(pub, d, me):
+    """the staff a head may give a new temporary password, in listing order: not themselves, not switched off, not a head
+    or a school leader, in one of the head's own departments, and signed in by password they have no right the head lacks
+    (so never a committee, relief team or admin member, nor anyone with a current Exams and events tick)"""
+    rec = people.record(d, me)
+    mine = set(rec["depts"])
+    head = dict(group=rec["group"], extras=rec["extras"], off=rec["off"])
+    have = rights_table.rights(head, "password")
+    return [p for p in people.staff(pub, d) if p["name"] != me and not p["off"] and p["group"] not in ("leader", "hod", "sh")
+            and set(p["depts"]) & mine and rights_table.rights(p, "password") <= have]
+
+def _reset_page(me, shown=None, msg="", status=200):
+    back = ("/home", "Back")
+    if shown:
+        box = f"""<div class="notes"><p><strong>New temporary password for {esc(shown["name"])}</strong></p>
+<p>Username: <strong>{esc(shown["username"])}</strong></p><p>Temporary password: <strong>{esc(shown["once"])}</strong></p></div>"""
+    else: box = ""
+    items = _resettable(store.published(), people.load(), me)
+    rows = "".join(f"""<form class="srow" method="post" action="/staff-reset"><span>{esc(p["name"])} <span class="muted small">{esc(", ".join(p["depts"]))}</span></span>
+<input type="hidden" name="name" value="{esc(p["name"])}"><button type="submit">Reset</button></form>""" for p in items)
+    if not items: msg = msg or RESET_NONE
+    r = Response(_form_page("Reset a password", box + rows, msg, RESET_HINT, back=back, tail=""), status=status, mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.get("/staff-reset")
+@need("staff.reset")
+def staff_reset_page():
+    try: return _reset_page(who()["name"])
+    except people.Unreadable: return _reset_page_unreadable()
+
+def _reset_page_unreadable():
+    r = Response(_form_page("Reset a password", "", people.UNREADABLE, back=("/home", "Back"), tail=""), status=503, mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.post("/staff-reset")
+@need("staff.reset")
+def staff_reset_do():
+    me, by_, pub = who()["name"], by(), store.published()
+    name = request.form.get("name", "")
+    once = passwords.one_time(); h = passwords.hash_pw(once)
+    def change(d):
+        if not any(p["name"] == name for p in _resettable(pub, d, me)): raise Refused(RESET_REFUSED)   # rechecked under the lock
+        r = people.record(d, name)
+        u = r["username"]
+        if not u:
+            taken = {str(x.get("username") or "").lower() for x in d["people"].values() if isinstance(x, dict)}
+            u = account_slips.make_username(name, next(p["depts"] for p in people.staff(pub, d) if p["name"] == name), taken)
+        out = [dict(name=name, field="username", was=r["username"], now=u)] if u != r["username"] else []
+        r.update(username=u, pw=h, must_change=True, n=r["n"] + 1)
+        d["people"][name] = r
+        return u, [p["depts"] for p in people.staff(pub, d) if p["name"] == name][0], out
+    try: u, depts, out = people.update(change)
+    except Refused: return _reset_page(me, msg=RESET_REFUSED, status=403)
+    except people.Unreadable: return _reset_page_unreadable()
+    lockout.clear(u)
+    _account_entry("reset", [name], out, f"{name}: a new one-time password from their head of department" + (f"; username {u}" if out else ""), by_=by_, where="Reset a password", depts=depts)
+    return _reset_page(me, dict(name=name, username=u, once=once))
 
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
 TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"],

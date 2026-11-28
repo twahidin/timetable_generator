@@ -33,7 +33,8 @@ def rights(person, via, shared=None, today=None):
         if ex.get("timetable"):
             r |= {"committee", "setup", "history", "codes"}
             if ex.get("admin"): r.add("admin")
-        if g in ("hod", "sh"): r |= {"setup", "history.dept"}
+        if g in ("hod", "sh"): r |= {"setup", "history.dept", "staff.reset"}
+    r.add("codes.look")   # a student's forgotten code, looked up by anyone signed in by name (each look-up is recorded)
     r.add("history.own")   # anyone signed in by name can change something (ask for relief, start an event), so sees their own history
     return frozenset(r)
 
@@ -59,6 +60,7 @@ def gives(person, depts, today=None):
     r = rights(person, "password", today=today)
     out = [{"text": "Sees the published timetable and the files.", "strong": False}]
     def add(text, strong=False): out.append({"text": text, "strong": strong})
+    if "codes.look" in r: add("Student codes: looks up a student's forgotten code.")
     if "relief.team" in r: add("Relief: runs it, with the team's pages and settings.")
     elif "relief.plan" in r: add("Relief: plans cover, as management.")
     elif "relief" in r: add("Relief: opens the relief page and asks for cover.")
@@ -70,5 +72,6 @@ def gives(person, depts, today=None):
     elif "exams" in r: add(f"Exams and events: plans them, until {_day(person['extras']['exams'])}.")
     if "history" in r: add("History: sees everyone's changes.", True)
     elif "history.dept" in r: add("History: sees their departments' changes.", True)
+    if "staff.reset" in r: add("Passwords: gives staff in their departments a new temporary password.", True)
     if "admin" in r: add("People and access: this page.", True)
     return out

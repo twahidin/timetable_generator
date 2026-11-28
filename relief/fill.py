@@ -284,7 +284,7 @@ def soon(ids=None, date=None, force=False):
 
 def filling():
     """a run asked for (Fill now, a new absence, a request to change) has not ended, from the moment it is asked, or the
-    ticker's run is making picks: the Today page says "Being picked" and fetches again"""
+    ticker's run is making picks: the Today's Relief Assignments tab says "Being picked" and fetches again"""
     with _asked_lock: asked = bool(_asked) or _going[0] > 0
     return asked or _picking.is_set()
 

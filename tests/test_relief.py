@@ -262,7 +262,7 @@ def the_front_page_is_one_box_for_every_code():
     c = A.app.test_client()
     with published(PUB):
         front = c.get("/login").data
-        assert b"Your code (the one the school gave you)" in front and front.count(b'name="code"') == 1 and b'class="choice' not in front
+        assert b"Please enter your code to access your timetable." in front and front.count(b'name="code"') == 1 and b'class="choice' not in front
         assert c.get("/login?as=relief").data == front                 # the old cards' links still open the page
         assert not hasattr(A, "CHOICES")
 
@@ -532,7 +532,7 @@ def the_relief_home_moves_the_lists_too():
         c = staff("Mr Darren Lim")
         assert AP.load()["migrated"] is False
         j = c.get("/api/relief/me").get_json()
-        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the What's in tab, on the first open
+        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the All Relief Requests tab, on the first open
         assert AP.load()["migrated"] is True and AP.record(AP.load(), "Mr Darren Lim")["extras"]["relief"] is True
         assert A.move_relief_lists() is None and c.get("/api/relief/me").get_json()["can_team"] is True   # once only
     _reset(); fresh()

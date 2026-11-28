@@ -1,9 +1,10 @@
 "use strict";
-/* What's in (/relief#inbox), for the relief team (me.can_team), read-only: every absence, newest first, with when it came
+/* All Relief Requests (/relief#inbox), for the relief team (me.can_team), read-only: every absence, newest first, with when it came
    in, who sent it and how, for whom and when, the reason, whether the absent teacher has acknowledged (when someone else
    planned it), how many lessons have work and how many reliefs are approved, waiting or open (from the server's cover
-   counts); cancelled ones dimmed. Views: Coming up, Needs a nudge (planned by someone else, not acknowledged, and past
-   the time to remind them), Today, Earlier (every date past, not cancelled), Cancelled: every absence is in one of them (Needs a nudge only picks some of Coming up's). "new" = came in since this
+   counts); cancelled ones dimmed. Views: Coming up, Not acknowledged (planned by someone else, not acknowledged, and past
+   the time to remind them; or with a relief of today that has reached its relief teacher and is not acknowledged, the server's
+   unacked, each named in its row), Today, Earlier (every date past, not cancelled), Cancelled: every absence is in one of them (Not acknowledged only picks some of Coming up's and Today's). "new" = came in since this
    person last looked, counted over the absences the views show, and each view says how many of its own are new. The
    list is read with a GET, which never writes; once it is shown, the page posts the list's as_of to
    /api/relief/absences/seen. */
@@ -14,7 +15,7 @@
   const lastDate = r => (r.dates || []).slice().sort().pop() || "";
   const VIEWS = [
     ["coming", "Coming up", r => !r.cancelled && lastDate(r) >= RF.today(), "Nothing coming up."],
-    ["nudge", "Needs a nudge", r => !!r.nudge, "Nobody needs a nudge."],
+    ["nudge", "Not acknowledged", r => !!r.nudge || (Array.isArray(r.unacked) && r.unacked.length > 0), "Everyone has acknowledged."],
     ["today", "Today", r => !r.cancelled && (r.dates || []).includes(RF.today()), "No one is away today."],
     ["earlier", "Earlier", r => !r.cancelled && lastDate(r) < RF.today(), "Nothing earlier."],
     ["cancelled", "Cancelled", r => !!r.cancelled, "Nothing cancelled."],
@@ -50,7 +51,8 @@
       const ack = r.how !== "planned" ? `<span class="small muted">their own request</span>`
         : r.acknowledged ? `<span class="chip st-ok">✓ ${esc(stamp(r.acknowledged.at) || "acknowledged")}</span>` : `<span class="chip st-amber">not acknowledged yet</span>`;
       const w = n ? `<span class="${work === n ? "chip st-ok" : ""}">${work} of ${n}</span>` : `<span class="muted">none to cover</span>`;
-      const rel = status(r);
+      const un = (Array.isArray(r.unacked) ? r.unacked : []).map(u => `<div class="small pl-changed">${esc(`Relief not acknowledged: ${u.who}, ${RF.periods(u)}${u.started ? " · started" : ""}`)}</div>`).join("");
+      const rel = status(r) + un;
       tail = `<td>${ack}</td><td>${w}</td><td>${rel}</td>`;
     }
     return `<tr class="${[r.new ? "new" : "", r.cancelled ? "off" : ""].filter(Boolean).join(" ")}">
@@ -74,7 +76,7 @@
     const seg = VIEWS.map(([k, label, f]) => `<button type="button" data-in="view" data-v="${k}" class="${k === v[0] ? "on" : ""}" aria-pressed="${k === v[0] ? "true" : "false"}">${esc(label)} (${esc(count(f))})</button>`).join("");
     const about = [I.asOf ? `As of ${stamp(I.asOf, true)}` : "", fresh ? `${fresh} new since you last looked` : ""].filter(Boolean).join(" · ");
     box.innerHTML = `<div class="card">
-      <div class="ab-top"><div><h2>What's in</h2><div class="small muted">${esc(about)}</div></div>
+      <div class="ab-top"><div><h2>All Relief Requests</h2><div class="small muted">${esc(about)}</div></div>
         <div class="row"><div class="seg" role="group" aria-label="Which absences">${seg}</div><button type="button" class="small" data-in="reload" ${I.loading ? "disabled" : ""}>${I.loading ? "Reading…" : "Refresh"}</button></div></div>
       ${I.err ? `<p>${R.say(I.err)}</p>` : ""}
       ${rows.length ? `<div class="tablewrap"><table class="rtable inbox"><thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Absent teacher</th><th>Work</th><th>Relief status</th></tr></thead>

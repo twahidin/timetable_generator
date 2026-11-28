@@ -4608,7 +4608,7 @@ import importlib  # noqa: E402
 from relief import report as RE  # noqa: E402
 
 D13 = "2026-10-13"
-TODAY_BUTTON = [dict(text="Open relief today", url=BASE + "/relief#today")]
+TODAY_BUTTON = [dict(text="Open Today's Relief Assignments", url=BASE + "/relief#today")]
 SAM_LINE, MAYA_LINE = "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 · starts 10:30 · ", "\n• Ms Maya Lee · 1C Science P3–P5 · starts 09:00 · "
 STARTED, SAM_STARTED, MAYA_STARTED = "\nStarted without acknowledgement:", "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 (10:30)", "\n• Ms Maya Lee · 1C Science P3–P5 (09:00)"
 NOBODY, NOT_ON, TOO_SOON, TRIED = "Nobody to remind.", "Not on Telegram.", "Sent at {}: wait a few minutes.", "Last tried at {}: wait a few minutes."
@@ -4643,8 +4643,8 @@ def the_report_texts_are_the_plans():
     assert "`sent {hh:mm} · not on Telegram now`" in plan
     assert RE.clear_text("08:00", 4, 2) == none_waits("08:00", 2) and "`No reliefs are waiting now: {k} started without acknowledgement.`" in plan
     assert RE.clear_text("08:00", 1, 0) == "✅ 08:00 · The 1 relief for today is acknowledged." and RE.clear_text("08:00", 1, 1) == none_waits("08:00", 1)
-    for label in (RE.AGAIN, RE.OPEN_TODAY): assert f"`{label}`" in plan
-    assert (RE.AGAIN, RE.OPEN_TODAY, RE.NOBODY, RE.NOT_ON, RE.TOO_SOON.format(at="07:20"), RE.TRIED.format(at="07:20"), bot.REMINDED.format(n=2)) == ("Remind them again", "Open relief today", NOBODY, NOT_ON, TOO_SOON.format("07:20"), TRIED.format("07:20"), "Reminded 2.")
+    assert f"`{RE.AGAIN}`" in plan and RE.OPEN_TODAY == "Open Today's Relief Assignments"   # old plans are history: the old button label stays in them
+    assert (RE.AGAIN, RE.OPEN_TODAY, RE.NOBODY, RE.NOT_ON, RE.TOO_SOON.format(at="07:20"), RE.TRIED.format(at="07:20"), bot.REMINDED.format(n=2)) == ("Remind them again", "Open Today's Relief Assignments", NOBODY, NOT_ON, TOO_SOON.format("07:20"), TRIED.format("07:20"), "Reminded 2.")
     for text in (NOBODY, NOT_ON, TOO_SOON.format("{hh:mm}"), TRIED.format("{hh:mm}")): assert f"`{text}`" in plan, text
     v = dict(who=SAM, lesson="1A Art", periods="P1", start="", how="not on Telegram")                          # a lesson with no times
     assert RE.report_text("07:00", [v], [v]) == head("07:00", 1) + "\n• Mr Sam Tan · 1A Art P1 · not on Telegram" + STARTED + "\n• Mr Sam Tan · 1A Art P1"
@@ -7509,7 +7509,7 @@ def only_a_blocked_bot_makes_the_line():
 # ---- Answers, Task 3: the team pinged for a request for today ----
 from relief import report as RO  # noqa: E402
 NEW_EVE = "🆕 Late request for today · Ms Evelyn Koh\nwhole day\n2 lessons are waiting for your approval. Approve, then Send out."
-OPEN_TODAY = [[dict(text="Open relief today", url=BASE + "/relief#today")]]
+OPEN_TODAY = [[dict(text="Open Today's Relief Assignments", url=BASE + "/relief#today")]]
 def news(): return sorted((r["key"], r["name"], r["text"]) for r in outs("late"))
 def pick(i, ckey, who_=SAM): return CV.set_pick(i, ckey, dict(who=who_, by="ai", reason="Free then.", at=clock.now), SCHOOL, rs())
 
@@ -8016,7 +8016,7 @@ def send_out_is_checked_like_approve():
         for body, why in ((dict(who=MAYA), CV.PICK_CHANGED), (dict(who=SAM, approved_at="2026-10-01T09:00:00+08:00"), CV.PICK_CHANGED)):
             assert on_cover(TEAM, i, K5, "send-out", body, code=400)["error"] == why
         absent(teacher=SAM, dates=("2026-10-13",)); assert on_cover(TEAM, i, K5, "send-out", dict(who=SAM), code=400)["error"] == "Mr Sam Tan is no longer free then: change it"
-        assert on_cover(SAM, i, K5, "send-out", dict(who=SAM), code=403)["error"] == "Only the relief team can open What's in."
+        assert on_cover(SAM, i, K5, "send-out", dict(who=SAM), code=403)["error"] == "Only the relief team can open this."
 
 @t
 def send_out_all_sends_what_the_page_showed():
@@ -8827,7 +8827,7 @@ def a_relief_teacher_who_falls_sick_after_acknowledging():
         FL.run(); swept(); assert len(told_of("needed")) == 2, "once"
         row_ = next(v for v in call(TEAM, "get", "/api/relief/today?date=2026-10-13")["rows"] if v["ckey"] == K5); assert row_["away"] == SAM
         assert (c["approved"], c["sent_out"], c["ack"], c["change"]) == (None, None, None, None), "nothing of the old approval stands"
-        r_ = outs("needed", TEAM)[0]; assert r_["key"] == f"needed:{EVE}:{K5}:2026-10-13T07:00:00+08:00:{TEAM}" and buttons_of(r_) == [[dict(text="Open relief today", url=BASE + "/relief#today")]]
+        r_ = outs("needed", TEAM)[0]; assert r_["key"] == f"needed:{EVE}:{K5}:2026-10-13T07:00:00+08:00:{TEAM}" and buttons_of(r_) == [[dict(text="Open Today's Relief Assignments", url=BASE + "/relief#today")]]
         assert json.loads(r_["ref"]) == dict(id=i, absent=EVE, ckey=K5, at="2026-10-13T07:00:00+08:00", ends="2026-10-13T11:30:00+08:00")
 
 @t
@@ -9022,7 +9022,7 @@ def a_blocked_bot_in_the_evening_is_told_to_the_team_in_the_morning():
         at("21:05"); swept(); at("06:29:59", day=13); swept(); assert told_of("unlinked") == [], "the team's window"
         at("06:30", day=13); swept(); assert sorted(n for k, n in told_of("unlinked")) == [LEE, TEAM] and said(TEAM)[-1] == ALERT_EVE and said(LEE)[-1] == ALERT_EVE
         assert {r["key"] for r in outs("unlinked")} == {f"unlinked:{EVE}:2026-10-12:{n}" for n in (TEAM, LEE)} and all(json.loads(r["ref"]) == dict(name=EVE, date="2026-10-12") for r in outs("unlinked"))
-        assert buttons_of(outs("unlinked")[0]) == [[dict(text="Open relief today", url=BASE + "/relief#today")]]
+        assert buttons_of(outs("unlinked")[0]) == [[dict(text="Open Today's Relief Assignments", url=BASE + "/relief#today")]]
         swept(); assert len(told_of("unlinked")) == 2, "once"
         assert h.new() == [] and EVE not in [n for k, n in told_of("unlinked")]
 
