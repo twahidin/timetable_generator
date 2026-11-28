@@ -384,9 +384,28 @@ function redraw() {
   if (S.key === "__build") return renderBuilder();   /* its card switches to Whole week, its choices kept */
   if (S.current && S.current.key === S.key) $("#view").innerHTML = viewHTML(S.current);   /* the same page, date and all: the list and hash untouched */
 }
-function pickDay(d) { if (!(d >= 0 && d < ND)) return; S.pd = d; S.pdBy = true; redraw(); }
-function pickWeek(w) { if (!(w >= 0 && w < WEEKS)) return; S.pd = Math.min(ND - 1, w * PER_WEEK + S.pd % PER_WEEK); S.pdBy = true; redraw(); }
-function pickWhole(on) { S.whole = !!on; redraw(); }
+/* a redraw loses the keyboard's place: put focus back on the button with the same value */
+function focusBack(a, v) { const e = document.querySelector(`[data-${a}="${v}"]`); if (e && e.focus) e.focus(); }
+function pickDay(d) { if (!(d >= 0 && d < ND)) return; S.pd = d; S.pdBy = true; redraw(); focusBack("pd", d); }
+function pickWeek(w) { if (!(w >= 0 && w < WEEKS)) return; S.pd = Math.min(ND - 1, w * PER_WEEK + S.pd % PER_WEEK); S.pdBy = true; redraw(); focusBack("pw", w); }
+function pickWhole(on) { S.whole = !!on; redraw(); focusBack("pv", S.whole ? "week" : "day"); }
+/* which day the list opens on: today's school day when the app says; the first day when today is no school day; else the device's weekday in the first week */
+function deviceDay() { return WKD[new Date().getDay()]; }
+function startDay(today, wd) {
+  if (today && today.calendar) { if (today.day == null) return 0; const i = DAYS.indexOf(today.day); if (i >= 0) return i; }
+  const w = String(wd || "").toLowerCase(), i = DAYS.findIndex(n => weekDay(n)[1].slice(0, 3).toLowerCase() === w);
+  return i < 0 ? 0 : i;
+}
+let todayAsked = false;
+/* the app's answer for today, asked once on a narrow screen; any failure falls back to the device's weekday, with no message */
+function loadToday() {
+  if (!APP || todayAsked || !NARROW.matches) return;
+  todayAsked = true;
+  const done = a => { if (!S.pdBy) { S.pd = startDay(a, deviceDay()); redraw(); } };
+  fetch("/api/today", { credentials: "same-origin", cache: "no-store" })
+    .then(r => r.status === 200 ? r.json() : null)
+    .then(a => done(a && typeof a === "object" && "calendar" in a ? a : null), () => done(null));
+}
 function viewHTML(v, extra = "") {
   const stats = COMMITTEE && v.stats.length ? `<div class="stats">${v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("")}</div>` : "";
   const leg = v.legend.map(e => { const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}${COMMITTEE && e.count ? esc(" · " + e.count) : ""}</span></div>`; }).join("");
@@ -799,7 +818,11 @@ if (APP) {
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";
 window.addEventListener("hashchange", route);
+if (!APP) S.pd = startDay(null, deviceDay());   /* a saved copy asks nothing */
 route();
+const NARROW = matchMedia("(max-width:700px)");
+if (NARROW.addEventListener) NARROW.addEventListener("change", loadToday);
+loadToday();
 </script>
 </body>
 </html>

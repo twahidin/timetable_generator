@@ -67,7 +67,7 @@ const EVROW = { id: "ev1", name: TRIP, kind: "event", start: "2026-10-05", end: 
 const STUROW = { id: "ev2", name: "Sec 3 <i>Trip</i>", kind: "event", start: "2026-10-06", end: "2026-10-07", classes: ["3B"], where: "Science Centre & museum",
   days: [{ date: "2026-10-06", start: "07:40", end: "13:00" }, { date: "2026-10-07", start: "07:40", end: "10:40" }] };
 
-function boot(answers, app, tweak) {
+function boot(answers, app, tweak, narrow) {   /* narrow: the screen is 700px wide or less (only that query matches) */
   const reg = new Map(), fetched = [];
   const el = (id, tag) => {
     const cls = new Set();
@@ -81,16 +81,17 @@ function boot(answers, app, tweak) {
   const adopt = o => { if (o.id) reg.set(o.id, o); scan(o); };
   const scan = e => { for (const m of e._html.matchAll(/id="([^"]+)"/g)) if (!reg.has(m[1])) reg.set(m[1], el(m[1])); };
   for (const id of ["q", "results", "status", "theme", "tabs", "main", "browse", "fq", "chips", "list", "view", "dlg", "dlgT", "dlgB", "school", "ttl"]) reg.set(id, el(id));
+  const mq = { matches: !!narrow, ls: [], addEventListener(t, f) { if (t === "change") this.ls.push(f); } }, focused = [];
   const header = el("", "header"), on = {};   /* on: the page's own document listeners (click, keydown), to call with a fake event */
   const document = {
     documentElement: { classList: el("html").classList, dataset: {} },
-    querySelector: sel => sel === "header.top" ? header : sel === ".search" ? el("") : (/^#([\w-]+)$/.exec(sel) ? reg.get(sel.slice(1)) || null : null),
+    querySelector: sel => sel === "header.top" ? header : sel === ".search" ? el("") : /^\[data-p[dwv]="[^"]*"\]$/.test(sel) ? { focus() { focused.push(sel); } } : (/^#([\w-]+)$/.exec(sel) ? reg.get(sel.slice(1)) || null : null),
     querySelectorAll: () => [], createElement: t => el("", t), addEventListener: (t, f) => { (on[t] = on[t] || []).push(f); }, activeElement: { tagName: "BODY" }
   };
   const loc = { hash: "", href: "http://x/timetable" };
   const ctx = {
     document, location: loc, history: { replaceState: (a, b, h) => { loc.hash = h; } }, window: { addEventListener() {}, print() {} },
-    localStorage: { getItem: () => null, setItem() {} }, matchMedia: () => ({ matches: false }), CSS: { escape: s => s }, navigator: {},
+    localStorage: { getItem: () => null, setItem() {} }, matchMedia: q => q === "(max-width:700px)" ? mq : { matches: false }, CSS: { escape: s => s }, navigator: {},
     setTimeout, clearTimeout, URL, Blob: function () {}, console,
     fetch: url => {
       fetched.push(url);
@@ -107,7 +108,7 @@ function boot(answers, app, tweak) {
   vm.runInContext(SCRIPT, ctx);
   const tick = () => new Promise(r => setImmediate(r)).then(() => new Promise(r => setImmediate(r))).then(() => new Promise(r => setImmediate(r)));
   const pick = async iso => { reg.get("onDate").listeners.change[0]({ target: { value: iso } }); await tick(); };
-  return { run: c => vm.runInContext(c, ctx), view: () => reg.get("view")._html, el: id => reg.get(id), fetched, tick, pick, on };
+  return { run: c => vm.runInContext(c, ctx), view: () => reg.get("view")._html, el: id => reg.get(id), fetched, tick, pick, on, focused, setNarrow: m => { mq.matches = m; mq.ls.forEach(f => f({ matches: m })); } };
 }
 
 const APP = { mode: "teacher", tabs: ["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], pdf: true, logout: "/logout", files: [], dates: true, exams: true, published_at: STAMP };
@@ -134,7 +135,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(count(v, 'class="cell exam"'), 1, v);
     assert(v.includes('<span class="t"><span class="tf">7.50–8.50</span><span class="ts">7.50</span></span><b>Sec 3 English Paper 1</b><span class="m">3-01</span>'), v);
     P.run('show("classes", "4A")');
-    assert(P.view().includes("runs 8.20–8.40 only") && !P.view().includes('class="cell x"'), P.view());
+    assert(grid(P.view()).includes("runs 8.20–8.40 only") && !P.view().includes('class="cell x"'), P.view());
   });
 
   await t("a teacher and a room on a date; a combined venue shows the paper held in one of its rooms", async () => {
@@ -391,6 +392,61 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(/@media print\{[^\n]*\.tt \.track\{height:calc\(var\(--h\) \* 56 \/ 62\)\}\.tt \.row\{break-inside:avoid\}\.tt \.ruler\{break-after:avoid\}/.test(PAGE), "print: 56px rows, a row never split, an hour row kept with its row");
   });
 
+  await t("the phone's day list: ties, no breaks, focus kept, and which day it opens on", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick();
+    assert.strictEqual(P.run('JSON.stringify(dayItems({ cells: [{ d: 0, a: 540, b: 560, title: "X" }], codes: null }, 0).map(x => x.name || x.c.title))'), '["X"]', "no codes: the lessons only");
+    assert.strictEqual(P.run('JSON.stringify(dayItems({ cells: [{ d: 0, a: 540, b: 560, title: "X" }], codes: null }, 1))'), "[]");
+    P.run('bandsOf = (v, d) => [{ a: 540, b: 560, name: "Recess" }]');
+    assert.strictEqual(P.run('JSON.stringify(dayItems({ cells: [{ d: 0, a: 540, b: 560, title: "X" }] }, 0).map(x => x.name || x.c.title))'), '["Recess","X"]', "same start and end: the break first");
+    P.run('show("classes", "3A")');
+    P.run("pickDay(2)"); P.run("pickWeek(1)"); P.run("pickWhole(true)"); P.run("pickWhole(false)");
+    assert.deepStrictEqual(P.focused, ['[data-pd="2"]', '[data-pw="1"]', '[data-pv="week"]', '[data-pv="day"]'], "focus goes back to the button just pressed (the fake DOM only shows that the page asks for it)");
+    const sd = (a, w) => P.run(`startDay(${a}, "${w}")`);
+    assert.strictEqual(sd('{ date: "2026-10-08", day: "Odd Thu", calendar: true }', "Mon"), 3);
+    assert.strictEqual(sd('{ date: "2026-10-22", day: "Even Thu", calendar: true }', "Mon"), 8);
+    assert.strictEqual(sd('{ date: "2026-10-10", day: null, calendar: true }', "Sat"), 0, "not a school day: the first day");
+    assert.strictEqual(sd('{ date: "2026-10-08", day: null, calendar: false }', "Thu"), 3, "the calendar cannot say: the device's weekday, first week");
+    assert.strictEqual(sd("null", "wed"), 2);
+    assert.strictEqual(sd("null", "Sun"), 0);
+    const TODAY = [200, { date: "2026-10-08", day: "Odd Thu", calendar: true }];
+    const dev = P.run("startDay(null, deviceDay())");
+    /* narrow: asked once, opens on the app's day */
+    const N = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true);
+    await N.tick(); N.run('show("classes", "3A")');
+    assert(list(N.view()).includes('<button data-pd="3" class="on">Thu</button>'), list(N.view()));
+    N.run('show("classes", "3B")'); await N.tick();
+    assert.deepStrictEqual(N.fetched.filter(u => u === "/api/today"), ["/api/today"], "once, also after a second show");
+    N.setNarrow(true); await N.tick(); assert.strictEqual(N.fetched.filter(u => u === "/api/today").length, 1, "nothing after its first answer");
+    /* failures: the device's weekday, and no message */
+    for (const ans of [{ "/api/today": [401, { error: "Sign in again" }] }, {}, { "/api/today": [200, { error: "x" }] }]) {
+      const F = boot(Object.assign({ "/api/published/exams": LIST }, ans), APP, null, true); await F.tick(); F.run('show("classes", "3A")');
+      assert.strictEqual(F.run("S.pd"), dev); assert(!/Sign in again|error/i.test(F.view()), F.view().slice(0, 300));
+    }
+    /* a button pressed before the answer wins */
+    const B = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true);
+    B.run('show("classes", "3A")'); B.run("pickDay(1)"); await B.tick();
+    assert.strictEqual(B.run("S.pd"), 1); assert(list(B.view()).includes('<button data-pd="1" class="on">Tue</button>'));
+    /* not narrow: never asks; narrow later: asks then */
+    const W = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP); await W.tick();
+    assert(!W.fetched.includes("/api/today")); W.setNarrow(true); await W.tick(); assert(W.fetched.includes("/api/today"), "the screen became narrow");
+    assert.strictEqual(W.run("S.pd"), 3);
+    /* a saved copy asks nothing and opens on the device's weekday */
+    const C = boot({ "/api/today": TODAY }, null, null, true); await C.tick();
+    assert(!C.fetched.includes("/api/today")); assert.strictEqual(C.run("S.pd"), dev);
+    /* a personal page asks and opens on today */
+    const R = boot({ "/api/today": TODAY }, Object.assign({}, APP, { mode: "personal", tabs: [], exams: false, dates: false }), null, true);
+    await R.tick(); assert(R.fetched.includes("/api/today")); assert.strictEqual(R.run("S.pd"), 3);
+    /* a date: that day only, no week or day buttons, the exam and the stopped lessons; back to the usual */
+    const D = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await D.tick(); D.run('show("classes", "3A")'); await D.pick("2026-10-05");
+    let L = list(D.view());
+    assert(!L.includes('class="seg pw"') && !L.includes('class="seg pdy"') && L.includes('class="it exam"') && L.includes("7.50–8.50"), L);
+    assert(L.includes('class="it x"'), "a stopped lesson is crossed out in the list: " + L);
+    D.el("onDate").listeners.change[0]({ target: { value: "" } }); await D.tick();
+    assert(list(D.view()).includes('class="seg pdy"'), "Usual timetable: the day buttons are back");
+  });
+
   await t("the phone's day list: drawn before the grid, the week and day buttons, a lesson's time beside it, Whole week", async () => {
     const P = boot({ "/api/published/exams": LIST }, APP);
     await P.tick();
@@ -498,7 +554,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(count(v, 'class="cell s"'), 1, "only the 20-minute lesson is short");
     const Q = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
     await Q.tick(); await Q.pick("2026-10-05"); Q.run('show("classes", "4A")');
-    assert(Q.view().includes("runs 8.20–8.40 only") && !Q.view().includes("08:20"), Q.view());
+    assert(grid(Q.view()).includes("runs 8.20–8.40 only") && !Q.view().includes("08:20"), Q.view());
     const R = boot({ "/api/published/exams": LIST }, APP);
     await R.tick();
     R.run('const cv0 = classView; classView = c => c === "3B" ? Object.assign(cv0(c), { cells: [] }) : cv0(c); show("lessons", null)'); await R.tick();
