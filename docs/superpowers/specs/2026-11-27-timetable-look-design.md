@@ -222,6 +222,13 @@ today. The space the figures used at the top right is left empty.
   for anyone who wants it. (My call.)
 - The heading, the tools, the legend and the note stay around it. The PDF a phone downloads is the same PDF.
 
+### 9. Times on the exam parts of the page (the lead, 2026-11-28: "keep it consistent")
+
+The published page's exam parts wrote times as 13:00 while the grid writes 1.00. Every time the published page shows
+is now written the grid's way: the Exams and events tab (papers, the roster, an event's days and duties, "Your
+duties"), "My exam timetable" (papers, event days, the report time) and the duty line of a date view. The committee's
+exam planning pages and the exam printouts keep the 24-hour form until the lead says otherwise. Built with step 2.
+
 ## The steps
 
 1. **The grid and the printouts.** Sections 1 to 7: the new grid on every page, who sees what, and the PDF.

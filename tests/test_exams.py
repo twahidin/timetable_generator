@@ -3505,4 +3505,23 @@ def the_change_of_teacher_in_charge_keeps_to_the_save_check():
         assert SC.load(id)["rev"] == r0 + 2 and SC.load(id)["in_charge"] == "Mr Ben Ong"
     _reset()
 
+@t
+def today_says_only_the_school_day():
+    _reset(); _cal(True)
+    with published(_PUB):
+        mon, sat = date(2026, 9, 7), date(2026, 9, 12)   # F.CAL's Term 4 starts on this Monday as an Odd week
+        who = dict(committee=committee(), teacher=signed_in(os.environ["TEACHER_CODE"])[0], student=signed_in(os.environ["STUDENT_CODE"])[0],
+                   own=as_role("personal", sid="3A-07"))
+        with _today(mon):
+            for k, c in who.items():
+                r = c.get("/api/today"); j = r.get_json()
+                assert r.status_code == 200 and j == dict(date="2026-09-07", day="Odd Mon", calendar=True) and set(j) == {"date", "day", "calendar"}, (k, r.data)
+        with _today(sat): assert who["student"].get("/api/today").get_json() == dict(date="2026-09-12", day=None, calendar=True)
+        _cal(False)
+        with _today(mon): assert who["own"].get("/api/today").get_json() == dict(date="2026-09-07", day=None, calendar=False)
+        assert A.app.test_client().get("/api/today").status_code == 401
+    with published(None):
+        r = committee().get("/api/today"); assert r.status_code == 409 and r.get_json() == {"error": A.NO_EXAMS_PUB}
+    _reset()
+
 print(f"{COUNT} exams tests passed")
