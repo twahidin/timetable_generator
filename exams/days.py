@@ -20,6 +20,12 @@ def hhmm(m):
     return "%02d:%02d" % divmod(int(m), 60)
 
 
+def school(m):
+    """minutes after midnight as the timetable writes a time: 12-hour, a full stop, no am or pm ("8.00", "1.00")"""
+    h, mi = divmod(int(m), 60)
+    return "%d.%02d" % ((h + 11) % 12 + 1, mi)
+
+
 def _clock(t):
     """a time as the published model writes it ("7.40", "1.00" or "07:40"), read without am or pm"""
     m = re.fullmatch(r"(\d{1,2})[.:](\d{2})", str(t).strip())

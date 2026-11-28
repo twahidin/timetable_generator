@@ -34,7 +34,7 @@ def _seat_key(seat):
 
 def _span(p):
     a = _days.minutes(p["start"])
-    return "%s to %s" % (_days.hhmm(a), _days.hhmm(a + p["minutes"]))
+    return "%s to %s" % (_days.school(a), _days.school(a + p["minutes"]))
 
 
 def _where(sched):
@@ -147,7 +147,7 @@ class _Doc:
 
 
 def _sitting_title(sit, room):
-    return "%s · %s · %s" % (_day(sit["date"]), _days.hhmm(sit["start"]), room)
+    return "%s · %s · %s" % (_day(sit["date"]), _days.school(sit["start"]), room)
 
 
 def _per_room(d, pub, sched, xset, what):
@@ -204,13 +204,13 @@ def _roster(d, sched, by_teacher):
         for n in sorted(mine):
             d.title(n)
             for x in sorted(mine[n], key=lambda x: (x["date"], x["start"])):
-                d.row([_day(x["date"]), "%s to %s" % (_days.hhmm(x["start"]), _days.hhmm(x["end"])), x["room"], "chief" if x.get("chief") == n else ""], w)
+                d.row([_day(x["date"]), "%s to %s" % (_days.school(x["start"]), _days.school(x["end"])), x["room"], "chief" if x.get("chief") == n else ""], w)
     else:
         for date in sorted({x["date"] for x in duties}):
             d.title(_day(date))
             d.row(["Time", "Room", "Chief", "Invigilators"], [110, 90, 110, 200], bold=True)
             for x in sorted((x for x in duties if x["date"] == date), key=lambda x: (x["start"], x["room"])):
-                d.row(["%s to %s" % (_days.hhmm(x["start"]), _days.hhmm(x["end"])), x["room"], x.get("chief") or "", ", ".join(x["names"])], [110, 90, 110, 200])
+                d.row(["%s to %s" % (_days.school(x["start"]), _days.school(x["end"])), x["room"], x.get("chief") or "", ", ".join(x["names"])], [110, 90, 110, 200])
 
 
 def _timetable(d, sched):

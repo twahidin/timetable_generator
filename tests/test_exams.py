@@ -1145,8 +1145,17 @@ def printout_titles_use_the_page_words():
                          "roster-day": "Roster by day", "roster-teacher": "Roster by teacher", "timetable": "Exam timetable"}
     assert set(PR.TITLES) == set(PR.WHATS)
     assert PR._day("2026-10-05") == "Mon 5 Oct" and PR._day("2026-11-01") == "Sun 1 Nov"
-    assert PR._sitting_title(dict(date="2026-10-05", start=470), "Hall") == "Mon 5 Oct · 07:50 · Hall"
+    assert PR._sitting_title(dict(date="2026-10-05", start=470), "Hall") == "Mon 5 Oct · 7.50 · Hall"
     assert PR._Doc(_PUB, dict(name="Sec 3 Exam"), "roster-day", io.BytesIO()).head == "Sample School · Sec 3 Exam · Roster by day"
+
+@t
+def printouts_write_the_school_time():
+    from exams import days as D
+    assert (D.school(480), D.school(760), D.school(780), D.school(0)) == ("8.00", "12.40", "1.00", "12.00")
+    assert D.hhmm(780) == "13:00"
+    assert PR._span(dict(start="13:00", minutes=90)) == "1.00 to 2.30"
+    t = PR._sitting_title(dict(date="2026-10-05", start=480), "Hall")
+    assert "8.00" in t and "08:00" not in t, t
 
 @t
 def printouts_and_excel():
@@ -1175,6 +1184,9 @@ def printouts_and_excel():
         assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
         assert c.get(f"/api/exams/{s['id']}/view").get_json()["stale"] is False
         r = c.get(f"/api/exams/{s['id']}/download.xlsx"); assert r.status_code == 200 and "Sec 3 Exam.xlsx" in r.headers["Content-Disposition"]
+        _xl = openpyxl.load_workbook(io.BytesIO(r.data))
+        _starts = [row[1].value for row in list(_xl["Seats"].iter_rows())[1:] if row[1].value]
+        assert _starts and all(re.fullmatch(r"\d\d:\d\d", v) for v in _starts), _starts
         wb = openpyxl.load_workbook(io.BytesIO(r.data))
         assert wb.sheetnames == ["Papers", "Seats", "Duties", "Lessons"], wb.sheetnames
         made = c.get(f"/api/exams/{s['id']}").get_json()["made"]
