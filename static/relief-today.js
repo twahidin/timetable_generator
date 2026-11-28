@@ -7,7 +7,9 @@
    own choice, planned_by, is approved and sent out when it is planned, and its line reads "Planned by {head} · "); Choose
    or Change, which opens the "free then" list (Relief.freeList, drawn as Relief Planning's) and approves the one chosen at once; Split (a cover of two periods or
    more that is not approved: the person chooses after which period); Join again (a split lesson none of whose parts is
-   approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting,
+   approved); Keep (on a request to change, where Approve reads "Approve the new pick"); Relief not needed (on every row not cancelled
+   nor stopped whose lesson is not over (the row's over), "for the whole lesson" on a part of a split one: it ends every part), which opens a reason line (optional) with
+   Mark relief not needed and Back, one at a time as Split's is; the row then leaves the list, so what was done is said above the rows. At the top: Approve all waiting,
    Send out all approved and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
    this tab is on screen. After every action the day is read again; a refusal shows the server's sentence beside its row.
    The page opens on the day the server says (no date asked: today, or the next school day once today's cut-off has come), and its
@@ -40,9 +42,10 @@
      list's answer; split: the row whose split choice is open; bot: a bot was connected when the day was last read; follow: the rows a
      step was taken on whose teacher is not told yet; reads: how often the day was read again for what is being sent; said: what came
      of that; lines, acts: the lines above the rows and the buttons at the top as drawn; date: the day shown, empty until the first
-     answer (the page asks for none: the server says which day it opens on); hours: the times of the last answer (its hours) */
+     answer (the page asks for none: the server says which day it opens on); hours: the times of the last answer (its hours); nn: the
+     row whose Relief not needed box is open, nnWhy: what is typed in it */
   const T = { pane: null, date: "", want: "", hours: null, data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
-              busy: new Set(), all: false, open: null, free: new Map(), split: null, bot: false, follow: new Set(), reads: 0, said: "", lines: "", acts: "" };
+              busy: new Set(), all: false, open: null, free: new Map(), split: null, nn: null, nnWhy: "", bot: false, follow: new Set(), reads: 0, said: "", lines: "", acts: "" };
 
   const rid = r => r.id + "\n" + r.ckey;
   const rows = () => (T.data && Array.isArray(T.data.rows) ? T.data.rows : []);
@@ -151,7 +154,16 @@
       out.push(b(on ? "split-off" : "split", "Split", "", ` aria-expanded="${on ? "true" : "false"}"`));
     }
     if (r.split && !rows().some(o => o.id === r.id && o.key === r.key && SENT.includes(o.state))) out.push(b("join", "Join again"));
+    const nn = T.nn === k;
+    if (!r.over) out.push(b(nn ? "nn-off" : "nn", r.split ? "Relief not needed for the whole lesson" : "Relief not needed", "", ` aria-expanded="${nn ? "true" : "false"}"`));   /* over: nothing more is marked */
     return `<div class="bar td-btns">${out.join("")}</div>`;
+  }
+
+  function nnHTML(r) {   /* the reason (optional), then Mark relief not needed: the whole lesson, every part of a split one */
+    const off = T.busy.has(rid(r)) || T.all ? " disabled" : "", id = `tdNn-${r.id}-${r.ckey}`;
+    return `<div class="td-split td-nn" role="group" aria-label="${esc(`Relief not needed for ${lessonName(r)}`)}">${r.split ? `<span class="small">${esc(`This ends every part of ${RF.title(r)}.`)}</span>` : ""}
+      <label class="small" for="${esc(id)}">Why is relief not needed? (optional)</label><input id="${esc(id)}" data-td="nn-why" maxlength="200" value="${esc(T.nnWhy)}" autocomplete="off">
+      <button type="button" class="small primary" data-td="nn-go"${off}>Mark relief not needed</button><button type="button" class="small" data-td="nn-off"${off}>Back</button></div>`;
   }
 
   function splitHTML(r) {   /* "Split after P3": the second part starts at the next period (0-based at = the 1-based period before it) */
@@ -174,6 +186,7 @@
     const k = rid(r), m = T.msg.get(k), under = [];
     if (m) under.push(`<div class="bar">${say(m)}</div>`);
     if (T.split === k && Number(r.n) >= 2) under.push(splitHTML(r));
+    if (T.nn === k) under.push(nnHTML(r));
     if (T.open === k) under.push(freeArea(r));
     const work = r.work_set ? `<span class="td-yes">work set</span>` : `<span class="td-no">no work yet</span>`;
     return `<div class="td-row${r.state === "cancelled" || r.state === "stopped" ? " off" : ""}${r.state === "change" ? " ask" : ""}" role="listitem" data-id="${esc(r.id)}" data-ckey="${esc(r.ckey)}">
@@ -236,7 +249,7 @@
       lines.push({ text: `${one ? "1 relief sent out: it" : `${held.length} reliefs sent out: they`} will be sent at ${at} on ${day(d)}. You can still change ${one ? "it" : "them"} until then.` });
     }
     lines.push(...T.top);
-    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">show today</button>.` : ""}</p>`; });
+    lines.forEach((m, i) => { lines[i] = `<p class="td-top"${m.said ? ` tabindex="-1" data-said="1"` : ""}>${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">show today</button>.` : ""}</p>`; });
     if (T.data && T.data.filling) lines.push(`<p class="td-top small td-busy">Being picked… The page reads the day again every 3 seconds.</p>`);
     if (T.err && T.data) lines.push(`<p class="td-top">${say(T.err)} <button type="button" class="small" data-td="reload">Try again</button></p>`);
     if (lines.join("") !== T.lines) $("#tdTop", T.pane).innerHTML = T.lines = lines.join("");   /* a live region: what is there already is not said again */
@@ -307,6 +320,7 @@
     const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
     if (T.open && !live(T.open)) T.open = null;
     if (T.split && !live(T.split)) T.split = null;
+    if (T.nn && (!live(T.nn) || findRow(T.nn).over)) T.nn = null;   /* over meanwhile: its box closes */
     if (!T.data.filling) T.top = T.top.filter(m => !m.fill);
     if (same) { paintActs(); paintSaid(); } else { paintDay(); paint(); }
     schedule();
@@ -328,7 +342,7 @@
     const r = findRow(k);
     if (!r) return;
     const s = { loading: true, err: null, data: null, teaching: false, busy: false };
-    T.open = k; T.split = null; T.free.set(k, s); T.msg.delete(k);
+    T.open = k; T.split = null; T.nn = null; T.free.set(k, s); T.msg.delete(k);
     paintRows();
     focusIn(k, '[data-td="close"]');
     const res = await R.api(`/api/relief/absences/${enc(r.id)}/covers/${enc(r.ckey)}/free`);
@@ -438,7 +452,7 @@
 
   function setDate(v, quiet) {   /* quiet: the caller reads the day itself (showDay, through the tab's shown) */
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) || v === T.date) return;
-    T.date = v; T.data = null; T.err = null; T.top = []; T.msg.clear(); T.open = null; T.free.clear(); T.split = null; T.follow.clear();
+    T.date = v; T.data = null; T.err = null; T.top = []; T.msg.clear(); T.open = null; T.free.clear(); T.split = null; T.nn = null; T.follow.clear();
     paintDay(); paint(); if (!quiet) load();
   }
 
@@ -483,7 +497,7 @@
       case "pl-duty": { const s = T.free.get(k); if (s) { s.duty = !s.duty; paintRows(); focusIn(k, '[data-pl="duty"]'); } return; }
       case "remind": remind(k, r); return;
       case "keep": act(k, "POST", `${cover}/keep`, {}, () => `${r.pick.who} kept: the relief stays with them.`); return;
-      case "split": T.split = k; T.open = null; T.msg.delete(k); paintRows(); focusIn(k, '[data-td="split-go"]'); return;
+      case "split": T.split = k; T.open = null; T.nn = null; T.msg.delete(k); paintRows(); focusIn(k, '[data-td="split-go"]'); return;
       case "split-off": T.split = null; paintRows(); focusIn(k, '[data-td="split"]'); return;
       case "split-go": {
         const at = Number(b.dataset.at);
@@ -492,8 +506,31 @@
         return;
       }
       case "join": act(k, "POST", `${lesson}/join`, {}, () => `${RF.title(r)}: joined again as one lesson.`); return;
+      case "nn": T.nn = k; T.nnWhy = ""; T.split = null; T.open = null; T.msg.delete(k); paintRows(); focusIn(k, '[data-td="nn-why"]'); return;
+      case "nn-off": T.nn = null; paintRows(); focusIn(k, '[data-td="nn"]'); return;
+      case "nn-go": notNeeded(k, r); return;
     }
   }
+
+  /* the whole lesson (every part of a split one): it leaves the list, so it is said above the rows, and the focus goes to the
+     next row still there (else the one before, else that line) */
+  async function notNeeded(k, r) {
+    if (T.busy.has(k) || T.all) return;
+    const order = rows().map(rid), i = order.indexOf(k), said = { text: `${RF.title(r)}: relief not needed.`, bad: false, said: true };
+    let done = false;
+    await act(k, "POST", `/api/relief/absences/${enc(r.id)}/lessons/${enc(r.key)}/not-needed`, { why: T.nnWhy.trim() }, () => {
+      T.nn = null; T.nnWhy = ""; done = true;
+      T.top.forEach(m => { delete m.said; });
+      T.top.push(said);
+      return "";
+    }, true, false);
+    if (!done || R.cur !== "today" || rowEl(k) || (document.activeElement && document.activeElement !== document.body)) return;
+    const next = [...order.slice(i + 1), ...order.slice(0, Math.max(i, 0)).reverse()].map(rowEl).find(Boolean);
+    const b = next && [...next.querySelectorAll("button")].find(x => !x.disabled), line = $("#tdTop [data-said]", T.pane);
+    if (b) b.focus({ preventScroll: true }); else if (line) line.focus({ preventScroll: true });
+  }
+
+  function onInput(e) { if (e.target.dataset && e.target.dataset.td === "nn-why") T.nnWhy = e.target.value; }
 
   function onChange(e) {
     if (e.target.id !== "tdDate") return;
@@ -503,7 +540,12 @@
   }
 
   function onKey(e) {
-    if (e.key === "Escape" && T.open && e.target.closest && e.target.closest(".pl-list")) { e.preventDefault(); closeFree(T.open); }
+    if (e.key === "Escape" && T.open && e.target.closest && e.target.closest(".pl-list")) { e.preventDefault(); closeFree(T.open); return; }
+    if (!e.target.dataset || e.target.dataset.td !== "nn-why") return;
+    const k = keyOf(e.target), r = k && findRow(k);
+    if (!r) return;
+    if (e.key === "Enter") { e.preventDefault(); notNeeded(k, r); }
+    else if (e.key === "Escape") { e.preventDefault(); T.nn = null; paintRows(); focusIn(k, '[data-td="nn"]'); }
   }
 
   document.addEventListener("visibilitychange", () => { if (T.pane && onScreen() && again() && !T.timer) load(true); });
@@ -523,6 +565,7 @@
       pane.addEventListener("click", onClick);
       pane.addEventListener("change", onChange);
       pane.addEventListener("keydown", onKey);
+      pane.addEventListener("input", onInput);
       paintDay(); paint();
       load();
     },
