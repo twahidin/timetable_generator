@@ -211,7 +211,7 @@
       let body;
       if (!x.needed) {
         const nn = x.not_needed || {}, line = nn.by === "app" ? `${nn.why}: no relief needed` : (nn.why ? `Relief not needed: ${nn.why}` : "Relief not needed");
-        body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${now && !r.cancelled ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;
+        body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${now && !r.cancelled && !x.over ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;   /* over: nothing more is marked */
       } else body = now ? workEdit(r, x, i) : workRead(r, x);
       const extra = cover && opts.extra ? opts.extra(r, x) || "" : "";
       return `<div class="rl" data-key="${esc(x.key)}">${head}${changed}${stop}${body}${extra}</div>`;
@@ -232,7 +232,7 @@
       return `<div class="rf-work"><label class="small muted" for="${esc(id)}-t">Work for this lesson</label>
         <textarea id="${esc(id)}-t" class="wrapbox" data-w="text" rows="2" maxlength="2000" placeholder="What the class does in this lesson">${esc(d.text)}</textarea>
         <input type="url" data-w="link" maxlength="500" value="${esc(d.link)}" placeholder="A link, if any (SLS, Google Drive): https://…" aria-label="A link for this lesson">
-        <div class="rf-files">${files}<button type="button" class="small" data-act="addfile" ${up ? "disabled" : ""}>Add a file</button><input type="file" data-w="file" multiple accept="${RF.KINDS.join(",")}" hidden>${asking ? "" : `<button type="button" class="small ab-nn-btn" data-act="nn-ask">Relief not needed</button>`}</div>
+        <div class="rf-files">${files}<button type="button" class="small" data-act="addfile" ${up ? "disabled" : ""}>Add a file</button><input type="file" data-w="file" multiple accept="${RF.KINDS.join(",")}" hidden>${asking || x.over ? "" : `<button type="button" class="small ab-nn-btn" data-act="nn-ask">Relief not needed</button>`}</div>
         <div class="rf-err${e && !e.bad ? " say" : ""}" role="status">${e ? esc(e.text) : ""}</div></div>${nn}`;
     }
 

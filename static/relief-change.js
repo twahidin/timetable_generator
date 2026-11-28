@@ -17,10 +17,19 @@
 
    opts.lessons (the relief team's Edit on All Relief Requests): "Or change one lesson", each lesson dated today or later as
    "{day} · {periods} · {title} · {relief}" (relief in Today's words, each part of a split lesson with its periods): Relief not
-   needed opens "Why? (optional)" with Mark relief not needed and Back (one at a time); a lesson a person marked not needed has
-   Needed again (one the app marked, a co-teacher being there, has none). opts.cancel: "Or cancel the whole request", a reason
-   needed (Cancel the request is off while it is empty) and Keep it, which empties it. Each step done calls onDone(the answered
-   record, what was done in a line); a refusal shows its sentence beside it. While any step is on its way, nothing else is sent. */
+   needed opens "Why? (optional)" with Mark relief not needed and Back (one at a time); a lesson not needed has Needed again (a
+   person marked it) or Ask for relief anyway (the app marked it: a co-teacher is there); a lesson that is over (rec's over) has
+   neither. A lesson step keeps the editor open on the answered record (what was chosen and typed above stays), says what was
+   done beside the lesson, reads the preview again and calls opts.onStep(the record, what was done in a line). opts.cancel: "Or
+   cancel the whole request", a reason needed (Cancel the request is off while it is empty) and Keep it, which empties it;
+   Cancel the request done calls onDone(the answered record, "Cancelled."). A refusal shows its sentence beside it. While any
+   step is on its way, nothing else is sent.
+
+   An added lesson one of whose other teachers is there (the preview's shared) has a tick "Ask for relief anyway": ticked, its
+   key goes in ask with the preview and the save, and the preview is read again (the lines shown stay while it is read, so the
+   tick keeps the focus). A preview blocked (nothing to cover only because a co-teacher is there for each) shows its sentence
+   under the lines, and Save waits. The editor opens on the dates and periods the last change chose (changes[-1].chosen), else
+   the record's: a request cut back today keeps today in its dates for a lesson under way, and opening it again changes nothing. */
 window.ReliefChange = (function () {
   const RF = window.ReliefForm, esc = RF.esc, enc = encodeURIComponent;
   const LOOKED = "The request has changed since you looked: look again before saving.";
@@ -29,12 +38,15 @@ window.ReliefChange = (function () {
   const rel = () => window.Relief;
   const SAID = { open: "no relief teacher yet", waiting: "waiting for you", approved: "approved", acknowledged: "acknowledged", change: "asked to change" };   /* Today's words */
 
-  /* the record's dates today or later, as Ask for relief's controls hold them */
+  /* the dates today or later and the periods the last change chose (else the record's), as Ask for relief's controls hold them */
   function initial(rec, today) {
-    const dates = [...new Set(((rec && rec.dates) || []).map(String))].filter(d => d >= today).sort();
+    const chs = rec && Array.isArray(rec.changes) ? rec.changes : [], last = chs[chs.length - 1], c = last && last.chosen && typeof last.chosen === "object" ? last.chosen : null;
+    const later = v => [...new Set((Array.isArray(v) ? v : []).map(String))].filter(d => d >= today).sort();
+    const from = c && later(c.dates).length ? c : rec || {};
+    const dates = later(from.dates);
     const one = dates.length === 1 ? dates[0] : "";
     const day = one === today ? "today" : one && one === RF.addDays(today, 1) ? "tomorrow" : "pick";
-    const p = rec && rec.periods, some = Array.isArray(p) && p.length === 2;
+    const p = from.periods, some = Array.isArray(p) && p.length === 2;
     return { day, picked: dates, away: some ? "some" : "whole", from: some ? Number(p[0]) : null, to: some ? Number(p[1]) : null };
   }
 
@@ -43,9 +55,13 @@ window.ReliefChange = (function () {
     return { dates, periods: s.away === "some" ? [s.from, s.to] : null };
   }
 
-  function lines(p) {
+  function lines(p) {   /* an added lesson a co-teacher is there for also has tick: {i: its place in added, key} */
     const out = [];
-    for (const [k, mark, label] of KINDS) for (const x of (p && p[k]) || []) out.push({ mark, text: `${label}: ${RF.day(x.date)} ${x.periods}, ${x.title} · ${x.line}` });
+    for (const [k, mark, label] of KINDS) ((p && p[k]) || []).forEach((x, i) => {
+      const l = { mark, text: `${label}: ${RF.day(x.date)} ${x.periods}, ${x.title} · ${x.line}` };
+      if (k === "added" && x.shared) l.tick = { i, key: x.key };
+      out.push(l);
+    });
     const n = Number(p && p.earlier) || 0;
     if (n > 0) out.push({ mark: "", text: n === 1 ? "1 earlier lesson stays as it was." : `${n} earlier lessons stay as they were.` });
     return out;
@@ -54,7 +70,7 @@ window.ReliefChange = (function () {
   /* who relieves lesson x, in Today's words: "Mr Sam Tan, approved", "no relief teacher yet", "relief not needed"; a split lesson's
      parts each with its periods ("P10: Mr Sam Tan, approved; P11–P12: no relief teacher yet") */
   function relief(x) {
-    if (!x.needed) return "relief not needed";
+    if (!x.needed) return x.not_needed && x.not_needed.by === "app" && x.not_needed.why ? `${x.not_needed.why}: no relief needed` : "relief not needed";
     if (x.stopped) return "not happening";
     const one = c => { const w = SAID[c.state] || (c.state ? String(c.state) : SAID.open); return c.relief && c.state !== "open" ? `${c.relief}, ${w}` : w; };
     const cs = Array.isArray(x.covers) && x.covers.length ? x.covers : [{ state: "open" }];
@@ -62,10 +78,10 @@ window.ReliefChange = (function () {
   }
   const byPerson = x => !x.needed && !!x.not_needed && x.not_needed.by !== "app";   /* a person marked it not needed (not the app, for a co-teacher there) */
 
-  function lineHTML(l) {   /* "✔ <b>Kept:</b> …" */
+  function lineHTML(l, tick) {   /* "✔ <b>Kept:</b> …"; tick(l): the HTML of its tick, when it has one */
     if (!l.mark) return `<div class="small muted rc-l">${esc(l.text)}</div>`;
     const i = l.text.indexOf(": ");
-    return `<div class="small rc-l${l.mark === "✖" ? " rc-gone" : ""}">${l.mark} <b>${esc(l.text.slice(0, i + 1))}</b> ${esc(l.text.slice(i + 2))}</div>`;
+    return `<div class="small rc-l${l.mark === "✖" ? " rc-gone" : ""}">${l.mark} <b>${esc(l.text.slice(0, i + 1))}</b> ${esc(l.text.slice(i + 2))}${l.tick && tick ? tick(l) : ""}</div>`;
   }
 
   const segBtn = (what, v, on, label) => `<button type="button" data-rc="${what}" data-v="${esc(v)}" class="${on ? "on" : ""}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
@@ -79,7 +95,7 @@ window.ReliefChange = (function () {
   function mount(box, rec, opts) {
     const o = opts || {}, t0 = RF.today();
     const S = Object.assign(initial(rec, t0), { rec, key: "change:" + rec.id, why: "", per: [], prev: null, err: null, loading: false, seq: 0, busy: false, msg: null, box: null, gone: false,
-      nn: null, nnWhy: "", cwhy: "", lmsg: null, cmsg: null, drawn: {}, stepping: false });   /* nn: the lesson key whose Why? line is open; lmsg {key, text…}, cmsg: a refusal; stepping: busy with a step of these parts, not a save */
+      nn: null, nnWhy: "", cwhy: "", lmsg: null, cmsg: null, drawn: {}, stepping: false, ask: new Set(), soft: false });   /* nn: the lesson key whose Why? line is open; lmsg {key, text…}: a step's answer or refusal, cmsg: a refusal; stepping: busy with a step of these parts, not a save; ask: the keys ticked "Ask for relief anyway"; soft: the lines shown stay while the preview is read (a tick) */
     const start = JSON.stringify(body(S, t0));
     const $ = sel => S.box.querySelector(sel);
     const idp = () => "rc-" + S.rec.id;
@@ -89,7 +105,8 @@ window.ReliefChange = (function () {
       if (S.away === "some" && (S.from === null || S.to === null)) return "Choose the periods first: from and to.";
       return "";
     }
-    const ready = () => !waiting() && !S.loading && !S.err && !!S.prev && !S.prev.unchanged;
+    const ready = () => !waiting() && !S.loading && !S.err && !!S.prev && !S.prev.unchanged && !S.prev.blocked;
+    const sent = b => (S.ask.size ? Object.assign({}, b, { ask: [...S.ask].sort() }) : b);   /* the dates and times, with the ticks when there are any */
 
     function keep(el, paint) {   /* paint el again, the focus where it was (a button or select by its data-rc / data-per and data-v) */
       const a = document.activeElement, had = a && el.contains(a) && a !== el ? [a.dataset.rc, a.dataset.per, a.dataset.v] : null;
@@ -102,7 +119,7 @@ window.ReliefChange = (function () {
 
     function draw() {
       const me = (rel().me || {}).name, id = idp();
-      const told = S.rec.teacher && S.rec.teacher !== me ? `<p class="small muted rc-told">${esc(`${S.rec.teacher} is told on Telegram what changed.`)}</p>` : "";
+      const told = S.rec.teacher && S.rec.teacher !== me ? `<p class="small muted rc-told">${esc(`${S.rec.teacher} is told on Telegram, if they have linked it.`)}</p>` : "";
       S.box.innerHTML = `<div class="rc"><h3>Change the dates or times</h3>
         <div class="field"><div class="flabel">Dates</div><div class="rc-day"></div></div>
         <div class="field"><div class="flabel">Away for</div><div class="rc-away"></div></div>
@@ -143,10 +160,16 @@ window.ReliefChange = (function () {
       let html;
       if (wait) html = `<p class="small muted rc-l">${esc(wait)}</p>`;
       else if (S.err) html = `<p class="rc-l">${rel().say(S.err)}${S.err.status === 0 ? ` <button type="button" class="small" data-rc="again">Try again</button>` : ""}</p>`;
-      else if (S.loading || !S.prev) html = `<p class="small muted rc-l">Reading what this change does…</p>`;
+      else if ((S.loading && !S.soft) || !S.prev) html = `<p class="small muted rc-l">Reading what this change does…</p>`;
       else if (S.prev.unchanged) html = `<p class="small muted rc-l">Nothing changes yet.</p>`;
-      else html = lines(S.prev).map(lineHTML).join("") || `<p class="small muted rc-l">Nothing changes yet.</p>`;
+      else html = (lines(S.prev).map(l => lineHTML(l, tickHTML)).join("") || `<p class="small muted rc-l">Nothing changes yet.</p>`)
+        + (S.prev.blocked ? `<p class="rc-l">${rel().say({ text: S.prev.blocked, bad: true })}</p>` : "");
       keep(el, () => { el.innerHTML = html; });
+    }
+
+    function tickHTML(l) {   /* "Ask for relief anyway" on an added lesson a co-teacher is there for, by its place in added (data-v), never its key in a selector */
+      const id = `${idp()}-ask-${l.tick.i}`;
+      return ` <span class="rc-ask"><input type="checkbox" id="${esc(id)}" data-rc="ask" data-v="${l.tick.i}"${S.ask.has(l.tick.key) ? " checked" : ""}${S.busy ? " disabled" : ""}><label for="${esc(id)}">Ask for relief anyway</label></span>`;
     }
 
     function paintSave() {
@@ -177,9 +200,10 @@ window.ReliefChange = (function () {
       const rows = list.map(([x, i]) => {
         const open = S.nn === x.key && x.needed && !x.stopped, btn = (act, label, cls) => `<button type="button" class="small${cls ? " " + cls : ""}" data-rc="${act}" data-v="${i}"${off}>${esc(label)}</button>`;
         let acts = "";
-        if (open) acts = `<div class="rc-nn"><label for="${esc(idp())}-nn">Why? (optional)</label><input id="${esc(idp())}-nn" data-rc="nn-why" maxlength="200" value="${esc(S.nnWhy)}" autocomplete="off">${btn("nn-go", "Mark relief not needed", "primary")}${btn("nn-off", "Back")}</div>`;
+        if (x.over) acts = "";   /* over: nothing more is marked */
+        else if (open) acts = `<div class="rc-nn"><label for="${esc(idp())}-nn">Why? (optional)</label><input id="${esc(idp())}-nn" data-rc="nn-why" maxlength="200" value="${esc(S.nnWhy)}" autocomplete="off">${btn("nn-go", "Mark relief not needed", "primary")}${btn("nn-off", "Back")}</div>`;
         else if (x.needed && !x.stopped) acts = btn("nn", "Relief not needed");
-        else if (byPerson(x)) acts = btn("needed", "Needed again");
+        else if (!x.needed) acts = btn("needed", byPerson(x) ? "Needed again" : "Ask for relief anyway");
         const m = S.lmsg && S.lmsg.key === x.key ? `<div class="bar">${rel().say(S.lmsg)}</div>` : "";
         return `<div class="rc-ll" data-key="${esc(x.key)}"><div class="rc-lt"><b>${esc(`${RF.day(x.date)} · ${RF.periods(x)}`)}</b> · ${esc(RF.title(x))} <span class="muted">${esc(`· ${relief(x)}`)}</span></div>${acts ? `<div class="bar">${acts}</div>` : ""}${m}</div>`;
       }).join("");
@@ -190,16 +214,19 @@ window.ReliefChange = (function () {
       const id = idp() + "-cwhy", off = S.busy ? " disabled" : "";
       return `<h3>Or cancel the whole request</h3><div class="rc-does"><label class="small" for="${esc(id)}">Say why in a line <b>(needed)</b></label>
         <div class="bar"><input id="${esc(id)}" data-rc="cwhy" maxlength="200" value="${esc(S.cwhy)}" autocomplete="off"><button type="button" class="small danger" data-rc="cancel"${S.busy || !S.cwhy.trim() ? " disabled" : ""}>Cancel the request</button><button type="button" class="small" data-rc="keep"${off}>Keep it</button>${rel().say(S.cmsg)}</div>
-        <p class="small muted rc-told">${esc(`Everyone already told (the relief teachers and ${S.rec.teacher}) gets a message that it is cancelled.`)}</p></div>`;
+        <p class="small muted rc-told">${esc(`Everyone already told (the relief teachers and ${S.rec.teacher}) gets a message on Telegram that it is cancelled, if they have linked it.`)}</p></div>`;
     }
 
-    /* one step on the request: Mark relief not needed, Needed again, Cancel the request; where: the lesson's key, or "cancel" */
+    /* one step on the request: Mark relief not needed, Needed again (Ask for relief anyway), Cancel the request; where: the
+       lesson's key, or "cancel". Cancelled: the editor ends (onDone); a lesson's step: it stays open on the answered record */
     async function step(path, body, said, where) {
       if (S.busy || S.gone) return;
       S.busy = S.stepping = true; S.msg = null; S.lmsg = null; S.cmsg = null; paintSave();
       const r = await rel().api(`/api/relief/absences/${enc(S.rec.id)}/${path}`, rel().json("POST", body));
       S.busy = S.stepping = false;
-      if (r.ok) { finish(r.data, said); return; }   /* done: said even when the editor was stopped meanwhile */
+      if (r.ok && where === "cancel") { finish(r.data, said); return; }   /* done: said even when the editor was stopped meanwhile */
+      if (r.ok && S.gone) { if (o.onStep) o.onStep(r.data, said); return; }
+      if (r.ok) { stepped(r.data, said, where); return; }
       if (S.gone) return;
       const m = { text: r.error, bad: true, status: r.status };
       if (where === "cancel") S.cmsg = m; else S.lmsg = Object.assign({ key: where }, m);
@@ -207,6 +234,17 @@ window.ReliefChange = (function () {
       const again = () => [...S.box.querySelectorAll('[data-rc="needed"]')].find(b => (lessonAt(b.dataset.v) || {}).key === where);
       const back = where === "cancel" ? $('[data-rc="cwhy"]') : $('[data-rc="nn-why"]') || again();   /* where to try again */
       if (back) back.focus();
+    }
+
+    function stepped(got, said, key) {   /* a lesson's step done: the answered record, what was done beside the lesson, the focus on its new button */
+      if (got && typeof got === "object" && Array.isArray(got.lessons)) S.rec = got;
+      S.nn = null; S.nnWhy = ""; S.lmsg = { key, text: said, bad: false };
+      delete S.drawn[".rc-one"];
+      paintSave();
+      const b = [...S.box.querySelectorAll('[data-rc="nn"], [data-rc="needed"]')].find(x => (lessonAt(x.dataset.v) || {}).key === key);
+      if (b) b.focus();
+      reread();   /* the lessons changed: what the change does is read again, what was chosen kept */
+      if (o.onStep) o.onStep(S.rec, said);
     }
 
     const lessonAt = v => (S.rec.lessons || [])[Number(v)] || null;
@@ -219,7 +257,7 @@ window.ReliefChange = (function () {
         case "nn": if (x) { S.nn = x.key; S.nnWhy = ""; S.lmsg = null; paintMore(); focus('[data-rc="nn-why"]'); } return true;
         case "nn-off": S.nn = null; S.lmsg = null; paintMore(); focus(`[data-rc="nn"][data-v="${Number(v)}"]`); return true;
         case "nn-go": notNeeded(x); return true;
-        case "needed": if (x) step(`lessons/${enc(x.key)}/needed`, {}, `${RF.title(x)}: relief needed again.`, x.key); return true;
+        case "needed": if (x) step(`lessons/${enc(x.key)}/needed`, {}, byPerson(x) ? `${RF.title(x)}: relief needed again.` : `${RF.title(x)}: relief asked for.`, x.key); return true;
         case "cancel": cancelGo(); return true;
         case "keep": S.cwhy = ""; S.cmsg = null; delete S.drawn[".rc-cancel"]; paintMore(); focus('[data-rc="cwhy"]'); return true;   /* drawn again: the box holds what was typed */
       }
@@ -232,17 +270,23 @@ window.ReliefChange = (function () {
 
     /* what the change does, read again; an answer to an older read is dropped. With Some periods and no periods known yet (an
        earlier read refused), the whole day is read only for its periods */
-    async function reread() {
+    async function reread(soft) {   /* soft: the lines shown stay while it is read (a tick changed) */
       const b = body(S, RF.today()), seq = ++S.seq, wait = waiting(), learn = !!wait && b.dates.length > 0 && S.away === "some" && !S.per.length;
-      S.prev = null; S.err = null;
+      S.soft = !!soft && !!S.prev && !wait;
+      if (!S.soft) S.prev = null;
+      S.err = null;
       if (wait && !learn) { S.loading = false; paintRead(); return; }
       S.loading = true; paintRead();
-      const r = await rel().api(`/api/relief/absences/${enc(S.rec.id)}/change/preview`, rel().json("POST", { dates: b.dates, periods: learn ? null : b.periods }));
+      const r = await rel().api(`/api/relief/absences/${enc(S.rec.id)}/change/preview`, rel().json("POST", learn ? { dates: b.dates, periods: null } : sent({ dates: b.dates, periods: b.periods })));
       if (seq !== S.seq || S.gone) return;
-      S.loading = false;
-      if (!r.ok) { if (!learn) S.err = { text: r.error, bad: true, status: r.status }; paintRead(); return; }
+      S.loading = false; S.soft = false;
+      if (!r.ok) { S.prev = null; if (!learn) S.err = { text: r.error, bad: true, status: r.status }; paintRead(); return; }
       if (Array.isArray(r.data.day_periods)) S.per = r.data.day_periods;
-      if (!learn) S.prev = r.data;
+      if (!learn) {
+        S.prev = r.data;
+        const shared = new Set((r.data.added || []).filter(x => x.shared).map(x => x.key));
+        for (const k of [...S.ask]) if (!shared.has(k)) S.ask.delete(k);   /* a tick on a lesson the change no longer adds goes */
+      }
       paintRead();
     }
 
@@ -250,7 +294,7 @@ window.ReliefChange = (function () {
       if (S.busy || !ready()) return;
       const b = body(S, RF.today()), keys = k => (S.prev[k] || []).map(x => x.key);
       S.busy = true; S.msg = null; paintSave();
-      const r = await rel().api(`/api/relief/absences/${enc(S.rec.id)}/change`, rel().json("POST", { dates: b.dates, periods: b.periods, why: S.why.trim(), shown: { added: keys("added"), gone: keys("gone") } }));
+      const r = await rel().api(`/api/relief/absences/${enc(S.rec.id)}/change`, rel().json("POST", Object.assign(sent({ dates: b.dates, periods: b.periods }), { why: S.why.trim(), shown: { added: keys("added"), gone: keys("gone") } })));
       S.busy = false;
       if (r.ok) { finish(r.data, "Changed."); return; }   /* saved: said even when the editor was stopped meanwhile */
       if (S.gone) return;
@@ -299,6 +343,13 @@ window.ReliefChange = (function () {
         else if (rc === "cwhy" && enter) { e.preventDefault(); if (!S.busy) cancelGo(); }
         return;
       }
+      if (el.dataset.rc === "ask") {   /* the tick on an added lesson a co-teacher is there for */
+        const x = S.prev && (S.prev.added || [])[Number(el.dataset.v)];
+        if (!x || S.busy) return;
+        if (el.checked) S.ask.add(x.key); else S.ask.delete(x.key);
+        changed(); reread(true);
+        return;
+      }
       const per = el.dataset.per;   /* change: from and to */
       if ((per !== "from" && per !== "to") || S.busy) return;
       const v = el.value === "" ? null : Number(el.value);
@@ -319,7 +370,7 @@ window.ReliefChange = (function () {
       if (again && !S.busy) reread();
     }
 
-    const ed = { on, attach, stop, busy: () => S.busy, dirty: () => !S.gone && (S.why.trim() !== "" || S.cwhy.trim() !== "" || (!!S.nn && S.nnWhy.trim() !== "") || JSON.stringify(body(S, RF.today())) !== start) };
+    const ed = { on, attach, stop, busy: () => S.busy, dirty: () => !S.gone && (S.why.trim() !== "" || S.cwhy.trim() !== "" || S.ask.size > 0 || (!!S.nn && S.nnWhy.trim() !== "") || JSON.stringify(body(S, RF.today())) !== start) };
     attach(box);
     reread();
     return { attach, stop, busy: ed.busy, dirty: ed.dirty };

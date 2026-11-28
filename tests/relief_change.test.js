@@ -56,14 +56,14 @@ async function choose(p, sel, v) { const el = p.find(sel); el.value = String(v);
 /* the editor alone, open on r; me: who is signed in; preview / save: the answers (or functions of the call) */
 async function editor(r, { me = EVE, preview = answer({ unchanged: true }), save = ok({}), step = ok({}), opts = {} } = {}) {
   const p = open("relief.html", { now: NOW, server: call => serve(p, call) });
-  Object.assign(p, { preview, save, step, done: [] });
+  Object.assign(p, { preview, save, step, done: [], stepped: [] });
   p.run("relief-form.js", "relief-dates.js", "relief-change.js");
   const RF = p.window.ReliefForm;
   RF.setToday(TODAY);
   p.window.Relief = { me: { name: me }, api: apiOf(p), json: (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }),
     say: m => (m && m.text ? `<span class="msg ${m.bad ? "bad" : "ok"}" role="status">${RF.esc(m.text)}</span>` : "") };
   p.document.body.insertAdjacentHTML("beforeend", `<div id="rcBox"></div>`);
-  p.ed = p.window.ReliefChange.mount(p.$("#rcBox"), r, Object.assign({ onDone: (got, said) => p.done.push([got, said]) }, opts));
+  p.ed = p.window.ReliefChange.mount(p.$("#rcBox"), r, Object.assign({ onDone: (got, said) => p.done.push([got, said]), onStep: (got, said) => p.stepped.push([got, said]) }, opts));
   await p.settle();
   p.box = () => p.text("#rcBox");
   p.saveBtn = () => p.find("#rcBox button", "Save the change");
@@ -218,7 +218,7 @@ t("Close: nothing is sent", async () => {
 });
 t("someone else saving it: the absent teacher is told on Telegram", async () => {
   const p = await editor(rec({ how: "planned", by: GRACE }), { me: GRACE });
-  has(p, `${EVE} is told on Telegram what changed.`);
+  has(p, `${EVE} is told on Telegram, if they have linked it.`);
 });
 
 /* ---------------------------------------------------------------- Or change one lesson, or cancel the whole request (the relief team's Edit) */
@@ -251,7 +251,7 @@ t("Or change one lesson: each lesson today or later, its day, periods, title and
   has(p, "Or change one lesson");
   same(lessonLines(p), [
     "Mon 12 Oct · P6–P7 · 1A Science · Mr Sam Tan, approved",
-    "Tue 13 Oct · P1 · 4A Science · relief not needed",
+    "Tue 13 Oct · P1 · 4A Science · Mr Sam Tan is there: no relief needed",
     "Tue 13 Oct · P2 · 2A Science · relief not needed",
     "Tue 13 Oct · P3 · 2B Science · Ms Grace Wong, waiting for you",
     "Tue 13 Oct · P4 · 3A Science · Mr Sam Tan, acknowledged",
@@ -261,7 +261,7 @@ t("Or change one lesson: each lesson today or later, its day, periods, title and
   same(lessonBtns(p, "k5"), ["Relief not needed"]);
   same(lessonBtns(p, "k9"), ["Relief not needed"]);
   same(lessonBtns(p, "k2"), ["Needed again"], "a person marked it");
-  same(lessonBtns(p, "k3"), [], "the app marked it: a co-teacher is there");
+  same(lessonBtns(p, "k3"), ["Ask for relief anyway"], "the app marked it: a co-teacher is there");
 });
 t("Relief not needed: Why? (optional), then Mark relief not needed sends the reason; Back closes it", async () => {
   const p = await team();
@@ -277,11 +277,15 @@ t("Relief not needed: Why? (optional), then Mark relief not needed sends the rea
   same(posted(p), []);
   await p.click(p.$('#rcBox .rc-ll[data-key="k5"]').querySelector("button"));
   await p.type('#rcBox input[data-rc="nn-why"]', "  Class on a trip ");
-  const got = rec({ lessons: LESSONS.map(x => (x.key === "k5" ? Object.assign({}, x, { needed: false }) : x)) });
+  const got = rec({ lessons: LESSONS.map(x => (x.key === "k5" ? Object.assign({}, x, { needed: false, not_needed: { by: "Mr Hugo Ong", why: "Class on a trip", at: NOW } }) : x)) });
   p.step = ok(got);
   await p.click("#rcBox button", "Mark relief not needed");
   same(posted(p), [[NN("k5"), { why: "Class on a trip" }]]);
-  same(p.done, [[got, "1A Science: relief not needed."]]);
+  same(p.stepped, [[got, "1A Science: relief not needed."]]);
+  same(p.done, [], "the editor stays open");
+  assert.ok(p.text(p.$('#rcBox .rc-ll[data-key="k5"]')).includes("1A Science: relief not needed."), "said beside the lesson");
+  same(lessonBtns(p, "k5"), ["Needed again"]);
+  assert.strictEqual(p.focus(), p.$('#rcBox .rc-ll[data-key="k5"]').querySelector("button"), "the focus on its new button");
 });
 t("Relief not needed: one open at a time, Return sends it, a refusal shows beside it", async () => {
   const p = await team();
@@ -300,7 +304,8 @@ t("Needed again sends nothing but the step", async () => {
   p.step = ok(got);
   await p.click(p.$('#rcBox .rc-ll[data-key="k2"]').querySelector("button"));
   same(posted(p), [[NEEDED("k2"), {}]]);
-  same(p.done, [[got, "2A Science: relief needed again."]]);
+  same(p.stepped, [[got, "2A Science: relief needed again."]]);
+  same(p.done, []);
 });
 t("Needed again refused: its sentence beside the lesson, and the focus back on the button", async () => {
   const p = await team();
@@ -320,12 +325,12 @@ t("while a lesson's step is on its way, nothing else can be pressed", async () =
   await p.click("#rcBox button", "Tomorrow");
   assert.strictEqual(previews(p).length, 1, "nothing is read while it is on its way");
   wait.give(200, rec()); await p.settle();
-  assert.strictEqual(p.done.length, 1);
+  assert.strictEqual(p.stepped.length, 1);
   assert.strictEqual(posted(p).length, 1);
 });
 t("Or cancel the whole request: the reason is needed, Cancel the request sends it", async () => {
   const p = await team();
-  has(p, "Or cancel the whole request", "Say why in a line (needed)", "Everyone already told (the relief teachers and Ms Evelyn Koh) gets a message that it is cancelled.");
+  has(p, "Or cancel the whole request", "Say why in a line (needed)", "Everyone already told (the relief teachers and Ms Evelyn Koh) gets a message on Telegram that it is cancelled, if they have linked it.");
   const input = p.find('#rcBox input[data-rc="cwhy"]'), go = () => p.find("#rcBox button", "Cancel the request");
   assert.strictEqual(input.getAttribute("maxlength"), "200");
   assert.ok(go().disabled, "off while there is no reason");
@@ -361,6 +366,85 @@ t("everything a lesson or a name says is escaped", async () => {
   const p = await team(rec({ teacher: "<b>Ms X</b>", lessons: [lesson("k<1>", TODAY, 5, 1, { classes: ["<i>1A</i>"], covers: [cover("k<1>", 5, 1, "approved", "<u>Mr Y</u>")] })] }));
   assert.ok(!p.all("#rcBox b").some(b => p.text(b) === "Ms X") && !p.all("#rcBox i").length && !p.all("#rcBox u").length, p.box());
   has(p, "<i>1A</i> Science · <u>Mr Y</u>, approved", "(the relief teachers and <b>Ms X</b>)");
+});
+
+/* ---------------------------------------------------------------- the fix wave: chosen dates, the tick, a blocked preview, a lesson over */
+t("initial: from the dates and periods the last change chose, else the record's", async () => {
+  const RC = pure(), ch = chosen => ({ changes: [{ at: NOW, by: EVE, chosen: { dates: ["2026-10-14"], periods: null } }, { at: NOW, by: EVE, chosen }] });
+  same(RC.initial(rec(Object.assign({ dates: [TODAY, TOMORROW] }, ch({ dates: [TOMORROW], periods: null }))), TODAY), { day: "tomorrow", picked: [TOMORROW], away: "whole", from: null, to: null });
+  same(RC.initial(rec(Object.assign({ dates: [TODAY, TOMORROW], periods: null }, ch({ dates: [TOMORROW], periods: [2, 4] }))), TODAY), { day: "tomorrow", picked: [TOMORROW], away: "some", from: 2, to: 4 });
+  same(RC.initial(rec(Object.assign({ dates: [TODAY] }, ch({ dates: [PAST], periods: [2, 4] }))), TODAY), { day: "today", picked: [TODAY], away: "whole", from: null, to: null }, "all past: the record's");
+  for (const changes of [undefined, null, [], "x", [null], [{}], [{ chosen: "x" }]]) same(RC.initial(rec({ dates: [TOMORROW], changes }), TODAY).picked, [TOMORROW], JSON.stringify(changes));
+});
+t("a request cut back today opens on what was chosen: nothing changes yet, Save off", async () => {
+  const r = rec({ dates: [TODAY, TOMORROW], changes: [{ at: NOW, by: EVE, dates: [TODAY, TOMORROW], periods: null, chosen: { dates: [TOMORROW], periods: null } }] });
+  const p = await editor(r, { preview: answer({ unchanged: true }) });
+  same(previews(p)[0].body, { dates: [TOMORROW], periods: null });
+  has(p, "Nothing changes yet.");
+  assert.ok(p.saveBtn().disabled);
+  assert.strictEqual(p.ed.dirty(), false);
+});
+const SHARED = (asked, more) => answer(Object.assign({ dates: [TODAY, TOMORROW], added: [item("k9", TOMORROW, 8, 1, "2C Science", "a relief teacher will be picked"),
+  Object.assign(item("k3", TOMORROW, 0, 1, "4A Science", asked ? "Mr Sam Tan is there · relief asked for anyway: a relief teacher will be picked" : "Mr Sam Tan is there: no relief needed"), { shared: true, asked })] }, more));
+t("lines: an added lesson a co-teacher is there for has its tick", async () => {
+  const RC = pure();
+  same(RC.lines(SHARED(false)).map(l => l.tick || null), [null, { i: 1, key: "k3" }]);
+});
+t("Ask for relief anyway: a tick on a shared lesson added reads the preview again with ask, the lines stay meanwhile, and Save sends it", async () => {
+  const p = await editor(rec(), { preview: SHARED(false) });
+  await p.click("#rcBox button", "Tomorrow");
+  has(p, "➕ Added: Tue 13 Oct P1, 4A Science · Mr Sam Tan is there: no relief needed Ask for relief anyway");
+  const box = () => p.find('#rcBox input[data-rc="ask"]');
+  assert.strictEqual(p.all('#rcBox input[data-rc="ask"]').length, 1, "only on the shared one");
+  assert.strictEqual(box().checked, false);
+  assert.strictEqual(p.find("#rcBox label", "Ask for relief anyway").getAttribute("for"), box().id);
+  const wait = later();
+  p.preview = () => wait.answer;
+  box().focus(); box().checked = true; fireChange(box()); await p.settle();
+  same(previews(p).pop().body, { dates: [TOMORROW], periods: null, ask: ["k3"] });
+  has(p, "Mr Sam Tan is there: no relief needed");
+  hasNot(p, "Reading what this change does");
+  assert.ok(p.saveBtn().disabled, "not while it is read");
+  assert.strictEqual(p.ed.dirty(), true);
+  wait.give(200, SHARED(true)); await p.settle();
+  has(p, "Mr Sam Tan is there · relief asked for anyway: a relief teacher will be picked");
+  assert.strictEqual(box().checked, true);
+  assert.strictEqual(p.focus(), box(), "the focus stays on the tick");
+  p.save = ok(rec());
+  await p.click(p.saveBtn());
+  same(saves(p)[0].body, { dates: [TOMORROW], periods: null, ask: ["k3"], why: "", shown: { added: ["k9", "k3"], gone: [] } });
+});
+t("a tick taken off, or on a lesson the change no longer adds, is not sent", async () => {
+  const p = await editor(rec(), { preview: SHARED(false) });
+  await p.click("#rcBox button", "Tomorrow");
+  const box = () => p.find('#rcBox input[data-rc="ask"]');
+  box().checked = true; fireChange(box()); await p.settle();
+  box().checked = false; fireChange(box()); await p.settle();
+  same(previews(p).pop().body, { dates: [TOMORROW], periods: null });
+  box().checked = true; fireChange(box()); await p.settle();
+  p.preview = answer({ dates: [TODAY], added: [item("k9", TOMORROW, 8, 1, "2C Science", "a relief teacher will be picked")] });
+  await p.click("#rcBox button", "Today");
+  same(previews(p).pop().body, { dates: [TODAY], periods: null, ask: ["k3"] });
+  await p.click("#rcBox button", "Tomorrow");
+  same(previews(p).pop().body, { dates: [TOMORROW], periods: null }, "k3 was not added there: its tick went");
+});
+t("a preview blocked (only shared lessons to cover): its sentence under the lines and Save off, until a tick", async () => {
+  const BLOCKED = "There are no lessons to cover in that time: a co-teacher is there for each. Tick “Ask for relief anyway” to ask for relief.";
+  const only = (asked, blocked) => answer({ dates: [TOMORROW], added: [Object.assign(item("k3", TOMORROW, 0, 1, "4A Science", "x"), { shared: true, asked })], blocked });
+  const p = await editor(rec(), { preview: only(false, BLOCKED) });
+  await p.click("#rcBox button", "Tomorrow");
+  has(p, BLOCKED);
+  assert.ok(p.saveBtn().disabled);
+  p.preview = only(true, "");
+  const box = p.find('#rcBox input[data-rc="ask"]');
+  box.checked = true; fireChange(box); await p.settle();
+  hasNot(p, BLOCKED);
+  assert.ok(!p.saveBtn().disabled);
+});
+t("Or change one lesson: a lesson that is over has no button", async () => {
+  const over = [lesson("k5", TODAY, 1, 1, { over: true }), lesson("k2", TODAY, 2, 1, { over: true, needed: false, not_needed: { by: GRACE, why: "", at: NOW } }), lesson("k9", TODAY, 8, 1)];
+  const p = await team(rec({ lessons: over }));
+  same(lessonBtns(p, "k5"), []); same(lessonBtns(p, "k2"), []); same(lessonBtns(p, "k9"), ["Relief not needed"]);
 });
 
 /* ---------------------------------------------------------------- on My absences (relief.js) */
@@ -483,6 +567,15 @@ t("Planned by me: an editor whose absence is closed is closed too, and is not un
   await p.click('#plPlannedList button[data-pl="open"]');
   assert.ok(!p.all("#plDetail .rc").length && p.find('#plDetail .ab[data-id="a1"] button[data-act="change"]'), "opened again: closed, with its button");
   same(saves(p), []);
+});
+
+t("a card's lesson that is over: no Relief not needed, no Needed after all", async () => {
+  const ls = [lesson("k5", TODAY, 1, 1, { over: true }), lesson("k2", TODAY, 2, 1, { over: true, needed: false, not_needed: { by: EVE, why: "", at: NOW } }),
+    lesson("k9", TODAY, 8, 1), lesson("k3", TODAY, 9, 1, { needed: false, not_needed: { by: EVE, why: "", at: NOW } })];
+  const p = await mine([rec({ id: "a1", lessons: ls })]);
+  const of = key => p.card("a1").querySelector(`.rl[data-key="${key}"]`).querySelectorAll("button").map(b => p.text(b));
+  assert.ok(!of("k5").includes("Relief not needed") && !of("k2").includes("Needed after all"), [of("k5"), of("k2")]);
+  assert.ok(of("k9").includes("Relief not needed") && of("k3").includes("Needed after all"), [of("k9"), of("k3")]);
 });
 
 run(all);

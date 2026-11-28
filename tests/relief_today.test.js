@@ -627,6 +627,17 @@ t("Relief not needed: none on a date past", async () => {
   await p.tick(400);
   assert.strictEqual(p.btn(NN), null);
 });
+t("Relief not needed: none on a row whose lesson is over; an open box closes when it is over by a reading", async () => {
+  const p = await today(day([row({ over: true }), row({ ckey: "k6", key: "k6", p: 8, n: 1 })]));
+  assert.strictEqual(p.btn(NN), null, "over: nothing more is marked");
+  assert.ok(p.btn(NN, "k6"));
+  await p.click(p.btn(NN, "k6"));
+  assert.ok(p.$('#tdRows input[data-td="nn-why"]'));
+  p.day = day([row({ over: true }), row({ ckey: "k6", key: "k6", p: 8, n: 1, over: true })]);
+  await p.click("#pane-today button", "Refresh");
+  assert.strictEqual(p.$('#tdRows input[data-td="nn-why"]'), null);
+  assert.strictEqual(p.btn(NN, "k6"), null);
+});
 t("Relief not needed: its box, Back, and one open at a time with Split's", async () => {
   const p = await today(day([row(), maya({ state: "waiting", approved: null, n: 2, told: null })]));
   await p.press(NN);

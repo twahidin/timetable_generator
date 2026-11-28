@@ -112,21 +112,25 @@ async function page(list) {
   p.edit = id => p.$(`#inBox button[data-in="edit"][data-id="${id}"]`);
   return p;
 }
-t("Edit opens the editor in a row under it, across the table, with one lesson and the cancel; one at a time", async () => {
+t("Edit opens the editor under the table, outside its scroller, named, its row marked, with one lesson and the cancel; one at a time", async () => {
   const p = await page([record({ id: "a", lessons: [LESSON] }), record({ id: "b", teacher: "Mr Sam Tan", by: "Mr Sam Tan", lessons: [LESSON] })]);
   assert.strictEqual(p.text(p.edit("a")), "Edit");
   await p.click(p.edit("a"));
-  const td = p.find("#inBox tr.in-edit td");
-  assert.strictEqual(td.getAttribute("colspan"), "9");
-  for (const words of ["Change the dates or times", "Or change one lesson", "Tue 13 Oct · P6–P7 · 1A Science · no relief teacher yet", "Or cancel the whole request"]) assert.ok(p.text(td).includes(words), p.text(td));
+  const box = p.find("#inBox .in-edit");
+  assert.strictEqual(box.closest(".tablewrap"), null, "never in the table's own scroller (a phone could not reach its right side)");
+  assert.strictEqual(box.closest("table"), null);
+  assert.strictEqual(box.parent, p.find("#inBox .tablewrap").parent, "under the table, the width of the card");
+  assert.ok(p.text(box).startsWith("Edit: Ms Evelyn Koh's request · Tue 13 Oct · whole day"), p.text(box));
+  for (const words of ["Change the dates or times", "Or change one lesson", "Tue 13 Oct · P6–P7 · 1A Science · no relief teacher yet", "Or cancel the whole request"]) assert.ok(p.text(box).includes(words), p.text(box));
   assert.strictEqual(p.edit("a").getAttribute("aria-expanded"), "true");
-  const rows = p.all("#inBox tbody tr");
-  assert.strictEqual(rows.indexOf(td.parent), rows.findIndex(r => r.contains(p.edit("a"))) + 1, "just under its row");
+  assert.deepStrictEqual(p.all("#inBox tbody tr").map(r => r.classes().includes("editing")), [true, false], "its row is marked");
+  assert.strictEqual(p.all("#inBox tr.in-edit").length + p.all("#inBox table .in-box").length, 0, "no row in the table for it");
   await p.click(p.edit("b"));
-  assert.strictEqual(p.all("#inBox tr.in-edit").length, 1);
-  assert.ok(p.text("#inBox tr.in-edit").includes("Mr Sam Tan"), "the newest is open");
-  await p.click("#inBox tr.in-edit button", "Close");
-  assert.strictEqual(p.all("#inBox tr.in-edit").length, 0);
+  assert.strictEqual(p.all("#inBox .in-edit").length, 1);
+  assert.ok(p.text("#inBox .in-edit").includes("Mr Sam Tan"), "the newest is open");
+  assert.deepStrictEqual(p.all("#inBox tbody tr").map(r => r.classes().includes("editing")), [false, true]);
+  await p.click("#inBox .in-edit button", "Close");
+  assert.strictEqual(p.all("#inBox .in-edit").length, 0);
   assert.strictEqual(p.focus(), p.edit("b"));
 });
 t("a cancelled row's chip spans to the last column", async () => {
@@ -144,11 +148,13 @@ t("what is chosen stays through a Refresh; a view without its row closes it, and
   assert.strictEqual(p.window.Relief.dirtyAny(), true);
   await p.click("#inBox button", "Refresh");
   assert.strictEqual(p.find('#inBox input[data-rc="cwhy"]').value, "Appointment moved");
+  let asked = 0; p.window.confirm = () => { asked++; return true; };
   await p.click('#inBox [data-in="view"][data-v="cancelled"]');
-  assert.strictEqual(p.all("#inBox tr.in-edit").length, 0);
+  assert.strictEqual(asked, 1, "asked first: it holds what was typed");
+  assert.strictEqual(p.all("#inBox .in-edit").length, 0);
   assert.strictEqual(p.window.Relief.dirtyAny(), false);
   await p.click('#inBox [data-in="view"][data-v="coming"]');
-  assert.strictEqual(p.all("#inBox tr.in-edit").length, 0, "closed, not hidden");
+  assert.strictEqual(p.all("#inBox .in-edit").length, 0, "closed, not hidden");
   assert.strictEqual(p.edit("a").getAttribute("aria-expanded"), "false");
   assert.ok(!p.text("#inBox").includes("can no longer be changed"), "the person's own step: nothing to say");
 });
@@ -157,14 +163,14 @@ t("a save refused because the request changed meanwhile: the list is read again,
   const p = await page([record({ id: "a", lessons: [LESSON] })]);
   await p.click(p.edit("a"));
   p.preview = { dates: [TODAY], unchanged: false, gone: [{ key: "k5", date: "2026-10-13", p: 5, n: 2, title: "1A Science", periods: "P6–P7", line: "nobody was approved yet" }] };
-  await p.click("#inBox tr.in-edit button", "Today");
-  assert.ok(!p.find("#inBox tr.in-edit button", "Save the change").disabled);
+  await p.click("#inBox .in-edit button", "Today");
+  assert.ok(!p.find("#inBox .in-edit button", "Save the change").disabled);
   const before = p.reads();
   p.save = { status: 400, data: { error: LOOKED } };
-  await p.click("#inBox tr.in-edit button", "Save the change");
+  await p.click("#inBox .in-edit button", "Save the change");
   assert.strictEqual(p.reads(), before + 1, "read again");
-  assert.strictEqual(p.all("#inBox tr.in-edit").length, 1);
-  assert.ok(p.text("#inBox tr.in-edit").includes(LOOKED), p.text("#inBox tr.in-edit"));
+  assert.strictEqual(p.all("#inBox .in-edit").length, 1);
+  assert.ok(p.text("#inBox .in-edit").includes(LOOKED), p.text("#inBox .in-edit"));
 });
 t("a Refresh finds the request can no longer be changed: the Edit closes and the line above the table says so", async () => {
   const cancelled = { by: "Ms Grace Wong", why: "Well again", at: "2026-10-12T08:00:00+08:00" };
@@ -173,20 +179,70 @@ t("a Refresh finds the request can no longer be changed: the Edit closes and the
     await p.click(p.edit("a"));
     p.list = now ? [now, p.list[1]] : [p.list[1]];
     await p.click("#inBox button", "Refresh");
-    assert.strictEqual(p.all("#inBox tr.in-edit").length, 0, JSON.stringify(now));
+    assert.strictEqual(p.all("#inBox .in-edit").length, 0, JSON.stringify(now));
     assert.strictEqual(p.text("#inBox .in-said"), "Ms Evelyn Koh's request can no longer be changed.");
     assert.strictEqual(p.window.Relief.dirtyAny(), false);
   }
 });
-t("a step done: the view closes, what was done is said above the table, and the list is read again", async () => {
+t("a lesson's step: the Edit stays open, the dates chosen kept, what was done beside the lesson, and the list is read again", async () => {
   const p = await page([record({ id: "a", lessons: [LESSON] })]), before = p.reads();
   await p.click(p.edit("a"));
-  p.step = ok(record({ id: "a", lessons: [Object.assign({}, LESSON, { needed: false })] }));
-  await p.click("#inBox tr.in-edit button", "Relief not needed");
-  await p.click("#inBox tr.in-edit button", "Mark relief not needed");
-  assert.strictEqual(p.all("#inBox tr.in-edit").length, 0);
-  assert.ok(p.text("#inBox .in-said").includes("1A Science: relief not needed."), p.text("#inBox"));
+  p.preview = { dates: [TODAY], unchanged: false, gone: [{ key: "k5", date: "2026-10-13", p: 5, n: 2, title: "1A Science", periods: "P6–P7", line: "nobody was approved yet" }] };
+  await p.click("#inBox .in-edit button", "Today");
+  await p.type('#inBox .in-edit input[data-rc="why"]', "Back on Tuesday");
+  const done = record({ id: "a", lessons: [Object.assign({}, LESSON, { needed: false, not_needed: { by: "Mr Hugo Ong", why: "", at: "2026-10-12T09:00:00+08:00" } })] });
+  p.step = ok(done); p.list = [done];
+  await p.click("#inBox .in-edit button", "Relief not needed");
+  await p.click("#inBox .in-edit button", "Mark relief not needed");
+  assert.strictEqual(p.all("#inBox .in-edit").length, 1, "still open");
+  assert.ok(p.text("#inBox .in-edit").includes("1A Science: relief not needed."), p.text("#inBox .in-edit"));
+  assert.ok(p.text("#inBox .in-edit").includes("Tue 13 Oct · P6–P7 · 1A Science · relief not needed"), p.text("#inBox .in-edit"));
+  assert.deepStrictEqual(p.all('#inBox .in-edit button[data-rc="day"]').filter(b => b.getAttribute("aria-pressed") === "true").map(b => p.text(b)), ["Today"]);
+  assert.strictEqual(p.find('#inBox .in-edit input[data-rc="why"]').value, "Back on Tuesday");
+  assert.strictEqual(p.text("#inBox .in-said"), null, "nothing said above the table");
+  assert.strictEqual(p.reads(), before + 1, "the list is read again");
+  assert.strictEqual(p.focus(), p.find("#inBox .in-edit button", "Needed again"), "the focus on the lesson's new button");
+  assert.strictEqual(p.window.Relief.dirtyAny(), true, "what was chosen is still unsaved");
+});
+t("Cancel the request: the Edit closes, what was done is said above the table, and the list is read again", async () => {
+  const p = await page([record({ id: "a", lessons: [LESSON] })]), before = p.reads();
+  await p.click(p.edit("a"));
+  p.step = ok(record({ id: "a", cancelled: { by: "Mr Hugo Ong", why: "Course moved", at: "2026-10-12T09:00:00+08:00" } }));
+  await p.type('#inBox .in-edit input[data-rc="cwhy"]', "Course moved");
+  await p.click("#inBox .in-edit button", "Cancel the request");
+  assert.strictEqual(p.all("#inBox .in-edit").length, 0);
+  assert.ok(p.text("#inBox .in-said").includes("Cancelled."), p.text("#inBox"));
   assert.strictEqual(p.reads(), before + 1);
+});
+t("a lesson the app marked not needed (a co-teacher there) has Ask for relief anyway in the Edit, and says why", async () => {
+  const shared = Object.assign({}, LESSON, { needed: false, not_needed: { by: "app", why: "Mr Busy Chan is there" } });
+  const p = await page([record({ id: "a", lessons: [shared] })]);
+  await p.click(p.edit("a"));
+  assert.ok(p.text("#inBox .in-edit").includes("Tue 13 Oct · P6–P7 · 1A Science · Mr Busy Chan is there: no relief needed"), p.text("#inBox .in-edit"));
+  p.step = ok(record({ id: "a", lessons: [LESSON] }));
+  await p.click("#inBox .in-edit button", "Ask for relief anyway");
+  assert.deepStrictEqual(p.calls.filter(c => c.url.includes("/lessons/")).map(c => [c.method, c.url]), [["POST", "/api/relief/absences/a/lessons/k5/needed"]]);
+  assert.ok(p.text("#inBox .in-edit").includes("1A Science: relief asked for."), p.text("#inBox .in-edit"));
+});
+t("a view without the Edit's row asks first when it holds unsaved choices; without them it closes as before", async () => {
+  const p = await page([record({ id: "a", lessons: [LESSON] })]), asked = [];
+  let answer = false;
+  p.window.confirm = q => { asked.push(q); return answer; };
+  await p.click(p.edit("a"));
+  await p.click('#inBox [data-in="view"][data-v="today"]');
+  assert.deepStrictEqual(asked, [], "nothing chosen: not asked");
+  assert.strictEqual(p.all("#inBox .in-edit").length, 0);
+  await p.click('#inBox [data-in="view"][data-v="coming"]');
+  await p.click(p.edit("a"));
+  await p.type('#inBox .in-edit input[data-rc="why"]', "Moved");
+  await p.click('#inBox [data-in="view"][data-v="nudge"]');
+  assert.deepStrictEqual(asked, ["Close the Edit of Ms Evelyn Koh's request? What you chose there is not saved."]);
+  assert.strictEqual(p.all("#inBox .in-edit").length, 1, "kept: the view stays");
+  assert.strictEqual(p.find('#inBox [data-in="view"][data-v="coming"]').getAttribute("aria-pressed"), "true");
+  answer = true;
+  await p.click('#inBox [data-in="view"][data-v="nudge"]');
+  assert.strictEqual(p.all("#inBox .in-edit").length, 0);
+  assert.strictEqual(p.window.Relief.dirtyAny(), false);
 });
 
 (async () => {

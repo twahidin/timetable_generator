@@ -8,7 +8,7 @@
    or Change, which opens the "free then" list (Relief.freeList, drawn as Relief Planning's) and approves the one chosen at once; Split (a cover of two periods or
    more that is not approved: the person chooses after which period); Join again (a split lesson none of whose parts is
    approved); Keep (on a request to change, where Approve reads "Approve the new pick"); Relief not needed (on every row not cancelled
-   nor stopped, "for the whole lesson" on a part of a split one: it ends every part), which opens a reason line (optional) with
+   nor stopped whose lesson is not over (the row's over), "for the whole lesson" on a part of a split one: it ends every part), which opens a reason line (optional) with
    Mark relief not needed and Back, one at a time as Split's is; the row then leaves the list, so what was done is said above the rows. At the top: Approve all waiting,
    Send out all approved and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
    this tab is on screen. After every action the day is read again; a refusal shows the server's sentence beside its row.
@@ -155,7 +155,7 @@
     }
     if (r.split && !rows().some(o => o.id === r.id && o.key === r.key && SENT.includes(o.state))) out.push(b("join", "Join again"));
     const nn = T.nn === k;
-    out.push(b(nn ? "nn-off" : "nn", r.split ? "Relief not needed for the whole lesson" : "Relief not needed", "", ` aria-expanded="${nn ? "true" : "false"}"`));
+    if (!r.over) out.push(b(nn ? "nn-off" : "nn", r.split ? "Relief not needed for the whole lesson" : "Relief not needed", "", ` aria-expanded="${nn ? "true" : "false"}"`));   /* over: nothing more is marked */
     return `<div class="bar td-btns">${out.join("")}</div>`;
   }
 
@@ -320,7 +320,7 @@
     const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
     if (T.open && !live(T.open)) T.open = null;
     if (T.split && !live(T.split)) T.split = null;
-    if (T.nn && !live(T.nn)) T.nn = null;
+    if (T.nn && (!live(T.nn) || findRow(T.nn).over)) T.nn = null;   /* over meanwhile: its box closes */
     if (!T.data.filling) T.top = T.top.filter(m => !m.fill);
     if (same) { paintActs(); paintSaid(); } else { paintDay(); paint(); }
     schedule();

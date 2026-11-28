@@ -8,12 +8,15 @@
    person last looked, counted over the absences the views show, and each view says how many of its own are new. The
    list is read with a GET, which never writes; once it is shown, the page posts the list's as_of to
    /api/relief/absences/seen. A request still to come (not cancelled, a date today or later, not a backup for an exam or event)
-   has Edit in its last column: the editor (ReliefChange, with its lessons and cancel parts) opens in a row under it across the
-   table, one at a time, kept while the list is drawn again with its row (a view without its row closes it, so nothing hidden
-   counts as unsaved); once something is done it closes, what was done is said above the table and the list is read again, as
-   it is after a save refused because the request changed meanwhile (onStale). A request that can no longer be changed when the
-   list is read again (cancelled, every date past, gone) closes its Edit and says so above the table. The Submitted cell names
-   the request's last change (Changed by …). */
+   has Edit in its last column: the editor (ReliefChange, with its lessons and cancel parts) opens under the table, the whole
+   width of the card (never in the table's own scroller: on a phone every control is in reach), named by the request's teacher
+   and dates, its row marked; one at a time, kept while the list is drawn again with its row, the focus where it was (a view
+   without its row closes it, so nothing hidden counts as unsaved: when it holds unsaved choices the view button asks first). A
+   lesson's step (Relief not needed, Needed again, Ask for relief anyway) keeps it open and reads the list again; Save the
+   change and Cancel the request close it, what was done is said above the table and the list is read again, as it is after a
+   save refused because the request changed meanwhile (onStale). A request that can no longer be changed when the list is read
+   again (cancelled, every date past, gone) closes its Edit and says so above the table. The Submitted cell names the
+   request's last change (Changed by …). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day;
   const $ = (s, el = document) => el.querySelector(s);
@@ -71,18 +74,26 @@
       tail = `<td>${ack}</td><td>${w}</td><td>${rel}</td><td class="act">${edit}</td>`;
     }
     const ch = lastChange(r);
-    return `<tr class="${[r.new ? "new" : "", r.cancelled ? "off" : ""].filter(Boolean).join(" ")}">
+    return `<tr class="${[r.new ? "new" : "", r.cancelled ? "off" : "", I.edit && I.edit.id === r.id && editable(r) ? "editing" : ""].filter(Boolean).join(" ")}">
       <td>${r.new ? `<span class="chip new">new</span><br>` : ""}${esc(stamp(r.at))}${ch ? `<div class="small muted">${esc(ch)}</div>` : ""}</td>
       <td>${esc(r.by)}<div class="small muted">${esc(how)}</div></td>
       <td>${esc(r.teacher)}</td>
       <td>${esc(when)}<div class="small muted">${esc(`${R.span(r)} · ${R.plural(n, "lesson")}`)}</div>${changed ? `<div class="small pl-changed">The lesson has changed since this was planned</div>` : ""}</td>
-      <td>${esc(R.reason(r))}</td>${tail}</tr>${I.edit && I.edit.id === r.id && editable(r) ? `<tr class="in-edit"><td colspan="${COLS}"><div class="in-box"></div></td></tr>` : ""}`;
+      <td>${esc(R.reason(r))}</td>${tail}</tr>`;
+  }
+
+  function editHTML(rows) {   /* the open Edit, under the table: which request it is, then the editor's box */
+    const r = I.edit && rows.find(x => x.id === I.edit.id);
+    if (!r || !editable(r)) return "";
+    const when = RF.dayRuns(r.dates, d => (d === RF.today() ? "Today" : day(d)));
+    return `<div class="in-edit" role="group" aria-label="${esc(`Edit ${r.teacher}'s request`)}"><div class="in-for"><b>${esc(`Edit: ${r.teacher}'s request`)}</b> <span class="muted">${esc(`· ${when} · ${R.span(r)}`)}</span></div><div class="in-box"></div></div>`;
   }
 
   function paint() {
     const box = $("#inBox", I.pane);
     if (!box) return;
     const a = document.activeElement, had = a && box.contains(a) && a.dataset && a.dataset.in ? [a.dataset.in, a.dataset.id || a.dataset.v || ""] : null;
+    const eb = $(".in-box", box), inEd = a && eb && eb.contains(a) && a !== eb && a.dataset ? [a.dataset.rc, a.dataset.per, a.dataset.v] : null;   /* the focus in the open Edit */
     checkEdit();
     if (!I.list) {
       box.innerHTML = I.err ? `<div class="card"><p>${R.say(I.err)}</p><p><button type="button" data-in="reload">Try again</button></p></div>` : `<div class="card"><p class="muted">Loading…</p></div>`;
@@ -100,9 +111,16 @@
       ${I.said ? `<p class="in-said">${R.say(I.said)}</p>` : ""}
       ${rows.length ? `<div class="tablewrap"><table class="rtable inbox"><thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Absent teacher</th><th>Work</th><th>Relief status</th><th><span class="vh">Edit</span></th></tr></thead>
         <tbody>${rows.map(row).join("")}</tbody></table></div>` : `<p class="muted">${esc(v[3])}</p>`}
-      </div>`;
+      ${editHTML(rows)}</div>`;
     placeEdit();
     if (had) focusBtn(had[0], had[1]);
+    if (inEd) focusEdit(inEd);
+  }
+
+  function focusEdit([rc, per, v]) {   /* the same control of the Edit, drawn again (by its data-rc or data-per, and data-v) */
+    const eb = $("#inBox .in-box", I.pane), sel = per ? `[data-per="${per}"]` : rc ? `[data-rc="${rc}"]${v !== undefined ? `[data-v="${v}"]` : ""}` : "";
+    const el = eb && sel && eb.querySelector(sel);
+    if (el) el.focus();
   }
 
   function focusBtn(what, v) {   /* a button of the list by its data-in and its absence (or view) */
@@ -124,11 +142,11 @@
   /* the open Edit, into its row once the list is drawn: the same editor, as it was; closed when its row is not in the view shown */
   function placeEdit() {
     if (!I.edit || !I.list) return;
-    const r = find(I.edit.id), box = $("#inBox tr.in-edit .in-box", I.pane);
+    const r = find(I.edit.id), box = $("#inBox .in-edit .in-box", I.pane);
     if (!r || !box) { if (I.edit.ed) I.edit.ed.stop(); I.edit = null; return; }   /* nothing hidden counts as unsaved */
     const id = r.id;
     if (I.edit.ed) I.edit.ed.attach(box, r);
-    else I.edit.ed = window.ReliefChange.mount(box, r, { lessons: true, cancel: true, onDone: (rec, said) => editDone(id, rec, said), onStale: () => load() });
+    else I.edit.ed = window.ReliefChange.mount(box, r, { lessons: true, cancel: true, onDone: (rec, said) => editDone(id, rec, said), onStep: rec => stepDone(rec), onStale: () => load() });
   }
 
   function openEdit(id) {
@@ -138,8 +156,14 @@
     I.edit = old && old.id === id ? null : { id, teacher: (find(id) || {}).teacher || "", ed: null };   /* Edit again closes it */
     I.said = null;
     paint();
-    if (I.edit) { const first = $("#inBox tr.in-edit .rc .seg button.on", I.pane); if (first) first.focus(); }
+    if (I.edit) { const first = $("#inBox .in-edit .rc .seg button.on", I.pane); if (first) first.focus(); }
     else focusBtn("edit", id);
+  }
+
+  function stepDone(rec) {   /* a lesson's step: the list holds the answered record at once (the Edit is drawn from it), then is read again */
+    const i = rec && rec.id ? (I.list || []).findIndex(x => x.id === rec.id) : -1;
+    if (i >= 0) I.list[i] = Object.assign({}, I.list[i], rec);
+    load();
   }
 
   function editDone(id, rec, said) {   /* done (the answered record and what was done) or closed (null) */
@@ -163,10 +187,19 @@
     if (I.asOf && R.cur === "inbox") R.api("/api/relief/absences/seen", R.json("POST", { at: I.asOf }));
   }
 
+  /* another view; when it does not show the open Edit's row, the Edit closes, and asks first when it holds unsaved choices */
+  function view(k) {
+    const f = (VIEWS.find(x => x[0] === k) || VIEWS[0])[2], r = I.edit && find(I.edit.id), ed = I.edit && I.edit.ed;
+    if (r && !f(r) && ed && (ed.dirty() || ed.busy()) && !window.confirm(`Close the Edit of ${r.teacher}'s request? What you chose there is not saved.`)) return;
+    I.view = k; paint();
+    const again = $(`[data-in="view"][data-v="${I.view}"]`, I.pane);
+    if (again) again.focus();
+  }
+
   function onClick(e) {
     const b = e.target.closest("button[data-in]");
     if (!b || b.disabled) return;
-    if (b.dataset.in === "view") { I.view = b.dataset.v; paint(); const again = $(`[data-in="view"][data-v="${I.view}"]`, I.pane); if (again) again.focus(); return; }
+    if (b.dataset.in === "view") { view(b.dataset.v); return; }
     if (b.dataset.in === "reload") { load(); return; }
     if (b.dataset.in === "edit") { openEdit(b.dataset.id); return; }
   }

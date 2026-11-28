@@ -31,6 +31,7 @@ class El {
   get hidden() { return "hidden" in this.attrs; } set hidden(v) { this.flag("hidden", v); }
   get open() { return "open" in this.attrs; } set open(v) { this.flag("open", v); }
   get disabled() { return "disabled" in this.attrs; } set disabled(v) { this.flag("disabled", v); }
+  get checked() { return "checked" in this.attrs; } set checked(v) { this.flag("checked", v); }
   get className() { return this.attrs.class || ""; } set className(v) { this.attrs.class = v; }
   get value() { return this.typed !== undefined ? this.typed : this.tag === "textarea" ? this.textContent : this.attrs.value || ""; } set value(v) { this.typed = String(v); }
   set title(v) { this.attrs.title = v; } set href(v) { this.attrs.href = v; }
