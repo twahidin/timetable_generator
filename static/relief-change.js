@@ -119,7 +119,9 @@ window.ReliefChange = (function () {
 
     function draw() {
       const me = (rel().me || {}).name, id = idp();
-      const told = S.rec.teacher && S.rec.teacher !== me ? `<p class="small muted rc-told">${esc(`${S.rec.teacher} is told on Telegram, if they have linked it.`)}</p>` : "";
+      const planner = S.rec.how === "planned" && !S.rec.exams && S.rec.by && S.rec.by !== S.rec.teacher && S.rec.by !== "app" ? S.rec.by : "";   /* the head who planned it is told too (the lead's call, 28 Nov) */
+      const toTell = [S.rec.teacher, planner].filter(n => n && n !== me);
+      const told = toTell.length ? `<p class="small muted rc-told">${esc(`${toTell.join(" and ")} ${toTell.length > 1 ? "are" : "is"} told on Telegram, if they have linked it.`)}</p>` : "";
       S.box.innerHTML = `<div class="rc"><h3>Change the dates or times</h3>
         <div class="field"><div class="flabel">Dates</div><div class="rc-day"></div></div>
         <div class="field"><div class="flabel">Away for</div><div class="rc-away"></div></div>
