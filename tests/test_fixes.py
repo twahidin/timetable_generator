@@ -1075,5 +1075,22 @@ def a_teacher_on_another_group_of_the_same_lesson_is_not_free():
     L2 = [dict(x) for x in L]; L2[1]["teachers"] = [ta, tb]                     # the row's own teacher also on the other group: busy there too
     m2, sp2 = model_with(L2); T2 = {x["name"]: x for x in fixes.choices(m2, sp2, DAYS, 7, L2[0]["group"])["teachers"]}
     assert T2[ta]["free"] is False and L2[1]["group"] in T2[ta]["doing"]
+@t
+def a_move_onto_a_teacher_only_period_is_no_and_can_be_forced():
+    tp = TEACHERS[0]; lv = ROW["level"]; school = dict(SP["school"], start_time="07:40", period_minutes=20)   # periods 1 to 3 of Monday are 8.00 to 9.00
+    staff = [dict(_id="z1", name="Staff meeting", all=False, depts=[], teachers=[tp], week="Both", days=["Mon"], times=["08:00", "09:00"], place="Hall")]
+    over = dict(school=school, staff_periods=staff, rules=spec_mod.rules_with_staff(dict(SP, school=school, staff_periods=staff, rules=[])))
+    why = f"{tp} has Staff meeting then (Mon 8.00 to 9.00)."
+    L = [lesson(1, 1, 2, 2, [CLS], SUBJ, ENTIRE, [tp], level=lv), lesson(2, 0, 1, 1, [CLS], "Art", ENTIRE, [tp], level=lv), lesson(3, 2, 6, 1, [CLS], SUBJ, ENTIRE, [TEACHER], level=lv)]
+    m, sp = model_with(L, **over); pool = [lesson(5, 3, 2, 2, [CLS], "Music", ENTIRE, [tp], level=lv)]
+    j = lambda **f: fixes.judge(m, sp, DAYS, f, pool=pool)
+    for r in (j(kind="move", id=1, d=0, p=2), j(kind="place", id=5, d=0, p=2), j(kind="add", key=KEY, d=0, p=3, n=1, room="")):
+        assert r["state"] == "no" and r["why"] == why and r["must"] == [r["why"]], r
+    m3, sp3 = model_with([lesson(3, 0, 2, 1, [CLS], SUBJ, ENTIRE, [TEACHER], level=lv)], **over)
+    r = fixes.judge(m3, sp3, DAYS, dict(kind="teacher", key=KEY, teachers=[tp])); assert r["state"] == "no" and r["why"] == why and r["must"] == [why], r   # the lesson given to the teacher
+    r = j(kind="move", id=2, d=0, p=3); assert r["state"] == "ok", r   # already inside the period, elsewhere inside it: not broken anew
+    S = fixes.slots(m, sp, DAYS, 1)
+    assert at(S, 0, 2)["state"] == "no" and at(S, 0, 2)["why"] == why and not [s for s in S if s["d"] == 0 and s["p"] <= 3 and s["state"] == "ok"]
+
 
 print(f"{n} checks passed")

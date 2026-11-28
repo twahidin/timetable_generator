@@ -6,7 +6,7 @@ from collections import Counter
 from . import parents
 from .export import ENTIRE
 from .solver import rule_label
-from .spec import whole as whole_n, clean_name, single_rooms, floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules
+from .spec import whole as whole_n, clean_name, single_rooms, floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules, clock12
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the row last ("" would put it first and renumber the group codes after it)
@@ -196,7 +196,8 @@ def _hit(m, r, i, detail, sentence, group, x=None):
     """one warning for rule row i; x is the lesson it names"""
     prefer = r.get("strength") == "Prefer"
     where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"]) if x else None
-    return warning(f"rule:{r.get('_id') or i}:{detail}", "rule", f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else ""), "Prefer" if prefer else "Must", group, where)
+    text = sentence if "staff" in r else f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else "")   # a teacher-only period's row: its own sentence, no rule label
+    return warning(f"rule:{r.get('_id') or i}:{detail}", "rule", text, "Prefer" if prefer else "Must", group, where)
 
 def _lessons(m, spec, r, days):
     """the lessons in scope that sit on a rule day"""
@@ -214,6 +215,10 @@ def _not_available(m, spec, i, r, days, per):
         if (q := next(iter(_inside(x, per)), None)) is None: continue
         who = f"for {x['classes'][0]}" if x["group"] == ENTIRE and x["classes"] else f"group {x['group']}"
         group = r["target"] if r.get("scope") in ("Teacher", "Class", "Room") else (x["classes"] or ["School"])[0]
+        if "staff" in r:   # a teacher-only period: step 8's sentence, and the board's short one in w["staff"]
+            a, b = (clock12(v) for v in r["times"])
+            h = _hit(m, r, i, _key(x, q), f"{r['target']} has {_what(x)} on {m['days'][x['d']]} period {q} during {r['staff']} ({a} to {b}).", group, x)
+            h["staff"] = f"{r['target']} has {r['staff']} then ({r['day']} {a} to {b})."; out.append(h); continue
         out.append(_hit(m, r, i, _key(x, q), f"{r['target']} has {x['subject']} {who} on {m['days'][x['d']]} period {q} but is not available ({_pr(per)}).", group, x))
     return out
 

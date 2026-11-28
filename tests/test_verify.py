@@ -701,5 +701,22 @@ def every_teacher_clash_is_listed_past_thirty():
     assert len(crit(rows)) == 35 and len({w["key"] for w in crit(rows)}) == 35
     assert len(crit(rows[:-1])) == 34
 
+@t
+def a_lesson_during_a_teacher_only_period_is_one_must_warning():
+    sp = primary(); row = next(x for x in sp["lessons"] if not x.get("block")); cls, subj, who = row["classes"][0], row["subject"], row["teachers"][0]
+    sp["school"].update(start_time="07:40", period_minutes=20)
+    sp["staff_periods"] = [dict(_id="z1", name="Staff meeting", all=False, depts=[], teachers=[who], week="Both", days=["Mon"], times=["08:00", "09:00"], place="Hall")]
+    m = model_for(sp, [(0, 1, 2, [cls], subj, "Entire Class", [who], "")]); day = m["days"][0]
+    ws = [w for w in verify.rules(m, m["checked_setup"])[0] if "staff" in w]
+    assert len(ws) == 1 and ws[0]["kind"] == "rule" and ws[0]["strength"] == "Must" and ws[0]["crit"] == "" and ws[0]["group"] == who
+    assert ws[0]["text"] == f"{who} has {subj} for {cls} on {day} period 1 during Staff meeting (8.00 to 9.00)."
+    assert ws[0]["staff"] == f"{who} has Staff meeting then (Mon 8.00 to 9.00)."
+    assert ws[0]["key"] == f"rule:tp.z1.{who}.Mon:{cls}|{subj}|0|1" and ws[0]["where"]["id"] == 1
+    sp2 = copy.deepcopy(sp); sp2["staff_periods"].insert(0, dict(_id="a0", name="Briefing", all=True, depts=[], teachers=[], week="Both", days=["Fri"], times=["08:00", "09:00"], place=""))
+    m2 = model_for(sp2, [(0, 1, 2, [cls], subj, "Entire Class", [who], "")])
+    assert [w["key"] for w in verify.rules(m2, m2["checked_setup"])[0] if "staff" in w] == [ws[0]["key"]]      # an answer stays with its warning when a row is added in front
+    m3 = model_for(sp, [(0, 4, 2, [cls], subj, "Entire Class", [who], "")])
+    assert not [w for w in verify.rules(m3, m3["checked_setup"])[0] if "staff" in w]
+
 
 print(f"{n} checks passed")

@@ -17,7 +17,7 @@ from ttgen import parents
 from ttgen.spec import teacher_depts
 
 LISTS = ("venues", "classes", "subjects", "teachers", "blocks", "lessons",
-         "rules", "students", "combinations", "roles", "choices")
+         "rules", "staff_periods", "students", "combinations", "roles", "choices")
 MERGE = {"teachers": ("can_teach",), "students": ("groups",)}
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 _RESERVED_TOP = set(LISTS) | {"school", "day_structure"}
@@ -289,6 +289,8 @@ def _head_why(spec, op):
         return _head_lessons_why(spec, op)
     if section == "blocks":
         return None
+    if section == "staff_periods":
+        return "Department heads cannot change teacher-only periods."
     if section != "teachers":
         return f"Department heads cannot change {section if isinstance(section, str) else 'that'}."
     if name == "set" and len(op) > 3 and op[3] == "dept2":

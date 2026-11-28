@@ -898,11 +898,12 @@
     const names = d.names.map(n => `<div>${esc(n)}${d.chief === n ? ` <span class="chip">chief</span>` : ""}${(d.backup || {})[n] ? ` <span class="chip amber">backup</span>` : ""}
       <span class="muted small">${esc((d.reasons || {})[n] || "")}</span></div>`).join("");
     const sub = Object.keys((d.backup || {})).length ? `<div class="small muted">${Object.keys(d.backup).map(esc).join(", ")} teaches a lesson then</div>` : "";
+    const soft = Object.entries(d.marks || {}).map(([n, m]) => `<span class="flag soft">${esc(n)}: ${esc(m)}</span>`).join("<br>");
     const n = (seatsOf(d.key)[d.room] || []).length;
     return `<tr class="${dutyEq(d, S.duty) ? "pick" : ""}"><td>${esc(fmtDate(d.date))}<br><span class="small muted">${hhmm(d.start)}–${hhmm(d.end)}</span></td>
       <td><b>${esc(d.room)}</b><br><span class="small muted">${esc(sitLabel(d.key).split(" · ").slice(2).join(" · "))}${n ? " · " + n : ""}</span></td>
       <td class="small">${names || `<span class="muted">No one yet</span>`}${d.locked ? ` <span class="chip">by hand</span>` : ""}</td>
-      <td>${flags.length ? flags.join("<br>") + sub : `<span class="okc">✓</span>`}</td>
+      <td>${(flags.length ? flags.join("<br>") + sub : `<span class="okc">✓</span>`) + (soft ? "<br>" + soft : "")}</td>
       <td><button type="button" class="small" data-act="duty" data-a="${esc(d.key)}" data-b="${esc(d.room)}">Who could take it</button></td></tr>`;
   }
 
@@ -912,11 +913,11 @@
     const d = (made.duties || []).find(x => dutyEq(x, p));
     if (!d) return `<div class="panel"><h3>Who could take it</h3><p class="muted small">That duty is not there any more.</p></div>`;
     const head = `<h3>Who could take it</h3><p class="small"><b>${esc(d.room)}</b> · ${esc(fmtDate(d.date))} ${hhmm(d.start)}–${hhmm(d.end)}</p>
-      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)}${(d.not_free || {})[n] ? ` <span class="flag">Not free: ${esc(d.not_free[n])}</span>` : ""} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>
+      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)}${(d.not_free || {})[n] ? ` <span class="flag">Not free: ${esc(d.not_free[n])}</span>` : ""}${(d.marks || {})[n] ? ` <span class="flag soft">${esc(n)}: ${esc(d.marks[n])}</span>` : ""} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>
       ${d.locked ? `<p class="small"><span class="muted">Chosen by hand: Make again keeps these names.</span> <button type="button" class="small" data-act="whoAuto" ${S.busy ? "disabled" : ""}>Let the app choose</button></p>` : ""}`;
     if (!S.who) return `<div class="panel">${head}<p class="muted small">Loading…</p></div>`;
     if (S.who.error) return `<div class="panel">${head}<p class="msg bad">${esc(S.who.error)}</p></div>`;
-    const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"], ["need_backup", "Would need a backup"]];
+    const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"], ["period", "In a teacher-only period"], ["need_backup", "Would need a backup"]];
     const body = groups.map(([k, title]) => {
       const list = (S.who[k] || []).filter(c => !d.names.includes(c.name));
       return `<h4>${title}</h4>${list.map(c => `<div class="small whorow"><div><b>${esc(c.name)}</b> <span class="muted">· ${c.minutes} min so far</span><br><span class="muted">${esc(c.reason)}</span></div>
@@ -949,7 +950,7 @@
     if (!d) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">Choose the duty on the main site that someone cannot do.</p>${say}</div>`;
     if (A.err) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="msg bad">${esc(A.err)}</p>${say}</div>`;
     if (!G) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">Loading…</p>${say}</div>`;
-    const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"]];
+    const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"], ["period", "In a teacher-only period"]];
     const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
     const who = names.includes(A.who) ? A.who : "";
     const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.minutes} min so far`)).join("")}</optgroup>` : "").join("");
@@ -1050,7 +1051,7 @@
 
   const goingRows = () => (S.sched.going || []).map(n => {
     const g = ((S.view && S.view.going) || []).find(x => x.name === n);
-    const text = g ? `<span class="${g.status === "free" ? "muted" : g.status === "backup" ? "amber" : "flag"} small">${esc(g.text)}</span>` : "";
+    const text = g ? `<span class="${g.status === "free" ? "muted" : g.status === "backup" || g.status === "period" ? "amber" : "flag"} small">${esc(g.text)}</span>` : "";
     return `<tr><td>${esc(n)}${g && g.tag ? ` · ${esc(g.tag)}` : ""}</td><td>${text}</td>
       <td><button type="button" class="small danger" data-act="goDrop" data-a="${esc(n)}" title="Take ${esc(n)} off the list" aria-label="Take ${esc(n)} off the list">✕</button></td></tr>`;
   }).join("");
@@ -1071,7 +1072,7 @@
     const say = A.say ? `<p class="msg ok" role="status">${esc(A.say)}</p>` : "";
     if (A.err) return `<div class="card"><h2>Someone is away</h2><p class="msg bad">${esc(A.err)}</p>${say}</div>`;
     if (!G) return `<div class="card"><h2>Someone is away</h2><p class="muted small">Loading…</p>${say}</div>`;
-    const groups = [["freed", "Freed by the event"], ["free", "Free then"]];
+    const groups = [["freed", "Freed by the event"], ["free", "Free then"], ["period", "In a teacher-only period"]];
     const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
     const who = names.includes(A.who) ? A.who : "";
     const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.reason}`)).join("")}</optgroup>` : "").join("");

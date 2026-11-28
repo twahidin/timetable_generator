@@ -65,6 +65,12 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .cell b{color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cell .t{color:var(--ink);font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none;overflow:visible;text-overflow:clip}.cell.s{padding:2px 1px 1px;border-left-width:2px}.cell.s .t{font-size:9.5px;letter-spacing:-.02em}.cell .m{color:var(--sub)}
 .cell{container-type:inline-size}.cell .ts{display:none}@container (max-width:75px){.cell .tf{display:none}.cell .ts{display:inline}}   /* a box too narrow for the full time shows the start alone, judged by its real width (75px of content holds the widest, 10.40–11.20) */
+.cell.staff,:root:not([data-theme="light"]) .cell.staff,:root[data-theme="dark"] .cell.staff{--a:#5B6677;background:#fff;border:1.5px solid #5B6677;border-left:4px solid #5B6677;cursor:default}   /* a teacher-only period: white with a dark outline in every theme, so its dark text always reads */
+.cell.staff b,.cell.staff .t{color:#1B2330}.cell.staff .m,.cell.staff span{color:#4A5566}
+.dlist .it.staff,:root:not([data-theme="light"]) .dlist .it.staff,:root[data-theme="dark"] .dlist .it.staff{--a:#5B6677;background:#fff;border:1.5px solid #5B6677;border-left:4px solid #5B6677;cursor:default}.dlist .it.staff b{color:#1B2330}.dlist .it.staff span{color:#4A5566}   /* a teacher-only period in the day list: white with a dark outline in every theme */
+.cell.staff.cut-r{border-right-style:dashed}.cell.staff.cut-l{border-left-style:dashed}
+.cell.staff:hover{outline:2px solid color-mix(in srgb,#5B6677 50%,transparent)}
+.legend .sw.staff{background:#fff;border:1.5px solid #5B6677}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
 .cell.x{opacity:.5;filter:grayscale(.7)}.cell.x b,.cell.x span{text-decoration:line-through}
@@ -172,6 +178,8 @@ const uniq = a => [...new Set(a)];
 const short = s => (D.subjects[s] || [s])[0];
 const colorOf = s => (D.subjects[s] || [s, 0])[1];
 const deptOf = s => (D.subjects[s] || [])[2] || "";   // an older page's data has no department
+let STAFF = D.staff || [], STAFF_LINES = D.staff_lines || {};   /* teacher-only periods: [teacher, day, first period or null, periods, name, place, from, to, starts before the day, ends after it, box start and end in minutes (cut to the day)]; the full page holds everyone's, a teacher's own page gets theirs by /api/timetable/my-periods */
+const staffTime = r => r[8] && r[9] ? `(from ${r[6]} to ${r[7]})` : r[9] ? `${r[6]} (to ${r[7]})` : r[8] ? `(from ${r[6]}) ${r[7]}` : `${r[6]}–${r[7]}`;
 const pal = i => D.palette[i % D.palette.length];
 const untag = s => short(s).replace(/\s+(G[123]|Std|Fdn)$/, "");
 const tshort = ts => ts.map(t => (tIx.get(t) || {}).short || t).join(", ");
@@ -196,7 +204,7 @@ const clk = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padSt
 const hm = t => mins(t) === null ? t : clk(mins(t));   /* "08:20" as the school writes it: "8.20"; anything that is not a time stays as it is */
 const hmAll = text => String(text == null ? "" : text).replace(/(^|\D)(\d{1,2}):(\d{2})(?!\d)/g, (w, pre, h, m) => +h < 24 && +m < 60 ? pre + clk(+h * 60 + +m) : w);   /* every clock time inside a text, written the school's way */
 const edge = (p, n) => { const hi = PB.length - 1, i = q => Math.max(0, Math.min(hi, Math.floor(q))); return [PB[i(p)][0], PB[i(Math.ceil(p + n) - 1)][1]]; };   /* p held inside the day as time() holds it */
-const cellTime = c => `${clk(c.a)}–${clk(c.b)}`, cellStart = c => clk(c.a);   /* a box holds both; its real width decides which shows */
+const cellTime = c => c.time || `${clk(c.a)}–${clk(c.b)}`, cellStart = c => c.start || clk(c.a);   /* a box holds both; its real width decides which shows */
 /* the runs of assembly, recess and lunch on day d, in minutes, kept only when a lesson (or exam, event) of that day starts at or after the run's end */
 function bandsOf(v, d) {
   const row = v.codes ? v.codes[d] : null, out = [];
@@ -271,6 +279,8 @@ function teacherView(t) {
   }
   const legend = [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? `${e.x.group} (${compact(e.x.classes)})` : e.x.classes.join(", ")} · ${common(e.rooms) || "-"}`, count: `${e.periods} periods` }));
   const days = Object.values(per), mine = CLS.filter(c => c.parents.includes(t)).map(c => c.name);
+  STAFF.filter(r => r[0] === t && r[2] != null).forEach(r => { const [a, b] = r[10] != null ? [r[10], r[11]] : edge(r[2], r[3]); cells.push({ d: r[1], p: r[2], n: r[3], a, b, title: r[4], lines: [r[5]].filter(Boolean), color: null, ext: false, id: null, staff: true, before: !!r[8], after: !!r[9], time: staffTime(r), start: r[6], ix: [] }); });   /* a teacher-only period: a box placed by its own minutes (cut to the day's first and last period), never counted in the stats */
+  (STAFF_LINES[t] || []).forEach(line => legend.push({ color: null, label: "", text: line, staff: true }));
   const base = [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · ");
   return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: mine.length ? `${base || "Teacher"} · ${PNAME} of ${mine.join(", ")}` : base,
     stats: [[total, "periods a cycle"], ...(MODE === "staff" && !info.allowance ? [] : [[info.allowance || "-", "allowance"]]), [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
@@ -357,7 +367,7 @@ function gridHTML(v) {
     for (const x of bandsOf(v, d)) if (x.b > a0 && x.a < b1) inner += `<div class="bk${x.b - x.a < 40 ? " v" : ""}" style="left:${pc(x.a)};width:${wd(x.a, x.b)}"><span>${esc(x.name)}</span></div>`;
     for (const c of v.cells.filter(c => c.d === d)) {
       const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : pal(c.color);   /* an exam takes its colours from .cell.exam */
-      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.b - c.a < 40 ? " s" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><span class="t"><span class="tf">${esc(cellTime(c))}</span><span class="ts">${esc(cellStart(c))}</span></span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
+      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.staff ? " staff" + (c.after ? " cut-r" : "") + (c.before ? " cut-l" : "") : ""}${c.b - c.a < 40 ? " s" : ""}"${c.exam || c.staff ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam || c.staff ? "" : `;--t:#${t};--a:#${a}`}" title="${esc((c.staff ? [c.title, c.time, ...c.lines] : [c.title, ...c.lines, c.when || when(c)]).join("\n"))}"><span class="t"><span class="tf">${esc(cellTime(c))}</span><span class="ts">${esc(cellStart(c))}</span></span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
     }
     h += `<div class="row"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track" style="--h:${most[d] > 1 ? 48 * most[d] : 62}px">${inner}</div></div>`;
   }
@@ -375,8 +385,8 @@ function dayListHTML(v) {
   if (v.only == null) { const last = wk === WEEKS - 1 ? ND : (wk + 1) * PER_WEEK; let b = ""; for (let i = wk * PER_WEEK; i < last; i++) b += `<button data-pd="${i}"${on(i === d)}>${esc(weekDay(DAYS[i])[1])}</button>`; h += `<div class="seg pdy">${b}</div>`; }
   const items = dayItems(v, d).map(x => { const c = x.c;
     if (!c) return `<div class="tm q">${esc(cellTime(x))}</div><div class="bkr">${esc(x.name)}</div>`;
-    const [t, a] = c.exam ? [] : pal(c.color);   /* an exam or event takes its colours from .it.exam */
-    return `<div class="tm">${esc(cellTime(c))}</div><div class="it${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${esc(c.id)}" tabindex="0" style="--t:#${esc(t)};--a:#${esc(a)}"`}><b>${esc(c.title)}</b>${c.lines.map(l => `<span>${esc(l).replace(/ · /g, "\u00a0· ")}</span>`).join("")}</div>`; }).join("");
+    const [t, a] = c.exam || c.staff ? [] : pal(c.color);   /* an exam or event takes its colours from .it.exam, a teacher-only period from .it.staff (no lesson id: a tap opens nothing) */
+    return `<div class="tm">${esc(cellTime(c))}</div><div class="it${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.staff ? " staff" : ""}"${c.exam || c.staff ? "" : ` data-id="${esc(c.id)}" tabindex="0" style="--t:#${esc(t)};--a:#${esc(a)}"`}><b>${esc(c.title)}</b>${c.lines.map(l => `<span>${esc(l).replace(/ · /g, "\u00a0· ")}</span>`).join("")}</div>`; }).join("");
   return h + `<div class="dlist">${items || `<div class="empty">No lessons this day.</div>`}</div></div>`;
 }
 /* the list's buttons: set the day, the week (the same weekday) or Whole week, then draw the view again as it is now */
@@ -416,7 +426,7 @@ function dayChanged() {
 }
 function viewHTML(v, extra = "") {
   const stats = COMMITTEE && v.stats.length ? `<div class="stats">${v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("")}</div>` : "";
-  const leg = v.legend.map(e => { const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}${COMMITTEE && e.count ? esc(" · " + e.count) : ""}</span></div>`; }).join("");
+  const leg = v.legend.map(e => { if (e.staff) return `<div><i class="sw staff"></i><span>${esc(e.text)}</span></div>`; const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}${COMMITTEE && e.count ? esc(" · " + e.count) : ""}</span></div>`; }).join("");
   return `<div class="card${S.whole && v.only == null ? " whole" : ""}"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div>${stats}</div>
     <div class="tools">${pdfLink(v)}<button data-act="print">Print</button><button data-act="csv">Download CSV</button>${MODE === "personal" ? "" : `<button data-act="link">Copy link</button>`}${extra}</div>
     ${v.onLine ? `<p class="onday">${esc(v.onLine)}</p>` : ""}
@@ -607,6 +617,7 @@ function renderFree() {
   L.forEach(x => { if (x.d !== day) return; const ps = ran(x); if (!ps.length) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + ps.length; } });
     if (ps.some(q => q >= +f.from && q <= +f.to)) { x.teachers.forEach(t => tb.add(t)); if (x.room) singles(x.room).concat(x.room).forEach(r => rb.add(r)); if (x.rain) x.rain.split(", ").forEach(r => singles(r).concat(r).forEach(q => rb.add(q))); x.classes.forEach(c => cb.add(c)); } });
   const hit = it => +it.p < +f.to + 1 && +it.p + +it.n > +f.from;   /* an exam item's p and n are period positions: period q is q to q + 1 */
+  STAFF.forEach(r => { if (r[1] === day && r[2] != null && hit({ p: r[2], n: r[3] })) tb.add(r[0]); });   /* a teacher in a teacher-only period then is busy */
   Object.entries(ex.teachers || {}).forEach(([t, its]) => { if (its.some(hit)) tb.add(t); });
   Object.entries(ex.rooms || {}).forEach(([r, its]) => { if (its.some(hit)) singles(r).concat(r).forEach(q => rb.add(q)); });
   Object.entries(ex.classes || {}).forEach(([c, its]) => { if (its.some(hit)) cb.add(c); });
@@ -823,6 +834,11 @@ if (APP) {
     $("#onUsual").onclick = () => { $("#onDate").value = ""; pickDate(""); };
   }
   if (EXAMS) loadExams();
+  if (MODE === "staff") fetch("/api/timetable/my-periods", { credentials: "same-origin" }).then(r => r.json()).then(j => {   /* a teacher's own teacher-only periods; a failed answer leaves the page as it was */
+    if (!j || j.error || !Array.isArray(j.staff) || !j.staff.length) return;
+    STAFF = j.staff; STAFF_LINES = { [APP.me]: Array.isArray(j.lines) ? j.lines : [] };
+    if (S.tab === "teachers" && S.key) show("teachers", S.key);
+  }, () => {});
 }
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";

@@ -175,9 +175,21 @@ def row_label_every_section():
     assert H.row_label("combinations", {"code": "S1"}) == "S1"
     r = spec["rules"][0]
     assert H.row_label("rules", r) == f"{r['target']} · {r['rule']}"
+    assert H.row_label("staff_periods", {"name": " Zone class "}) == "Zone class"
+    assert H.row_label("staff_periods", {"name": ""}) == "a teacher-only period"
     assert H.row_label("choices", {"kind": "recess", "level": "Sec 1"}) == "recess Sec 1"
     assert H.row_label("choices", {"kind": "setting", "key": "k"}) == "setting k"
     assert H.row_label("lessons", {"level": "Sec 3", "subject": "Physics", "classes": ["3B"]}) == "Sec 3 Physics 3B"
+
+@t
+def teacher_only_period_change_is_named():
+    spec = {"teachers": [{"name": "Mr A", "dept": "English"}], "staff_periods": [{"_id": "sp00000001", "name": "Zone class", "place": "Hall"}]}
+    es = H.setup_entries(spec, [["set", "staff_periods", "sp00000001", "place", "Court"]], H.by_of("Ann Lee", "password"), "b1", 1)
+    assert len(es) == 1 and es[0]["where"] == "Step 6 · Configuration & constraints" and es[0]["label"] == "Zone class", es
+    assert es[0]["was"] == "Hall" and es[0]["now"] == "Court" and es[0]["text"] == "Zone class: place Hall → Court", es[0]["text"]
+    for v, word in ((True, "on"), (False, "off")):
+        es = H.setup_entries(spec, [["set", "staff_periods", "sp00000001", "all", v]], H.by_of("Ann Lee", "password"), "b1", 1)
+        assert es[0]["text"] == f"Zone class: All teachers: {word}", es[0]["text"]
 
 @t
 def stray_files_and_non_dict():

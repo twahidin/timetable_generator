@@ -21,7 +21,7 @@ KEEP_MONTHS = 24
 FORBIDDEN = {"password", "pw", "code", "once", "token", "secret"}
 WHERE = {"venues": "Step 1 · Venues", "classes": "Step 2 · Classes", "subjects": "Step 3 · Subjects",
          "teachers": "Step 4 · Teachers", "roles": "Step 4 · Teachers", "lessons": "Step 5 · Teacher Deployment Editor",
-         "blocks": "Step 5 · Banding & TG Group Editor", "rules": "Step 6 · Configuration & constraints",
+         "blocks": "Step 5 · Banding & TG Group Editor", "rules": "Step 6 · Configuration & constraints", "staff_periods": "Step 6 · Configuration & constraints",
          "students": "Students", "combinations": "Students", "choices": "Students"}
 _SCHOOL_DAY = "School & day"
 _NAME_FIELD = {"venues": "room", "classes": "class", "subjects": "subject", "teachers": "name", "blocks": "block",
@@ -314,6 +314,8 @@ def row_label(section, row):
     if section == "rules":
         parts = [str(row.get("target") or "").strip(), str(row.get("rule") or row.get("text") or "").strip()]
         return _cut(" · ".join(p for p in parts if p) or "(rule)")
+    if section == "staff_periods":
+        return str(row.get("name") or "").strip() or "a teacher-only period"
     if section == "combinations":   # a combination has a name and a code: the name, else the code
         return str(row.get("name") or row.get("code") or "").strip() or "(unnamed)"
     if section == "choices":   # kind setting (key), rule (its rule id) or recess (level)
@@ -377,7 +379,9 @@ def _row_entry(work, op):
             e["text"] = f"Deleted {lab}"
         else:
             e["now"] = copy.deepcopy(r.get(field)) if r else None
-            if name == "set":
+            if name == "set" and section == "staff_periods" and field == "all":
+                e["text"] = f"{lab}: All teachers: {'on' if e['now'] is True else 'off'}"
+            elif name == "set":
                 e["text"] = _cut(f"{lab}: {_word(field)} {_show(e['was'])} → {_show(e['now'])}")
             else:
                 e["text"] = _cut(f"{lab}: {_word(field)} + {_show(op[4])} − {_show(op[5])}")

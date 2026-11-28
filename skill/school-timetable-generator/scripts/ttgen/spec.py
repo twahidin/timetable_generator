@@ -7,6 +7,7 @@ A *spec* is a plain dict (JSON friendly) holding everything the template holds:
                 A after-school slot (used only if needed), '.' no school
   venues, classes, subjects, teachers, blocks, lessons, rules, students, combinations (lists of dicts)
 """
+import re
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 CODES = {"F": "Flag / assembly", "L": "Lessons", "R": "Recess", "W": "Recess window (the solver puts the recess in it)", "U": "Lunch", "A": "After-school slot", ".": "No school"}
 SCOPES = ["School", "Level", "Class", "Teacher", "Department", "Subject", "Block", "Group", "Room"]
@@ -32,7 +33,7 @@ RULE_TYPES = [
     ("In words", "School, Level, Class, Subject, Room, Teacher", "N", "N", "A rule in plain words that the list cannot say. The timetable scripts do not enforce it: the agent honours a Must, tries a Prefer, and reports how each was met.", "Level · Sec 1 · No PE in the first period"),
 ]
 TYPED = "In words"             # a rule the agent honours and reports on; never enforced by the solver
-SKILL_VERSION = "2026-11.11"     # SKILL.md's version line and the one the workbook's README names
+SKILL_VERSION = "2026-11.12"     # SKILL.md's version line and the one the workbook's README names
 
 def teacher_depts(t):
     """A teacher row's departments, home first: the trimmed, non-empty, different ones of dept and dept2"""
@@ -41,6 +42,124 @@ def teacher_depts(t):
         d = str(t.get(k) or "").strip()
         if d and d not in out: out.append(d)
     return out
+
+# ---- teacher-only periods: spec["staff_periods"], weekly periods for named teachers with no students ----
+def _clock_min(v):
+    """"HH:MM" -> minutes after midnight, or None when it is not a time"""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", v.strip(), re.ASCII) if isinstance(v, str) else None
+    return int(m[1]) * 60 + int(m[2]) if m and int(m[1]) < 24 and int(m[2]) < 60 else None
+
+def _slist(v): return [x.strip() for x in v if isinstance(x, str) and x.strip()] if isinstance(v, list) else []
+def _sstr(v): return v if isinstance(v, str) else ""
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri")
+
+def staff_day(v):
+    """the weekday 'Mon'..'Fri' whose first three letters equal v's (any case, trimmed), else None"""
+    k = v.strip()[:3].lower() if isinstance(v, str) else ""
+    return next((d for d in _WEEKDAYS if d.lower() == k), None)
+
+def staff_row_days(row):
+    """a row's days as the normalised weekdays, each once, in Mon..Fri order"""
+    got = {staff_day(x) for x in _slist(row.get("days"))}
+    return [d for d in _WEEKDAYS if d in got]
+
+def staff_rows(spec):
+    """the rows of spec['staff_periods'] that are dicts; [] when the key is missing or not a list"""
+    v = (spec or {}).get("staff_periods")
+    return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else []
+
+def staff_people(spec, row):
+    """the names on step 4 that the row means now (all, a department, or named), in step 4's order, each once"""
+    ts = [t for t in (spec or {}).get("teachers") or [] if isinstance(t, dict)]
+    depts, names = set(_slist(row.get("depts"))), set(_slist(row.get("teachers")))
+    out = []
+    for t in ts:
+        nm = str(t.get("name") or "").strip()
+        if nm and nm not in out and (row.get("all") is True or nm in names or depts & set(teacher_depts(t))): out.append(nm)
+    return out
+
+def staff_faults(spec, row):
+    """[(hard, sentence)] for a row: soft ones (names or departments that mean nobody) first, then hard ones, which hide the row"""
+    ts = [t for t in (spec or {}).get("teachers") or [] if isinstance(t, dict)]
+    have = {str(t.get("name") or "").strip() for t in ts}; have_d = {d for t in ts for d in teacher_depts(t)}
+    out = [(False, f"{x} is not on step 4.") for x in _slist(row.get("teachers")) if x not in have]
+    out += [(False, f"Department {x} has no teacher.") for x in _slist(row.get("depts")) if x not in have_d]
+    out += [(False, f"{x} is not a weekday.") for x in _slist(row.get("days")) if staff_day(x) is None]
+    name = _sstr(row.get("name")).strip()
+    if not name: out.append((True, "It has no name."))
+    if len(_sstr(row.get("name"))) > 60: out.append((True, "Its name is longer than 60 letters."))
+    if len(_sstr(row.get("place"))) > 60: out.append((True, "Its place is longer than 60 letters."))
+    if not staff_people(spec, row): out.append((True, "Nobody is in it."))
+    if not staff_row_days(row): out.append((True, "It has no day."))
+    tm = row.get("times") if isinstance(row.get("times"), (list, tuple)) and len(row.get("times")) == 2 else [None, None]
+    a, b = _clock_min(tm[0]), _clock_min(tm[1])
+    if a is None or b is None: out.append((True, "Its From and To times are not times."))
+    elif b <= a: out.append((True, "Its To time is not after its From time."))
+    return out
+
+def clock12(hhmm):
+    """"15:00" -> "3.00": 12-hour, a dot, no am or pm"""
+    m = _clock_min(hhmm)
+    return "" if m is None else f"{(m // 60) % 12 or 12}.{m % 60:02d}"
+
+def staff_items(spec):
+    """one dict per row without a hard fault, per person, per day: the teacher-only period as it falls on one teacher's one weekday"""
+    sc = (spec or {}).get("school") or {}
+    try: st, pl, NP = _clock_min(str(sc.get("start_time"))), int(sc.get("period_minutes")), int(sc.get("periods_per_day"))
+    except (TypeError, ValueError): return []
+    if st is None or pl <= 0 or NP <= 0: return []
+    out = []
+    for i, row in enumerate(staff_rows(spec)):
+        if any(h for h, _ in staff_faults(spec, row)): continue
+        a, b = _clock_min(row["times"][0]), _clock_min(row["times"][1])
+        lo, hi = (a - st) // pl, -(-(b - st) // pl) - 1
+        per = None if lo > NP - 1 or hi < 0 else (max(0, lo), min(NP - 1, hi))
+        wk = row.get("week") if row.get("week") in ("Odd", "Even") else "Both"
+        try: one_week = int(sc.get("weeks")) == 1
+        except (TypeError, ValueError): one_week = False
+        if one_week: wk = "Both"
+        days = staff_row_days(row)
+        for who in staff_people(spec, row):
+            for d in days:
+                out.append(dict(id=f"tp.{row.get('_id') or i}.{who}.{d}".replace(":", " "), row=i, name=row["name"].strip(), place=_sstr(row.get("place")).strip(),
+                                teacher=who, week=wk, day=d, times=[row["times"][0].strip(), row["times"][1].strip()], minutes=(a, b), periods=per,
+                                before=a < st, after=b > st + NP * pl))
+    return out
+
+def staff_blocks(spec):
+    """the 'Not available' Must rows (marked with staff=name) that the teacher-only periods stand for in the grid"""
+    return [dict(scope="Teacher", target=x["teacher"], rule="Not available", week=x["week"], day=x["day"], strength="Must", note=x["name"], times=x["times"],
+                 staff=x["name"], place=x["place"], _id=x["id"], **{"from": x["periods"][0], "to": x["periods"][1]}) for x in staff_items(spec) if x["periods"]]
+
+def plain_rules(spec):
+    """spec['rules'] without the rows that stand for teacher-only periods (those with a staff key)"""
+    v = (spec or {}).get("rules")
+    return [r for r in v if not (isinstance(r, dict) and "staff" in r)] if isinstance(v, list) else []
+
+def rules_with_staff(spec):
+    """the plain rules and then the teacher-only blocks; the same list whether or not the blocks are already in spec['rules']"""
+    return plain_rules(spec) + staff_blocks(spec)
+
+def staff_day_indexes(days, item):
+    """the indexes of day names ('Odd Mon' ... or 'Mon' ...) that an item or block with week and day falls on (as verify.rule_days, for one weekday)"""
+    wk, dy = str(item.get("week") or "Both"), str(item.get("day") or "")
+    return [i for i, d in enumerate(days) if not (wk in ("Odd", "Even") and not d.startswith(wk)) and (d.split() or [""])[-1][:3] == dy[:3]]
+
+def staff_days_text(week, days):
+    """'Tue and Thu', 'Odd Mon', 'Even Mon, Wed and Fri'"""
+    ds = list(days or [])
+    txt = ds[0] if len(ds) == 1 else (", ".join(ds[:-1]) + " and " + ds[-1] if ds else "")
+    return f"{week} {txt}" if week in ("Odd", "Even") else txt
+
+def staff_legend_line(x):
+    """the legend line: name · week and days · from to to · place (no last part without a place)"""
+    tm = x.get("times") if isinstance(x.get("times"), (list, tuple)) and len(x.get("times")) == 2 else [None, None]
+    days = staff_row_days(x) if "days" in x else staff_row_days(dict(days=[x.get("day")]))
+    parts = [_sstr(x.get("name")), staff_days_text(x.get("week"), days)]
+    if clock12(tm[0]) and clock12(tm[1]): parts.append(f"{clock12(tm[0])} to {clock12(tm[1])}")
+    parts = [q for q in parts if q]
+    if _sstr(x.get("place")).strip(): parts.append(x["place"].strip())
+    return " · ".join(parts)
 
 def typed_rules(spec):
     """[(number, index, rule)] for every rule row in words, numbered 1, 2, 3... in spec['rules'] order"""
@@ -370,7 +489,7 @@ def split_rules(spec) -> dict:
     available' for a teacher), Fixed lessons (Must 'Fixed at' for a class, a group, or every class with a subject), or More
     rules (everything else)"""
     settings, availability, fixed, more = {}, [], [], []
-    for r in spec.get("rules", []):
+    for r in plain_rules(spec):
         must = str(r.get("strength") or "Must") == "Must"
         key = next((s["key"] for s in SETTING_RULES if s["rule"] and r.get("rule") == s["rule"]["rule"] and r.get("scope") == s["rule"]["scope"]
                     and (r.get("scope") != "Department" or r.get("target") == s["rule"]["target"])), None)
