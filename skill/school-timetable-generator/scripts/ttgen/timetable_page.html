@@ -386,7 +386,7 @@ function redraw() {
   if (S.current && S.current.key === S.key) $("#view").innerHTML = viewHTML(S.current);   /* the same page, date and all: the list and hash untouched */
 }
 /* a redraw loses the keyboard's place: put focus back on the button with the same value */
-function focusBack(a, v) { const e = document.querySelector(`[data-${a}="${v}"]`); if (e && e.focus) e.focus(); }
+function focusBack(a, v) { const e = document.querySelector(`[data-${a}="${v}"]`); if (e && e.focus) e.focus({ preventScroll: true }); }
 function pickDay(d) { if (!(d >= 0 && d < ND)) return; S.pd = d; S.pdBy = true; redraw(); focusBack("pd", d); }
 function pickWeek(w) { if (!(w >= 0 && w < WEEKS)) return; S.pd = Math.min(ND - 1, w * PER_WEEK + S.pd % PER_WEEK); S.pdBy = true; redraw(); focusBack("pw", w); }
 function pickWhole(on) { S.whole = !!on; redraw(); focusBack("pv", S.whole ? "week" : "day"); }
@@ -402,7 +402,7 @@ let todayAsked = false;
 function loadToday() {
   if (!APP || todayAsked || !NARROW.matches) return;
   todayAsked = true;
-  const done = a => { if (!S.pdBy) { S.pd = startDay(a, deviceDay()); redraw(); } };
+  const done = a => { if (S.pdBy) return; const d = startDay(a, deviceDay()); if (d !== S.pd) { S.pd = d; redraw(); } };
   fetch("/api/today", { credentials: "same-origin", cache: "no-store" })
     .then(r => r.status === 200 ? r.json() : null)
     .then(a => done(a && typeof a === "object" && "calendar" in a ? a : null), () => done(null));

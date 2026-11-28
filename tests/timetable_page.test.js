@@ -67,13 +67,13 @@ const EVROW = { id: "ev1", name: TRIP, kind: "event", start: "2026-10-05", end: 
 const STUROW = { id: "ev2", name: "Sec 3 <i>Trip</i>", kind: "event", start: "2026-10-06", end: "2026-10-07", classes: ["3B"], where: "Science Centre & museum",
   days: [{ date: "2026-10-06", start: "07:40", end: "13:00" }, { date: "2026-10-07", start: "07:40", end: "10:40" }] };
 
-function boot(answers, app, tweak, narrow) {   /* narrow: the screen is 700px wide or less (only that query matches) */
+function boot(answers, app, tweak, narrow, opt = {}) {   /* opt.day: the device weekday (0 Sun to 6 Sat); opt.hold: a promise that holds back /api/today; opt.noFocus: the page finds no button to focus */   /* narrow: the screen is 700px wide or less (only that query matches) */
   const reg = new Map(), fetched = [];
   const el = (id, tag) => {
     const cls = new Set();
     return { id, tagName: (tag || "div").toUpperCase(), _html: "", textContent: "", style: {}, dataset: {}, hidden: false, value: "", className: "", listeners: {},
       classList: { add: c => cls.add(c), remove: c => cls.delete(c), toggle: (c, on) => (on === undefined ? (cls.has(c) ? cls.delete(c) : cls.add(c)) : on ? cls.add(c) : cls.delete(c)), contains: c => cls.has(c) },
-      get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); scan(this); },
+      get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); this.writes = (this.writes || 0) + 1; scan(this); },
       insertAdjacentHTML(pos, h) { this._html = pos === "afterbegin" ? h + this._html : this._html + h; scan(this); },
       before(o) { adopt(o); }, after(o) { adopt(o); }, addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
       scrollIntoView() {}, focus() {}, showModal() {}, close() {}, querySelectorAll: () => [], open: false };
@@ -85,19 +85,21 @@ function boot(answers, app, tweak, narrow) {   /* narrow: the screen is 700px wi
   const header = el("", "header"), on = {};   /* on: the page's own document listeners (click, keydown), to call with a fake event */
   const document = {
     documentElement: { classList: el("html").classList, dataset: {} },
-    querySelector: sel => sel === "header.top" ? header : sel === ".search" ? el("") : /^\[data-p[dwv]="[^"]*"\]$/.test(sel) ? { focus() { focused.push(sel); } } : (/^#([\w-]+)$/.exec(sel) ? reg.get(sel.slice(1)) || null : null),
+    querySelector: sel => sel === "header.top" ? header : sel === ".search" ? el("") : /^\[data-p[dwv]="[^"]*"\]$/.test(sel) ? opt.noFocus ? null : { focus(o) { focused.push(sel + JSON.stringify(o || null)); } } : (/^#([\w-]+)$/.exec(sel) ? reg.get(sel.slice(1)) || null : null),
     querySelectorAll: () => [], createElement: t => el("", t), addEventListener: (t, f) => { (on[t] = on[t] || []).push(f); }, activeElement: { tagName: "BODY" }
   };
   const loc = { hash: "", href: "http://x/timetable" };
   const ctx = {
     document, location: loc, history: { replaceState: (a, b, h) => { loc.hash = h; } }, window: { addEventListener() {}, print() {} },
     localStorage: { getItem: () => null, setItem() {} }, matchMedia: q => q === "(max-width:700px)" ? mq : { matches: false }, CSS: { escape: s => s }, navigator: {},
+    Date: class extends Date { getDay() { return opt.day == null ? super.getDay() : opt.day; } },
     setTimeout, clearTimeout, URL, Blob: function () {}, console,
     fetch: url => {
       fetched.push(url);
       const k = Object.keys(answers).find(a => url === a || url.startsWith(a + "&"));
       if (!k) return Promise.reject(new Error("no answer for " + url));
       const [status, body] = answers[k];
+      if (opt.hold && k === "/api/today") return opt.hold.then(() => ({ ok: status < 400, status, json: () => Promise.resolve(JSON.parse(JSON.stringify(body))) }));
       return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(JSON.parse(JSON.stringify(body))) });
     }
   };
@@ -401,7 +403,8 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(P.run('JSON.stringify(dayItems({ cells: [{ d: 0, a: 540, b: 560, title: "X" }] }, 0).map(x => x.name || x.c.title))'), '["Recess","X"]', "same start and end: the break first");
     P.run('show("classes", "3A")');
     P.run("pickDay(2)"); P.run("pickWeek(1)"); P.run("pickWhole(true)"); P.run("pickWhole(false)");
-    assert.deepStrictEqual(P.focused, ['[data-pd="2"]', '[data-pw="1"]', '[data-pv="week"]', '[data-pv="day"]'], "focus goes back to the button just pressed (the fake DOM only shows that the page asks for it)");
+    assert.deepStrictEqual(P.focused, ['[data-pd="2"]{"preventScroll":true}', '[data-pw="1"]{"preventScroll":true}', '[data-pv="week"]{"preventScroll":true}', '[data-pv="day"]{"preventScroll":true}'], "focus goes back to the button just pressed (the fake DOM only shows that the page asks for it)");
+    const O = boot({ "/api/published/exams": LIST }, APP, d => { d.days = ["Mon", "Tue", "Wed", "Thu", "Fri"]; d.school.weeks = 1; d.lessons = d.lessons.filter(r => r[1] < 5); });
     const sd = (a, w) => P.run(`startDay(${a}, "${w}")`);
     assert.strictEqual(sd('{ date: "2026-10-08", day: "Odd Thu", calendar: true }', "Mon"), 3);
     assert.strictEqual(sd('{ date: "2026-10-22", day: "Even Thu", calendar: true }', "Mon"), 8);
@@ -409,8 +412,11 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(sd('{ date: "2026-10-08", day: null, calendar: false }', "Thu"), 3, "the calendar cannot say: the device's weekday, first week");
     assert.strictEqual(sd("null", "wed"), 2);
     assert.strictEqual(sd("null", "Sun"), 0);
+    assert.strictEqual(sd('{ date: "2026-10-08", day: "Odd Xyz", calendar: true }', "Fri"), 4, "a day that is not one of ours: the device's weekday");
+    assert.strictEqual(O.run('startDay({ day: "Wed", calendar: true }, "Mon")'), 2, "a one-week school, bare day names");
+    assert.strictEqual(O.run('startDay(null, "Fri")'), 4);
     const TODAY = [200, { date: "2026-10-08", day: "Odd Thu", calendar: true }];
-    const dev = P.run("startDay(null, deviceDay())");
+    const THU = { day: 4 };   /* the device says Thursday, so the fallback must give 3 and cannot pass by leaving 0 */
     /* narrow: asked once, opens on the app's day */
     const N = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true);
     await N.tick(); N.run('show("classes", "3A")');
@@ -420,9 +426,34 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     N.setNarrow(true); await N.tick(); assert.strictEqual(N.fetched.filter(u => u === "/api/today").length, 1, "nothing after its first answer");
     /* failures: the device's weekday, and no message */
     for (const ans of [{ "/api/today": [401, { error: "Sign in again" }] }, {}, { "/api/today": [200, { error: "x" }] }]) {
-      const F = boot(Object.assign({ "/api/published/exams": LIST }, ans), APP, null, true); await F.tick(); F.run('show("classes", "3A")');
-      assert.strictEqual(F.run("S.pd"), dev); assert(!/Sign in again|error/i.test(F.view()), F.view().slice(0, 300));
+      const F = boot(Object.assign({ "/api/published/exams": LIST }, ans), APP, null, true, THU); await F.tick(); F.run('show("classes", "3A")');
+      assert.strictEqual(F.run("S.pd"), 3); assert(!/Sign in again|error/i.test(F.view()), F.view().slice(0, 300));
     }
+    /* the answer arrives late: the shown page is drawn again by itself, on Thursday; other tabs and a date are left alone */
+    let go; const hold = new Promise(r => { go = r; });
+    const H = boot({ "/api/published/exams": LIST, "/api/today": TODAY, "/api/day?date=2026-10-05": [200, DAY] }, APP, null, true, { hold, day: 1 });
+    await H.tick(); H.run('show("classes", "3A")');
+    assert(list(H.view()).includes('<button data-pd="0" class="on">Mon</button>'), "before the answer: the device's Monday");
+    go(); await H.tick();
+    assert(list(H.view()).includes('<button data-pd="3" class="on">Thu</button>'), "the late answer redraws the shown page: " + list(H.view()));
+    assert.deepStrictEqual(H.focused, [], "the redraw moves no focus");
+    let g2; const hold2 = new Promise(r => { g2 = r; });
+    const H2 = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true, { hold: hold2, day: 1 });
+    await H2.tick(); H2.run('show("exams", null)'); const before = H2.view(), w = H2.el("view").writes;
+    g2(); await H2.tick();
+    assert.strictEqual(H2.view(), before, "the Exams tab is left alone"); assert.strictEqual(H2.el("view").writes, w); assert.strictEqual(H2.run("S.pd"), 3);
+    let g3; const hold3 = new Promise(r => { g3 = r; });
+    const H3 = boot({ "/api/published/exams": LIST, "/api/today": TODAY, "/api/day?date=2026-10-05": [200, DAY] }, APP, null, true, { hold: hold3, day: 1 });
+    await H3.tick(); H3.run('show("classes", "3A")'); await H3.pick("2026-10-05");
+    const dv = H3.view(); g3(); await H3.tick();
+    assert.strictEqual(H3.view(), dv, "a date view is kept, and the list on it still has no buttons"); assert.strictEqual(H3.run("S.pd"), 3);
+    /* an answer that names the day already shown draws nothing again */
+    let g4; const hold4 = new Promise(r => { g4 = r; });
+    const H4 = boot({ "/api/published/exams": LIST, "/api/today": [200, { date: "2026-10-05", day: "Odd Mon", calendar: true }] }, APP, null, true, { hold: hold4, day: 1 });
+    await H4.tick(); H4.run('show("classes", "3A")'); const w4 = H4.el("view").writes; g4(); await H4.tick();
+    assert.strictEqual(H4.el("view").writes, w4, "same day: no redraw");
+    /* focusBack with no such button in the new view does not throw */
+    const NF = boot({ "/api/published/exams": LIST }, APP, null, false, { noFocus: true }); await NF.tick(); NF.run('show("classes", "3A")'); NF.run("pickDay(2)"); assert.deepStrictEqual(NF.focused, []);
     /* a button pressed before the answer wins */
     const B = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true);
     B.run('show("classes", "3A")'); B.run("pickDay(1)"); await B.tick();
@@ -432,8 +463,8 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(!W.fetched.includes("/api/today")); W.setNarrow(true); await W.tick(); assert(W.fetched.includes("/api/today"), "the screen became narrow");
     assert.strictEqual(W.run("S.pd"), 3);
     /* a saved copy asks nothing and opens on the device's weekday */
-    const C = boot({ "/api/today": TODAY }, null, null, true); await C.tick();
-    assert(!C.fetched.includes("/api/today")); assert.strictEqual(C.run("S.pd"), dev);
+    const C = boot({ "/api/today": TODAY }, null, null, true, THU); await C.tick();
+    assert(!C.fetched.includes("/api/today")); assert.strictEqual(C.run("S.pd"), 3, "a saved copy: the device's Thursday");
     /* a personal page asks and opens on today */
     const R = boot({ "/api/today": TODAY }, Object.assign({}, APP, { mode: "personal", tabs: [], exams: false, dates: false }), null, true);
     await R.tick(); assert(R.fetched.includes("/api/today")); assert.strictEqual(R.run("S.pd"), 3);
