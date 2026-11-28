@@ -17,6 +17,7 @@ import access, checks, compare, draft, history, putback, refit, refit_plan, stor
 from accounts import passwords, people, renames, rights as rights_table, slips as account_slips
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
+from relief import calendar as relief_calendar
 from relief import links as relief_links
 import exams.relief_links as exams_relief_links
 from plan import ai as plan_ai, steps as plan_steps, web as plan_web
@@ -3477,6 +3478,16 @@ def exams_day():
     reader = _published_reader()
     return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, reader == "full",
                                                 only=who()["name"] if reader == "staff" and who() else None), published_at=stamp))
+
+@app.get("/api/today")
+@need("timetable", "own")
+def api_today():
+    """the school's date and which day of the published timetable it is: nothing else, so a student's own code may ask"""
+    pub = store.published()
+    if not pub: return {"error": NO_EXAMS_PUB}, 409
+    cal = _exam_cal(pub); today = _exams_today()
+    day = relief_calendar.school_day(cal, pub["model"]["days"], today) if cal.get("terms") else None
+    return jsonify(date=today.isoformat(), day=day, calendar=bool(cal.get("terms")))
 
 @app.get("/api/published/exams")
 @need("timetable")
