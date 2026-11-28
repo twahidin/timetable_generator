@@ -175,6 +175,7 @@ GUARDS = {
     "api_compare": ('committee',),
     "api_compare_xlsx": ('committee',),
     "api_history": ('history', 'history.dept', 'history.own'),
+    "api_today": ('timetable', 'own'),
     "history_back": ('setup', 'admin'),
     "history_download": ('history',),
     "api_sample": ('setup',),
