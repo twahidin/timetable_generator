@@ -100,19 +100,25 @@ times with the controls of Ask for relief: Today, Tomorrow or Pick dates, and th
 acknowledgement and work), **Added** (a relief teacher is picked for it, as for a new request) or **No longer needed**
 (its relief ends, and a relief teacher already told is told so). A lesson of an earlier day, or one of today that has
 started, always stays. The checks are those of a new request (school days only, no overlap with the teacher's other
-absences, a lesson shared with a co-teacher who is there needs no relief), and a reason for the change is optional. When
+absences, a lesson shared with a co-teacher who is there needs no relief: tick **Ask for relief anyway** on it to ask for
+relief all the same), and a reason for the change is optional. Opening the controls again starts from the dates and times
+last chosen, so a request cut back today (a lesson under way stays) shows "Nothing changes yet." When
 somebody else saves from an older list, the save is refused with "look again". All Relief Requests then says who changed
 it and when, and shows it as new. A backup made for an exam duty or an event cannot be changed this way: it follows the
 exam or event schedule, so change the duty instead.
 - **Relief not needed** on one lesson takes an optional reason everywhere: My absences, Planned by me, the Edit view
-  ("Or change one lesson", with **Needed again** to undo it) and a button on each row of Today's Relief Assignments. On a
-  row that is one part of a split lesson it reads **Relief not needed for the whole lesson** and ends every part.
+  ("Or change one lesson", with **Needed again** to undo it, or **Ask for relief anyway** on a lesson the app marked because
+  a co-teacher is there) and a button on each row of Today's Relief Assignments. On a row that is one part of a split lesson
+  it reads **Relief not needed for the whole lesson** and ends every part. Once a lesson is over, neither can be marked. In
+  the Edit view a lesson's step keeps the Edit open (what was chosen above it stays); the Edit sits under the table, the
+  width of the card, so a phone reaches every control.
 - **Cancel** the whole request is on the Edit view too ("Or cancel the whole request"), and needs a reason, as before.
 - **On Telegram:** when somebody other than the absent teacher changes the request, marks one of its lessons not needed
   or cancels it, the absent teacher is told what changed and by whom (never the reason typed). When a change adds a lesson
   to a request a head planned, the absent teacher is asked to acknowledge again and set work for it; a change that only
-  takes lessons away keeps the acknowledgement. When a teacher changes their own request for today, the relief team is
-  told. A reporting officer who was told of the absence is told the new dates and times (with the kind of reason alone). Relief teachers already
+  takes lessons away keeps the acknowledgement. When anyone changes a request for today, the rest of the relief team is
+  told (who changed it, when it was not the absent teacher). The counts in these messages are of lessons that need relief:
+  a lesson a co-teacher is there for counts for nothing, and a change of today that moves only such lessons pings nobody. A reporting officer who was told of the absence is told the new dates and times (with the kind of reason alone). Relief teachers already
   told hear "no longer needed" or "cancelled", as before. When several changes come close together, only the last is told.
 
 Relief also knows what approved exams and events do to a date (stage 3 of exams and events): a lesson whose every period stops for an exam or event shows as "Not happening" and needs no relief while it is stopped (if the exam is withdrawn, an absence sent meanwhile asks for its relief again); someone on an exam duty or going to an event is not offered as free then (a fold under the list says who and why) and cannot be chosen; their duty minutes count in "week so far"; and an absence may be sent even when every lesson stops, because the duty must be replaced and the exams committee sees who is away. The forms list the teacher's duties on each date. An absence sent before the exam or event was approved shows such a lesson as "Not happening", and it cannot be given a relief teacher. The relief team's pages know the same: such a lesson is not picked for, approved or counted (Today's Relief Assignments and Reliefs I'm covering say "Not happening", and a relief given before stands again if the exam is withdrawn); nobody on an exam duty or at an event is picked, and an approved relief who is given a duty then is flagged; Today's Relief Assignments says which duty the teacher of a backup is on; and Term Relief Report's "Week so far" and the numbers the AI is given count exam and event duties and leave out lessons that stop.
