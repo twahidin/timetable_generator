@@ -29,6 +29,17 @@ var StaffPeriods = (function () {
     return Array.isArray(v) ? v.filter(function (t) { return t && typeof t === "object" && !Array.isArray(t); }) : [];
   }
 
+  var WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  function day(v) {
+    var k = typeof v === "string" ? v.trim().slice(0, 3).toLowerCase() : "";
+    for (var i = 0; i < WEEKDAYS.length; i++) if (WEEKDAYS[i].toLowerCase() === k) return WEEKDAYS[i];
+    return null;
+  }
+  function days(row) {
+    var got = slist(row && row.days).map(day);
+    return WEEKDAYS.filter(function (d) { return got.indexOf(d) >= 0; });
+  }
+
   function blank() {
     return { name: "", all: false, depts: [], teachers: [], week: "Both", days: [], times: ["15:00", "16:00"], place: "" };
   }
@@ -49,11 +60,12 @@ var StaffPeriods = (function () {
     ts.forEach(function (t) { have[String(t.name == null ? "" : t.name).trim()] = true; tdepts(t).forEach(function (d) { haveD[d] = true; }); });
     slist(row.teachers).forEach(function (x) { if (!have[x]) out.push({ hard: false, text: x + " is not on step 4." }); });
     slist(row.depts).forEach(function (x) { if (!haveD[x]) out.push({ hard: false, text: "Department " + x + " has no teacher." }); });
+    slist(row.days).forEach(function (x) { if (day(x) === null) out.push({ hard: false, text: x + " is not a weekday." }); });
     if (!sstr(row.name).trim()) out.push({ hard: true, text: "It has no name." });
     if (len(row.name) > 60) out.push({ hard: true, text: "Its name is longer than 60 letters." });
     if (len(row.place) > 60) out.push({ hard: true, text: "Its place is longer than 60 letters." });
     if (!people(spec, row).length) out.push({ hard: true, text: "Nobody is in it." });
-    if (!slist(row.days).length) out.push({ hard: true, text: "It has no day." });
+    if (!days(row).length) out.push({ hard: true, text: "It has no day." });
     var tm = Array.isArray(row.times) && row.times.length === 2 ? row.times : [null, null];
     var a = clock(tm[0]), b = clock(tm[1]);
     if (a === null || b === null) out.push({ hard: true, text: "Its From and To times are not times." });
@@ -97,6 +109,6 @@ var StaffPeriods = (function () {
     return row.all === true ? { all: false, depts: [], teachers: [] } : { all: true, depts: depts, teachers: names };
   }
 
-  return { blank: blank, people: people, faults: faults, whoLine: whoLine, blocksLine: blocksLine, options: options };
+  return { blank: blank, day: day, days: days, people: people, faults: faults, whoLine: whoLine, blocksLine: blocksLine, options: options };
 })();
 if (typeof module !== "undefined") module.exports = StaffPeriods;

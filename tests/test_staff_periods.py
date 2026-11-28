@@ -73,14 +73,60 @@ def blocks_are_must_not_available_rows():
 @t
 def odd_days_long_day_names_and_one_week():
     sp = school(); sp["staff_periods"] = [dict(ZONE, days=["Tues", "Thursday"])]
-    assert [x["day"] for x in S.staff_items(sp)][:2] == ["Tues", "Thursday"]
+    assert [x["day"] for x in S.staff_items(sp)][:2] == ["Tue", "Thu"]                              # stored as the weekday, whatever it was spelled
     from ttgen.verify import rule_days
-    days = S.day_names(2); blocks = S.staff_blocks(sp)
+    days = [f"{w} {d}" for w in ("Odd", "Even") for d in ("Mon", "Tues", "Wed", "Thurs", "Fri")]   # a setup whose own day names are long
+    blocks = S.staff_blocks(sp)
     assert rule_days(days, blocks[0]) == [1, 6] and rule_days(days, blocks[1]) == [3, 8]
     assert rule_days(S.day_names(1), dict(blocks[0], week="Odd")) == []
     assert S.staff_day_indexes(days, blocks[0]) == rule_days(days, blocks[0]) and S.staff_day_indexes(days, blocks[1]) == rule_days(days, blocks[1])
     assert S.staff_day_indexes(S.day_names(1), dict(blocks[0], week="Odd")) == rule_days(S.day_names(1), dict(blocks[0], week="Odd")) == []
     assert S.staff_day_indexes(S.day_names(1), blocks[0]) == [1]
+
+@t
+def weekdays_are_read_the_same_everywhere():
+    assert [S.staff_day(x) for x in ("Tuesday", "tues", " THU ", "Mon", "Sat", "x", "", None, 3)] == ["Tue", "Tue", "Thu", "Mon", None, None, None, None, None]
+    sp = school(); one = dict(ZONE, teachers=["Mr Arjun Rao"])
+    sp["staff_periods"] = [dict(one, days=["Tuesday", "Tue", "Sat"])]
+    its = S.staff_items(sp)
+    assert [x["day"] for x in its] == ["Tue"] and its[0]["id"] == "tp.z1.Mr Arjun Rao.Tue"
+    assert S.staff_faults(sp, sp["staff_periods"][0]) == [(False, "Sat is not a weekday.")]
+    assert S.staff_faults(sp, dict(one, days=["Sat"])) == [(False, "Sat is not a weekday."), (True, "It has no day.")]
+    assert S.staff_faults(sp, dict(one, teachers=["Mr Gone"], days=["x"], name="")) == [(False, "Mr Gone is not on step 4."), (False, "x is not a weekday."), (True, "It has no name."), (True, "Nobody is in it."), (True, "It has no day.")]
+    assert S.staff_items(dict(sp, staff_periods=[dict(one, days=["Sat"])])) == []
+    assert S.staff_days_text("Both", S.staff_row_days(dict(days=["Thursday", "tues"]))) == "Tue and Thu"
+    assert S.staff_legend_line(dict(ZONE, days=["Tuesday", "Sat"])) == "Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"
+    assert S.staff_legend_line(dict(day="Tuesday", name="A", week="Both", times=["15:00", "16:00"])) == "A · Tue · 3.00 to 4.00"
+
+@t
+def a_week_is_both_in_a_one_week_school():
+    sp = school(); sp["school"]["weeks"] = 1; sp["staff_periods"] = [dict(ZONE, week="Odd", teachers=["Mr Arjun Rao"], days=["Tue"])]
+    its = S.staff_items(sp); assert its and all(x["week"] == "Both" for x in its)
+    from ttgen.verify import rule_days
+    assert rule_days(S.day_names(1), S.staff_blocks(sp)[0]) == [1]
+    sp["school"]["weeks"] = 2; assert S.staff_items(sp)[0]["week"] == "Odd"
+
+@t
+def the_check_counts_the_rules_the_committee_wrote():
+    import contextlib, io
+    from ttgen import __main__ as main
+    def printed(sp):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "s.xlsx"); template.write_template(sp, p); out = io.StringIO()
+            with contextlib.redirect_stdout(out): main.main(["check", p])
+            import re; return int(re.search(r"(\d+) rules", out.getvalue()).group(1))
+    plain = secondary(); withrow = secondary(); withrow["staff_periods"] = [dict(ZONE, all=True, teachers=[], days=["Mon", "Tue"])]
+    assert printed(withrow) == printed(plain) == len(plain["rules"])
+
+@t
+def a_workbook_without_the_sheet_reads_as_no_rows():
+    import openpyxl
+    sp = secondary(); sp["staff_periods"] = [dict(ZONE, teachers=[sp["teachers"][0]["name"]])]
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f: path = f.name
+    try:
+        template.write_template(sp, path); wb = openpyxl.load_workbook(path); del wb["Teacher-only periods"]; wb.save(path)
+        assert reader.read_template(path)["staff_periods"] == []
+    finally: os.unlink(path)
 
 @t
 def odd_times_and_days_never_raise():
@@ -113,6 +159,11 @@ def round_trip(sp):
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f: path = f.name
     try: template.write_template(sp, path); return reader.read_template(path)
     finally: os.unlink(path)
+
+@t
+def a_long_weekday_is_stored_short_by_the_workbook():
+    back = round_trip(dict(school(), staff_periods=[dict(ZONE, days=["Tuesday", "Thu"])]))
+    assert back["staff_periods"][0]["days"] == ["Tue", "Thu"]
 
 @t
 def the_workbook_keeps_every_shape_of_row():

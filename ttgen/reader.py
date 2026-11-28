@@ -6,7 +6,7 @@ template) and the older one (a 7 Rules sheet). Everything that constrains the ti
 import collections, datetime, re
 import openpyxl
 from . import parents as PA
-from .spec import clean_name, defaults, lesson_split, names_list, rules_with_staff, venue_problems, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
+from .spec import clean_name, defaults, lesson_split, names_list, rules_with_staff, staff_day, venue_problems, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
 
 FIXED_COLS = ("Level", "Class(es) or group", "Subject", "Week", "Day", "Start period", "Note")   # Fixed lessons, as the template writes it
 
@@ -219,7 +219,7 @@ def read_template(path):
             except (TypeError, ValueError): return None
         for x in _table(wb["Teacher-only periods"], "Name")[1]:
             staff_periods.append(dict(name=str(x.get("Name") or "").strip(), all=_yes(x.get("All teachers")), depts=names_list(x.get("Departments")), teachers=names_list(x.get("Teachers")),
-                                      week=str(x.get("Week") or "Both").strip(), days=names_list(x.get("Days")), times=[_hhmm(x.get("From")), _hhmm(x.get("To"))], place=str(x.get("Place") or "").strip()))
+                                      week=str(x.get("Week") or "Both").strip(), days=[staff_day(d) or d for d in names_list(x.get("Days"))], times=[_hhmm(x.get("From")), _hhmm(x.get("To"))], place=str(x.get("Place") or "").strip()))
     class_names = {c["class"] for c in classes}
     if "Fixed lessons" in wb.sheetnames:
         for x in _table(wb["Fixed lessons"], "Level", FIXED_COLS)[1]:

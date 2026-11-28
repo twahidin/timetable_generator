@@ -51,6 +51,17 @@ def _clock_min(v):
 
 def _slist(v): return [x.strip() for x in v if isinstance(x, str) and x.strip()] if isinstance(v, list) else []
 def _sstr(v): return v if isinstance(v, str) else ""
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri")
+
+def staff_day(v):
+    """the weekday 'Mon'..'Fri' whose first three letters equal v's (any case, trimmed), else None"""
+    k = v.strip()[:3].lower() if isinstance(v, str) else ""
+    return next((d for d in _WEEKDAYS if d.lower() == k), None)
+
+def staff_row_days(row):
+    """a row's days as the normalised weekdays, each once, in Mon..Fri order"""
+    got = {staff_day(x) for x in _slist(row.get("days"))}
+    return [d for d in _WEEKDAYS if d in got]
 
 def staff_rows(spec):
     """the rows of spec['staff_periods'] that are dicts; [] when the key is missing or not a list"""
@@ -73,12 +84,13 @@ def staff_faults(spec, row):
     have = {str(t.get("name") or "").strip() for t in ts}; have_d = {d for t in ts for d in teacher_depts(t)}
     out = [(False, f"{x} is not on step 4.") for x in _slist(row.get("teachers")) if x not in have]
     out += [(False, f"Department {x} has no teacher.") for x in _slist(row.get("depts")) if x not in have_d]
+    out += [(False, f"{x} is not a weekday.") for x in _slist(row.get("days")) if staff_day(x) is None]
     name = _sstr(row.get("name")).strip()
     if not name: out.append((True, "It has no name."))
     if len(_sstr(row.get("name"))) > 60: out.append((True, "Its name is longer than 60 letters."))
     if len(_sstr(row.get("place"))) > 60: out.append((True, "Its place is longer than 60 letters."))
     if not staff_people(spec, row): out.append((True, "Nobody is in it."))
-    if not _slist(row.get("days")): out.append((True, "It has no day."))
+    if not staff_row_days(row): out.append((True, "It has no day."))
     tm = row.get("times") if isinstance(row.get("times"), (list, tuple)) and len(row.get("times")) == 2 else [None, None]
     a, b = _clock_min(tm[0]), _clock_min(tm[1])
     if a is None or b is None: out.append((True, "Its From and To times are not times."))
@@ -103,7 +115,10 @@ def staff_items(spec):
         lo, hi = (a - st) // pl, -(-(b - st) // pl) - 1
         per = None if lo > NP - 1 or hi < 0 else (max(0, lo), min(NP - 1, hi))
         wk = row.get("week") if row.get("week") in ("Odd", "Even") else "Both"
-        days = list(dict.fromkeys(_slist(row.get("days"))))
+        try: one_week = int(sc.get("weeks")) == 1
+        except (TypeError, ValueError): one_week = False
+        if one_week: wk = "Both"
+        days = staff_row_days(row)
         for who in staff_people(spec, row):
             for d in days:
                 out.append(dict(id=f"tp.{row.get('_id') or i}.{who}.{d}".replace(":", " "), row=i, name=row["name"].strip(), place=_sstr(row.get("place")).strip(),
@@ -139,7 +154,7 @@ def staff_days_text(week, days):
 def staff_legend_line(x):
     """the legend line: name · week and days · from to to · place (no last part without a place)"""
     tm = x.get("times") if isinstance(x.get("times"), (list, tuple)) and len(x.get("times")) == 2 else [None, None]
-    days = _slist(x["days"]) if "days" in x else _slist([x.get("day")])
+    days = staff_row_days(x) if "days" in x else staff_row_days(dict(days=[x.get("day")]))
     parts = [_sstr(x.get("name")), staff_days_text(x.get("week"), days)]
     if clock12(tm[0]) and clock12(tm[1]): parts.append(f"{clock12(tm[0])} to {clock12(tm[1])}")
     parts = [q for q in parts if q]

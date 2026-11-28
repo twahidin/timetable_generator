@@ -379,7 +379,9 @@ def _row_entry(work, op):
             e["text"] = f"Deleted {lab}"
         else:
             e["now"] = copy.deepcopy(r.get(field)) if r else None
-            if name == "set":
+            if name == "set" and section == "staff_periods" and field == "all":
+                e["text"] = f"{lab}: All teachers: {'on' if e['now'] is True else 'off'}"
+            elif name == "set":
                 e["text"] = _cut(f"{lab}: {_word(field)} {_show(e['was'])} → {_show(e['now'])}")
             else:
                 e["text"] = _cut(f"{lab}: {_word(field)} + {_show(op[4])} − {_show(op[5])}")

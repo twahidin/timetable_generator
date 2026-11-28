@@ -187,6 +187,9 @@ def teacher_only_period_change_is_named():
     es = H.setup_entries(spec, [["set", "staff_periods", "sp00000001", "place", "Court"]], H.by_of("Ann Lee", "password"), "b1", 1)
     assert len(es) == 1 and es[0]["where"] == "Step 6 · Configuration & constraints" and es[0]["label"] == "Zone class", es
     assert es[0]["was"] == "Hall" and es[0]["now"] == "Court" and es[0]["text"] == "Zone class: place Hall → Court", es[0]["text"]
+    for v, word in ((True, "on"), (False, "off")):
+        es = H.setup_entries(spec, [["set", "staff_periods", "sp00000001", "all", v]], H.by_of("Ann Lee", "password"), "b1", 1)
+        assert es[0]["text"] == f"Zone class: All teachers: {word}", es[0]["text"]
 
 @t
 def stray_files_and_non_dict():

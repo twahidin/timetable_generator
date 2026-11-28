@@ -45,4 +45,14 @@ t("what can still be added", () => {
   assert.deepStrictEqual(SP.options(spec, ZONE), { all: true, depts: ["English", "Mathematics", "Science"], teachers: ["Ms Mei Ling Koh"] });
   assert.deepStrictEqual(SP.options(spec, { ...ZONE, all: true }), { all: false, depts: [], teachers: [] });
 });
+t("weekdays are read by their first three letters", () => {
+  assert.deepStrictEqual(["Tuesday", "tues", " THU ", "Mon", "Sat", "x", "", null, 3].map(SP.day), ["Tue", "Tue", "Thu", "Mon", null, null, null, null, null]);
+  assert.deepStrictEqual(SP.days({ days: ["Thursday", "tues", "Tue", "Sat", " "] }), ["Tue", "Thu"]);
+  assert.deepStrictEqual(SP.days({ days: "Tue" }), []);
+  assert.deepStrictEqual(SP.days(null), []);
+  assert.deepStrictEqual(SP.faults(spec, { ...ZONE, days: ["Tuesday", "Tue", "Sat"] }), [{ hard: false, text: "Sat is not a weekday." }]);
+  assert.deepStrictEqual(SP.faults(spec, { ...ZONE, days: ["Sat"] }), [{ hard: false, text: "Sat is not a weekday." }, { hard: true, text: "It has no day." }]);
+  assert.deepStrictEqual(SP.faults(spec, { ...ZONE, teachers: ["Mr Gone"], days: ["x"], name: "" }).map(f => f.text),
+    ["Mr Gone is not on step 4.", "x is not a weekday.", "It has no name.", "Nobody is in it.", "It has no day."]);
+});
 console.log(`${n} cases passed`);

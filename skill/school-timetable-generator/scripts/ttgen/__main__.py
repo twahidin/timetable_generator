@@ -6,6 +6,7 @@
    (export also writes the timetable as a SQLite database; a database written this way keeps the setup, so SETUP may be -)"""
 import argparse, os, shutil, sys
 from .reader import read_template
+from .spec import plain_rules
 
 def _say_outputs(out):
     names = {"excel": "Excel, every timetable", "html": "HTML timetable finder", "pdf_zip": "single PDFs (zip)", "db": "SQLite database, for other systems"}
@@ -70,7 +71,7 @@ def main(argv=None):
         try: found = checks.findings(spec); P = Problem(spec)   # the sums of the app's step 7, Will it fit?: the same list, in the same words. First: reading the setup reports a pattern that does not add up only once
         except Exception as e: print(f"The setup could not be checked: {e}"); return 2   # the app's own words for it; 2, not 1: nothing was checked
         print(f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} blocks, "
-              f"{len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students")
+              f"{len(plain_rules(spec))} rules, {len(spec.get('students', []))} students")
         print(f"{len(P.units)} units to place over {P.ND} days x {P.NP} periods")
         crit = [f for f in found if f["level"] == checks.CRITICAL]; warn = [f for f in found if f["level"] != checks.CRITICAL]
         print(f"Critical ({len(crit)}): no timetable can be made until these are fixed")   # both headings always, so new scripts can be told from old

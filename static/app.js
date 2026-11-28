@@ -1711,19 +1711,19 @@ const VIEWS = {
     const av = onTab(where.availability, tid);
     if (tid === "teachers") {
       const SP = S.spec.staff_periods = S.spec.staff_periods || [], badS = i => rowCls(out, crit, "staff_periods", i), wkdays = days.slice(1);
-      const msgS = i => out.staff_periods[i] ? `<tr class="rowmsg ${badS(i)}"><td colspan="8">${out.staff_periods[i].map(esc).join("<br>")}</td></tr>` : "";
-      const staffRow = i => { const r = SP[i] || {}, o = StaffPeriods.options(S.spec, r), tm = Array.isArray(r.times) ? r.times : ["", ""], chosen = new Set(Array.isArray(r.days) ? r.days : []);
+      const msgS = i => out.staff_periods[i] ? `<tr class="rowmsg ${badS(i)}"><td colspan="6">${out.staff_periods[i].map(esc).join("<br>")}</td></tr>` : "";
+      const staffRow = i => { const r = SP[i] || {}, o = StaffPeriods.options(S.spec, r), tm = Array.isArray(r.times) ? r.times : ["", ""], chosen = new Set(StaffPeriods.days(r));
         const chip = (key, text) => `<span class="chip spchip">${esc(text)}<button class="spx" data-spx="${esc(i + "|" + key)}" title="Take off">✕</button></span>`;
         const addOpts = `<option value="">+ Add teachers</option>${o.all ? `<option value="all">All teachers</option>` : ""}${o.depts.length ? `<optgroup label="Departments">${o.depts.map(d => `<option value="d|${esc(d)}">${esc(d)}</option>`).join("")}</optgroup>` : ""}${o.teachers.length ? `<optgroup label="Teachers">${o.teachers.map(t => `<option value="t|${esc(t)}">${esc(t)}</option>`).join("")}</optgroup>` : ""}`;
         const who = StaffPeriods.whoLine(S.spec, r);
-        return `<tr id="staff_periods-${i}" class="${badS(i)}" title="${esc((out.staff_periods[i] || []).join(" "))}"><td style="min-width:160px">${inp(`spec.staff_periods.${i}.name`, r.name || "", "text", 'maxlength="60"')}</td>
-          <td style="min-width:240px"><div class="spwho">${r.all === true ? chip("all", "All teachers") : ""}${(Array.isArray(r.depts) ? r.depts : []).map(d => chip("d|" + d, d)).join("")}${(Array.isArray(r.teachers) ? r.teachers : []).map(t => chip("t|" + t, t)).join("")}<select data-spadd="${i}">${addOpts}</select></div>${who ? `<div class="muted small">${esc(who)}</div>` : ""}</td>
+        return `<tr id="staff_periods-${i}" class="${badS(i)}" title="${esc((out.staff_periods[i] || []).join(" "))}"><td class="spname">${inp(`spec.staff_periods.${i}.name`, r.name || "", "text", 'maxlength="60"')}${inp(`spec.staff_periods.${i}.place`, r.place || "", "text", 'maxlength="60" placeholder="Place (optional)"')}</td>
+          <td class="spwhocell"><div class="spwho">${r.all === true ? chip("all", "All teachers") : ""}${(Array.isArray(r.depts) ? r.depts : []).map(d => chip("d|" + d, d)).join("")}${(Array.isArray(r.teachers) ? r.teachers : []).map(t => chip("t|" + t, t)).join("")}<select data-spadd="${i}">${addOpts}</select></div>${who ? `<div class="muted small">${esc(who)}</div>` : ""}</td>
           <td>${sel(`spec.staff_periods.${i}.week`, r.week || "Both", weeks, false)}</td>
-          <td><div class="spdays">${wkdays.map(d => `<button class="small${chosen.has(d) ? " on" : ""}" data-spday="${i}|${d}" aria-pressed="${chosen.has(d)}">${d}</button>`).join("")}</div></td>
-          <td><input type="time" data-sptime="${i}|0" value="${esc(tm[0] || "")}"></td><td><input type="time" data-sptime="${i}|1" value="${esc(tm[1] || "")}"><div class="muted small">${esc(StaffPeriods.blocksLine(sc(), r))}</div></td>
-          <td>${inp(`spec.staff_periods.${i}.place`, r.place || "", "text", 'maxlength="60"')}</td><td>${delBtn("staff_periods", i)}</td></tr>${msgS(i)}`; };
+          <td class="spdayscell"><div class="spdays">${wkdays.map(d => `<button class="small${chosen.has(d) ? " on" : ""}" data-spday="${i}|${d}" aria-pressed="${chosen.has(d)}">${d}</button>`).join("")}</div></td>
+          <td class="sptimes"><input type="time" data-sptime="${i}|0" value="${esc(tm[0] || "")}"><input type="time" data-sptime="${i}|1" value="${esc(tm[1] || "")}"><div class="muted small">${esc(StaffPeriods.blocksLine(sc(), r))}</div></td>
+          <td>${delBtn("staff_periods", i)}</td></tr>${msgS(i)}`; };
       parts.push(`<h2>Teacher-only periods</h2><p class="muted">A period for teachers with no students, the same every week: a meeting, a zone class. It shows on their timetables. Lessons are kept away from it; a lesson you put there by hand gets a warning. A change here shows on the published timetable after you publish again on step 9.</p>
-      <div class="tablewrap"><table class="ruletable"><tr><th>Name on the timetable</th><th>Who</th><th>Week</th><th>Days</th><th>From</th><th>To</th><th>Place (optional)</th><th></th></tr>${SP.map((_, i) => staffRow(i)).join("")}</table></div>
+      <div class="tablewrap"><table class="ruletable sptable"><tr><th>Name on the timetable<div class="muted small" style="font-weight:400">Place (optional)</div></th><th>Who</th><th>Week</th><th>Days</th><th>From<br>To</th><th></th></tr>${SP.map((_, i) => staffRow(i)).join("")}</table></div>
       <div class="row" style="margin:10px 0 16px"><button data-add="staffp">+ Add a teacher-only period</button></div>`);
     }
     if (tid === "teachers") parts.push(`<h2>Teacher availability</h2><p class="muted">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked.</p>
@@ -1883,7 +1883,7 @@ document.addEventListener("click", async e => {
     save(); render(); return; }
   if (b.dataset.spday !== undefined) {   // a teacher-only period: a weekday on or off, kept in weekday order
     const [i, d] = b.dataset.spday.split("|"), r = (S.spec.staff_periods || [])[Number(i)]; if (!r) return;
-    const on = new Set(Array.isArray(r.days) ? r.days : []); on.has(d) ? on.delete(d) : on.add(d);
+    const on = new Set(StaffPeriods.days(r)); on.has(d) ? on.delete(d) : on.add(d);
     r.days = ["Mon", "Tue", "Wed", "Thu", "Fri"].filter(x => on.has(x)); save(); render(); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split(".");
     const no = k === "lessons" && otherRow(S.spec.lessons[Number(i)]) ? OTHER_ROW : k === "blocks" ? bandWhy(S.spec.blocks[Number(i)]) : ""; if (no) { toast(no); return; }   /* a head signed in as a person: as the server rules */ if (k === "students" && !stuDelOk(Number(i))) return;   /* the published timetable loses the student too: asked first */ if (k === "teachers" && TV.open !== null) { if (TV.open === Number(i)) tkOpen(null); else if (TV.open > Number(i) && !TV.openId) TV.open--; } if (k === "venues") { const gone = VenueView.cleanName((S.spec.venues[Number(i)] || {}).room); if (gone && !S.spec.venues.some((v, j) => j !== Number(i) && v && VenueView.cleanName(v.room) === gone)) VenueView.dropRoom(S.spec, gone); }   // it leaves any combined venue made of it
