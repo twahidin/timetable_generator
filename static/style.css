@@ -44,11 +44,11 @@ table.ruletable td select{width:auto;min-width:100%}
 table.ruletable td.note input{min-width:220px}
 .spwho{display:flex;gap:4px;flex-wrap:wrap;align-items:center}.spwho select{min-width:0;width:auto;max-width:150px}
 .chip.spchip{display:inline-flex;align-items:center;gap:4px}.spchip .spx{border:0;background:transparent;padding:0 2px;font-size:11px;cursor:pointer;color:inherit;line-height:1}.spchip .spx:disabled{cursor:default;opacity:.5}
-/* step 6's teacher-only list: six columns that fit an 820 px card: 204+190+76+184+108+34 = 796 */
-table.sptable{table-layout:fixed;min-width:796px}table.sptable th,table.sptable td{box-sizing:border-box}table.sptable td{vertical-align:top}
-table.sptable th:nth-child(1){width:204px}table.sptable th:nth-child(2){width:190px}table.sptable th:nth-child(3){width:76px}table.sptable th:nth-child(4){width:184px}table.sptable th:nth-child(5){width:108px}table.sptable th:nth-child(6){width:34px}
+/* step 6's teacher-only list: six columns that fit an 820 px card: 200+178+72+184+132+34 = 800 */
+table.sptable{table-layout:fixed;min-width:800px}table.sptable th,table.sptable td{box-sizing:border-box}table.sptable td{vertical-align:top}
+table.sptable th:nth-child(1){width:200px}table.sptable th:nth-child(2){width:178px}table.sptable th:nth-child(3){width:72px}table.sptable th:nth-child(4){width:184px}table.sptable th:nth-child(5){width:132px}table.sptable th:nth-child(6){width:34px}
 table.sptable th{white-space:normal}table.sptable td.spname input+input{margin-top:4px}table.sptable td.sptimes input+input{margin-top:4px}table.sptable td.sptimes .small{white-space:normal;overflow-wrap:anywhere}
-table.sptable td select{min-width:0}table.sptable td .spwho select{width:auto;max-width:150px}
+table.sptable td select{min-width:0}table.sptable td.sptimes input{min-width:118px}table.sptable td .spwho select{width:auto;max-width:150px}
 table.sptable .spdays button.small{padding:3px 4px}
 .spdays{display:flex;gap:2px;flex-wrap:nowrap}.spdays button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 
