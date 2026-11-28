@@ -129,20 +129,20 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(count(v, 'class="row'), 1, "only that day");
     assert.strictEqual(count(v, 'class="cell x"'), 2, "English and the science band are crossed out");
     assert.strictEqual(count(v, 'class="cell exam"'), 1, v);
-    assert(v.includes('<b>Sec 3 English Paper 1</b><span class="">3-01</span><span class="m">07:50–08:50</span>'), v);
+    assert(v.includes('<span class="t"><span class="tf">7.50–8.50</span><span class="ts">7.50</span></span><b>Sec 3 English Paper 1</b><span class="m">3-01</span>'), v);
     P.run('show("classes", "4A")');
-    assert(P.view().includes("runs 08:20–08:40 only") && !P.view().includes('class="cell x"'), P.view());
+    assert(P.view().includes("runs 8.20–8.40 only") && !P.view().includes('class="cell x"'), P.view());
   });
 
   await t("a teacher and a room on a date; a combined venue shows the paper held in one of its rooms", async () => {
     const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
     await P.tick(); await P.pick("2026-10-05");
     P.run('show("teachers", "Ms Aisha Rahman")');
-    assert(P.view().includes('<b>Invigilate · 3-01</b><span class="">Sec 3 English Paper 1</span><span class="m">07:35–09:00</span>'), P.view());
+    assert(P.view().includes('<span class="t"><span class="tf">7.35–9.00</span><span class="ts">7.35</span></span><b>Invigilate · 3-01</b><span class="m">Sec 3 English Paper 1</span>'), P.view());
     P.run('show("rooms", "3-01")');
-    assert(P.view().includes("<b>Exam</b><span class=\"\">Sec 3 English Paper 1</span>"), P.view());
+    assert(P.view().includes('<b>Exam</b><span class="m">Sec 3 English Paper 1</span>'), P.view());
     P.run('show("rooms", "LT1&2")');
-    assert(P.view().includes("<b>Exam</b><span class=\"\">Sec 3 Pure Chemistry Paper 1</span><span class=\"m\">09:45–11:10</span><span class=\"m\">in LT1</span>"), P.view());
+    assert(P.view().includes('<span class="t"><span class="tf">9.45–11.10</span><span class="ts">9.45</span></span><b>Exam</b><span class="m">Sec 3 Pure Chemistry Paper 1 · in LT1</span>'), P.view());
     P.run('show("rooms", "LT2")');
     assert(!P.view().includes("Pure Chemistry"), "LT2 is not part of LT1");
   });
@@ -194,15 +194,15 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     await P.tick(); await P.pick("2026-10-05");
     P.run('show("classes", "3A")');
     let v = P.view();
-    assert(v.includes('<b>Sec 3 Learning Journey</b><span class="">Off site (museum)</span><span class="m">07:40–10:40</span>'), v);
+    assert(v.includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>Sec 3 Learning Journey</b><span class="m">Off site (museum)</span>'), v);
     assert(v.includes('<p class="onday">On Mon 5 Oct (Odd Mon): Sec 3 Learning Journey. Lessons that don&#39;t happen are crossed out.</p>') && count(v, 'class="cell x"') === 1, v);
     P.run('show("teachers", "Ms Grace Yeo")');
     v = P.view();
-    assert(v.includes('<b>At event · Off site (museum)</b><span class="">Sec 3 Learning Journey</span><span class="m">07:40–10:40</span><span class="m">Bus marshal 07:45</span>'), v);
+    assert(v.includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>At event · Off site (museum)</b><span class="m">Sec 3 Learning Journey · Bus marshal 07:45</span>'), v);
     P.run('show("rooms", "LT2")');
-    assert(P.view().includes('<b>Event</b><span class="">Sec 3 Learning Journey</span><span class="m">07:40–10:40</span>') && !P.view().includes("<b>Exam</b>"), P.view());
+    assert(P.view().includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>Event</b><span class="m">Sec 3 Learning Journey</span>') && !P.view().includes("<b>Exam</b>"), P.view());
     P.run('show("rooms", "LT1&2")');
-    assert(P.view().includes('<b>Event</b><span class="">Sec 3 Learning Journey</span><span class="m">07:40–10:40</span><span class="m">in LT2</span>'), "a combined venue holds its room's event: " + P.view());
+    assert(P.view().includes('<span class="t"><span class="tf">7.40–10.40</span><span class="ts">7.40</span></span><b>Event</b><span class="m">Sec 3 Learning Journey · in LT2</span>'), "a combined venue holds its room's event: " + P.view());
     P.run("S.ff = { d: 0, from: 0, to: 3 }; show('free', null)");
     v = P.view();
     assert(v.includes("Duties, events and the rooms they take count as busy; lessons that don't happen do not."), v);
@@ -260,7 +260,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(P.view().includes("Mr Ben Ong") && count(P.view(), 'class="row') === 10, P.view());
     assert.strictEqual(keys(P.el("list").innerHTML), "Mr Ben Ong");
     assert(!P.el("list").innerHTML.includes('class="grp"'), "no empty department heading: " + P.el("list").innerHTML);
-    assert(!P.view().includes("allowance") && P.view().includes("periods a cycle"), "no empty allowance stat");
+    assert(!P.view().includes("allowance") && !P.view().includes("periods a cycle"), "a staff page has no figures at all (planning figures are the committee's)");
     const box = id => { P.run(`lessonDialog(${id})`); return P.el("dlgB").innerHTML; };
     let b = box(3);
     assert(b.includes('<a data-go="teachers" data-key="Mr Ben Ong">Mr Ben Ong</a>') && b.includes('<a data-go="classes" data-key="4A">4A</a>') && !b.includes('data-go="rooms"') && b.includes("LT2"), b);
@@ -272,7 +272,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(keys(P.el("list").innerHTML), "3A,3B,4A");
     assert.strictEqual(P.run('INDEX_OK.filter(e => e.t === "teachers").map(e => e.k).join(",")'), "Mr Ben Ong", "the search finds only them");
     const F = boot({ "/api/published/exams": LIST }, APP);
-    F.run('show("teachers", "Mr Ben Ong")'); assert(F.view().includes("allowance"), "a teacher's page keeps the allowance stat");
+    F.run('show("teachers", "Mr Ben Ong")'); assert(!F.view().includes("allowance"), "a teacher-mode page has no allowance: it is the committee's figure");
     F.run("lessonDialog(2)"); b = F.el("dlgB").innerHTML;
     assert(b.includes('data-go="teachers" data-key="Ms Grace Yeo"') && b.includes('data-go="rooms" data-key="3-02"') && b.includes('data-go="lessons"'), "the full page keeps every link: " + b);
     const ST = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "student", tabs: ["classes", "students", "exams"] }), cut);
@@ -303,5 +303,182 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(!E.view().includes("Your duties"), "no section on an error");
     const F = boot({ "/api/published/exams": LIST }, APP);
     await F.tick(); assert(!F.fetched.includes("/api/exams/my-duties"), "only staff mode asks");
+  });
+  await t("the clock sums: times in minutes, breaks kept only before a later lesson, the page's span and hour marks", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick();
+    assert.strictEqual(P.run('clk(480) + " " + clk(780) + " " + clk(760)'), "8.00 1.00 12.40");
+    /* 3A: English at p0 n2 on Odd Mon */
+    assert.strictEqual(P.run('JSON.stringify(classView("3A").cells.filter(c => c.d === 0).map(c => [c.a, c.b, cellTime(c)]))'),
+      JSON.stringify([[460, 500, "7.40–8.20"], [580, 640, "9.40–10.40"]]));
+    assert.strictEqual(P.run('cellTime({ a: 740, b: 760 })'), "12.20–12.40");   /* the full time for every lesson: the box's real width decides what shows */
+    assert.strictEqual(P.run('cellStart({ a: 740, b: 760 })'), "12.20");
+    /* recess (9.00–9.20) has the science band after it; lunch (11.00–11.40) has nothing after it */
+    assert.strictEqual(P.run('JSON.stringify(bandsOf(classView("3A"), 0))'), JSON.stringify([{ a: 540, b: 560, name: "Recess" }]));
+    assert.strictEqual(P.run('JSON.stringify(bandsOf(classView("3A"), 1))'), "[]");   /* a day with no lessons: no bands */
+    assert.strictEqual(P.run('JSON.stringify(spanOf(classView("3A")))'), "[460,640]");
+    assert.strictEqual(P.run('spanOf({ cells: [], codes: null })'), null);
+    assert.strictEqual(P.run('JSON.stringify(bandsOf({ cells: [], codes: null }, 0))'), "[]");
+    assert.strictEqual(P.run('JSON.stringify(hourMarks(460, 800).map(h => h.text + (h.sub ? " " + h.sub : "")))'),
+      JSON.stringify(["8 am", "9", "10", "11", "12 noon", "1 pm"]));
+    assert.strictEqual(P.run('JSON.stringify(hourMarks(790, 900).map(h => h.text + (h.sub ? " " + h.sub : "")))'), JSON.stringify(["2 pm", "3"]));
+    assert.strictEqual(P.run('JSON.stringify(hourMarks(460, 800).map(h => h.m))'), JSON.stringify([480, 540, 600, 660, 720, 780]));
+    /* lanes: lessons that overlap in time share a row, the rest do not */
+    assert.strictEqual(P.run('const ls = lanes([{ d: 0, a: 460, b: 500, p: 0, n: 2 }, { d: 0, a: 480, b: 540, p: 1, n: 3 }, { d: 0, a: 540, b: 560, p: 4, n: 1 }]); JSON.stringify([...ls.values()])'),
+      JSON.stringify([[0, 2], [1, 2], [0, 1]]));
+  });
+
+  await t("the clock sums on a school of 35-minute periods, and on one with no start time", async () => {
+    const clock = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padStart(2, "0")}`;
+    const A = boot({ "/api/published/exams": LIST }, APP, d => {
+      d.school.period_minutes = 35; d.school.start_time = "07:30";
+      d.times = d.times.map((_, p) => [clock(450 + 35 * p), clock(485 + 35 * p)]);
+    });
+    await A.tick();
+    assert.strictEqual(A.run('JSON.stringify(hourMarks(450, 660).map(h => h.m))'), JSON.stringify([480, 540, 600, 660]));
+    assert.strictEqual(A.run('JSON.stringify(classView("4A").cells.filter(c => c.p === 1).map(cellTime))'), JSON.stringify(["8.05–9.15"]));
+    const B = boot({ "/api/published/exams": LIST }, APP, d => { delete d.school.start_time; delete d.school.period_minutes; d.lessons.push([4, 0, 20, 1, "Sec 4", "", ["4A"], "English", "Entire Class", ["Mr Ben Ong"], "LT2", 0]); });
+    await B.tick();
+    assert.strictEqual(B.run('classView("3A").cells[0].a'), 460, "the fallback reads the times");
+    assert.strictEqual(B.run('classView("4A").cells.filter(c => c.p === 20)[0].a'), 860, "after noon the minutes go on past 720");
+  });
+
+  await t("the date view's span: the whole page's, widened by that day's exam, event or duty", async () => {
+    const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await P.tick();
+    P.run('show("classes", "3A")'); await P.pick("2026-10-05");
+    assert.strictEqual(P.run("JSON.stringify(S.current.span)"), "[460,640]");
+    assert.strictEqual(P.run("JSON.stringify(S.current.cells.filter(c => c.exam).map(c => [c.a, c.b]))"), "[[470,530]]");
+    P.run('show("teachers", "Ms Aisha Rahman")'); await P.tick();
+    assert.strictEqual(P.run("S.current.span[0]"), 455);
+    /* a room with no lesson at all: its span is its paper's start and end */
+    P.run('show("rooms", "LT1")'); await P.tick();
+    assert.strictEqual(P.run("JSON.stringify(S.current.span)"), "[585,670]");
+  });
+
+  await t("spanOf starts at a kept band that comes before the first lesson", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP, d => { d.grid["Sec 3"][0] = "F" + d.grid["Sec 3"][0].slice(1); d.lessons[0][2] = 1; });
+    await P.tick();
+    assert.strictEqual(P.run('JSON.stringify(bandsOf(classView("3A"), 0)[0])'), JSON.stringify({ a: 460, b: 480, name: "Assembly" }));
+    assert.strictEqual(P.run('spanOf(classView("3A"))[0]'), 460, "the assembly, not the lesson's 480");
+  });
+  await t("the grid on the clock: an hour row above each week, the time first in a lesson's box, a band only before a lesson, the new note", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick();
+    P.run('show("classes", "3A")'); let h = P.view();
+    assert(count(h, 'class="ruler"') === 2 && h.includes(">ODD WEEK<") && h.includes(">EVEN WEEK<"), "an hour row above each week");
+    assert(count(h, 'class="row') === 10, "ten day rows");
+    assert(h.includes('<span class="t"><span class="tf">7.40–8.20</span><span class="ts">7.40</span></span><b>EL</b>'), "the time comes first in a lesson's box");
+    assert(count(h, ">Recess<") === 1 && !h.includes(">Lunch<"), "a band only where a lesson follows: " + count(h, ">Recess<"));
+    assert(h.includes("8<small>am</small>") && !h.includes(">noon<"), "3A's page ends at 10.40");
+    assert(!h.includes("after school") && !/class="cell[^"]* ext/.test(h), "no after-school mark");
+    assert(h.includes("Striped bands are breaks. Click a lesson for every group, teacher and room in it."));
+    assert(!h.includes("Times are period start times"));
+    assert(h.includes('<div class="gridwrap"><div class="tt" style="--w:324px">'), "the span, 7.40 to 10.40, at 1.8 pixels a minute");
+    assert(/@container \(max-width:\s*\d+px\)\s*\{\s*\.cell \.tf\{display:none\}\s*\.cell \.ts\{display:inline\}/.test(PAGE) && PAGE.includes(".cell{container-type:inline-size}"), "a narrow box shows the start alone, judged by its real width");
+    assert(/\.tt \.dl,\.tt \.wk\{position:sticky;left:0;z-index:3;background:/.test(PAGE), "the day names stay in place when the grid moves sideways");
+    /* a lone zero-length cell: the span is one minute, nothing divides by zero */
+    const z = P.run('gridHTML({ cells: [{ d: 0, a: 500, b: 500, exam: true, title: "X", lines: [], when: "w" }], codes: null })');
+    assert(z.includes('--w:1.8px') && !/NaN|Infinity/.test(z), z.slice(0, 300));
+    assert(h.includes('<div class="bk v"') && h.includes("<span>Recess</span>"), "a 20-minute band is turned on its side, its name whole");
+    assert(h.includes('<b>EL</b><span class="m">Ms Aisha Rahman · 3-01</span></div>'), "one detail line, joined with a dot");
+    assert(count(h, '<i class="vl h"') === 3 * 10 && h.includes('<i class="vl"'), "a strong line at 8, 9 and 10 on each day, faint lines at period edges");
+    assert(count(h, 'class="track" style="--h:62px"') === 10, "a row with nothing side by side is 62px");
+    assert(PAGE.includes(".tt .track{position:relative;height:var(--h)}"), "the track's height comes from --h");
+    assert(/@media print\{[^\n]*\.tt \.track\{height:calc\(var\(--h\) \* 56 \/ 62\)\}\.tt \.row\{break-inside:avoid\}\.tt \.ruler\{break-after:avoid\}/.test(PAGE), "print: 56px rows, a row never split, an hour row kept with its row");
+  });
+
+  await t("an after-school lesson looks like any other; three lessons at once make a taller row", async () => {
+    const cellsOf = h => [...h.matchAll(/<div class="cell[\s\S]*?<\/div>/g)].map(m => m[0]).join("\n");
+    const COM = Object.assign({}, APP, { mode: "committee" });
+    const A = boot({ "/api/published/exams": LIST }, COM); await A.tick(); A.run('show("classes", "3A")');
+    const B = boot({ "/api/published/exams": LIST }, COM, d => { d.lessons[0][11] = 1; }); await B.tick(); B.run('show("classes", "3A")');
+    assert(B.run("L[0].ext") === true, "the mark is read");
+    assert.strictEqual(cellsOf(B.view()), cellsOf(A.view()), "the same cells with and without the mark");
+    assert(!B.view().includes("after school") && !B.view().includes("--t:#eee"), "no after-school colour or words");
+    const C = boot({ "/api/published/exams": LIST }, APP, d => {
+      const E = "Entire Class";
+      d.lessons.push([10, 1, 0, 2, "Sec 3", "", ["3A"], "English", E, ["Ms Aisha Rahman"], "3-01", 0],
+        [11, 1, 0, 2, "Sec 3", "", ["3A"], "Mathematics", E, ["Mr Daniel Koh"], "3-02", 0],
+        [12, 1, 0, 2, "Sec 3", "", ["3A"], "Combined Science", E, ["Ms Grace Yeo"], "LT1", 0]);
+    });
+    await C.tick(); C.run('show("classes", "3A")');
+    assert(C.view().includes('class="track" style="--h:144px"') && count(C.view(), 'class="track" style="--h:62px"') === 9, "three side by side: 48px each");
+  });
+
+  await t("the grid on a date: an exam shows its time first, written as a lesson's; a duty before 8 starts the page", async () => {
+    const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await P.tick(); P.run('show("classes", "3A")'); await P.pick("2026-10-05");
+    let v = P.view();
+    assert(v.includes('<span class="t"><span class="tf">7.50–8.50</span><span class="ts">7.50</span></span><b>Sec 3 English Paper 1</b><span class="m">3-01</span>') && !v.includes("07:50"), v);
+    assert(count(v, 'class="ruler"') === 1 && v.includes('<div class="wk"></div>'), "one hour row, no week name, on a date");
+    P.run('show("teachers", "Ms Aisha Rahman")');
+    v = P.view();
+    const first = v.split('<span class="hr"')[1] || "";
+    assert(/^ style="left:[\d.]+%">8<small>am<\/small><\/span>/.test(first), first.slice(0, 80));
+    assert(/<div class="cell exam" tabindex="0" style="left:0%;/.test(v), "the duty from 7.35 starts the page: " + v);
+  });
+  await t("a 20-minute lesson keeps its whole start time; a shortened lesson's times are written as the school writes them; an empty class grid says so", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP, d => { d.lessons.push([10, 0, 3, 1, "Sec 3", "", ["3A"], "Mathematics", "Entire Class", ["Mr Daniel Koh"], "3-01", 0]); });
+    await P.tick(); P.run('show("classes", "3A")');
+    const v = P.view();
+    assert(/<div class="cell s" data-id="10"[^>]*><span class="t"><span class="tf">8\.40–9\.00<\/span><span class="ts">8\.40<\/span><\/span><b>MA<\/b>/.test(v), "a short box has its class and its whole start time: " + v);
+    assert.strictEqual(count(v, 'class="cell s"'), 1, "only the 20-minute lesson is short");
+    const Q = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await Q.tick(); await Q.pick("2026-10-05"); Q.run('show("classes", "4A")');
+    assert(Q.view().includes("runs 8.20–8.40 only") && !Q.view().includes("08:20"), Q.view());
+    const R = boot({ "/api/published/exams": LIST }, APP);
+    await R.tick();
+    R.run('const cv0 = classView; classView = c => c === "3B" ? Object.assign(cv0(c), { cells: [] }) : cv0(c); show("lessons", null)'); await R.tick();
+    const g = (R.el("ltab") || {}).innerHTML || "";
+    assert(/Class 3B<\/a><small><\/small><\/h2><div class="empty">No lessons\.<\/div><\/section>/.test(g), "an empty class grid says No lessons.: " + g.slice(0, 400));
+  });
+
+  await t("who sees what: figures, period counts and after-school words show to the committee only", async () => {
+    const lessonsOf = d => { d.lessons[0][11] = 1; };
+    const cut = d => { d.teachers = d.teachers.map(r => [r[0], r[1], r[2], ""]); d.classes = d.classes.map(r => [r[0], r[1], "", ...r.slice(3)]); d.lessons.forEach(r => { r[11] = 0; }); d.checks.after = []; d.checks.notes = []; };   /* html_data for a page that is not the committee's */
+    const tabs = ["classes", "teachers", "rooms", "students", "lessons", "free", "exams"];
+    const COM = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "committee" }), lessonsOf);
+    const TEA = boot({ "/api/published/exams": LIST }, APP, cut);
+    const STF = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" }), cut);
+    const STU_ = boot({ "/api/published/exams": LIST }, Object.assign({}, APP, { mode: "student", tabs: ["classes", "students", "exams"] }), cut);
+    const PER = boot({ "/api/me/exams": [200, { schedules: [] }] }, { mode: "personal", exams: true, pdf: true, logout: "/logout", files: [] }, cut);
+    const SAVED = boot({}, undefined, lessonsOf);
+    for (const X of [COM, TEA, STF, STU_, SAVED]) { X.run('show("classes", "3A")'); const h = X.view();
+      assert(!h.includes("periods a cycle") && !h.includes(" students") && !h.includes('class="stats"><div>'), "no figures on a class page: " + h);
+      assert(h.includes("Sec 3 · home room 3-01")); }
+    COM.run('show("teachers", "Mr Ben Ong")'); assert(COM.view().includes("periods a cycle") && COM.view().includes("most in a day") && / · \d+ periods/.test(COM.view()));
+    SAVED.run('show("teachers", "Mr Ben Ong")'); assert(SAVED.view().includes("periods a cycle") && / · \d+ periods/.test(SAVED.view()), "a saved copy with no APP is the committee's");
+    COM.run('show("rooms", "3-01")'); assert(COM.view().includes("periods used") && COM.view().includes("of lesson time"));
+    for (const X of [TEA, STF]) { X.run('show("teachers", "Mr Ben Ong")'); const h = X.view();
+      assert(!h.includes("periods a cycle") && !h.includes("allowance") && !h.includes("most in a day") && !/\d+ periods/.test(h), h); }
+    for (const X of [TEA, STU_]) { X.run('show("rooms", "3-01")'); assert(!X.view().includes("periods used") && !/\d+ periods/.test(X.view()), X.view()); }
+    COM.run('show("classes", "3A")'); assert(/ · \d+ periods/.test(COM.view()), "the committee's list under a class has the count");
+    COM.run('show("classes", "3A")'); COM.run("S.current.legend.forEach(e => { if (!e.count || /periods/.test(e.text)) throw new Error('legend entry ' + JSON.stringify(e)); })");
+    COM.run('const bv = classView("3A"); if (!bv.legend.every(e => /^\\d+ periods$/.test(e.count))) throw new Error("count")');
+    COM.run("lessonDialog(3)"); assert(/ · \d+ periods/.test(COM.el("dlgT").innerHTML) && !COM.el("dlgT").innerHTML.includes("after school"), COM.el("dlgT").innerHTML);
+    TEA.run("lessonDialog(3)"); assert(!TEA.el("dlgT").innerHTML.includes("periods") && !TEA.el("dlgT").innerHTML.includes("after school"), TEA.el("dlgT").innerHTML);
+    COM.run('show("lessons", null)'); assert(COM.view().includes("After school only"));
+    TEA.run('show("lessons", null)'); assert(!TEA.view().includes("After school only") && !TEA.view().includes("after school"));
+    /* the Table's small words and the CSV */
+    for (const X of [COM, TEA]) X.run('S.lview = "table"; show("lessons", null)');
+    assert.strictEqual(count(COM.el("ltab").innerHTML, "after school</small>"), 1, "one lesson is marked after school");
+    assert(!TEA.el("ltab").innerHTML.includes("after school") && TEA.el("ltab").innerHTML.includes("--t:#"), "the Table's swatch has the subject's colour");
+    const csv = X => { X.run('globalThis.__csv = null; Blob = function (a) { globalThis.__csv = a[0]; }; URL = { createObjectURL: () => "blob:x", revokeObjectURL() {} }; document.createElement = () => ({ click() {} }); csvDownload(filteredLessons(), "x")'); return X.run("globalThis.__csv").split("\r\n"); };
+    const cc = csv(COM), tc = csv(TEA);
+    assert(cc[0].includes("After school") && !tc[0].includes("After school"), cc[0] + " | " + tc[0]);
+    assert(cc[0].split(",").includes("Periods") && !tc[0].split(",").includes("Periods"), "the count of periods is the committee's: " + cc[0] + " | " + tc[0]);
+    assert.strictEqual(cc[1].split(",").length - 2, tc[1].split(",").length, "each row has two values fewer (periods, after school)");
+    assert.strictEqual(cc[0].split(",").length, cc[1].split(",").length, "the committee's header and rows line up");
+    assert(COM.el("ltab").innerHTML.includes('<th data-sort="n">Periods') && !TEA.el("ltab").innerHTML.includes(">Periods<") && !TEA.el("ltab").innerHTML.includes('data-sort="n"'), "the Table's Periods column is the committee's");
+    const cols = X => { const h = X.el("ltab").innerHTML; return [count(h.split("</thead>")[0], "<th "), count(h.split("<tbody>")[1].split("</tr>")[0], "<td")]; };
+    assert.deepStrictEqual(cols(COM), [9, 9]); assert.deepStrictEqual(cols(TEA), [8, 8]);
+    /* the filter and the link */
+    COM.run("S.lf = { ext: true }"); assert.strictEqual(COM.run("filteredLessons().length"), 1);
+    TEA.run("S.lf = { ext: true }"); assert.strictEqual(TEA.run("filteredLessons().length"), 4, "the filter does nothing for others");
+    TEA.run('location.hash = "#lessons?ext=true"; route()'); assert.strictEqual(TEA.run("JSON.stringify(S.lf)"), "{}", "the link does nothing");
+    /* a student's own page: no figures, no counts */
+    PER.run("showPersonal()"); const ph = PER.view();
+    assert(!ph.includes('class="stats"') && !/\d+ periods/.test(ph) && !ph.includes("periods a cycle"), ph);
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });

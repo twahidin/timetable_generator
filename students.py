@@ -126,7 +126,7 @@ def _files_run():
             while time.time() - _files["last"] < FILES_WAIT: time.sleep(0.2)   # FILES_WAIT read on every poll
             with _files_lock: _files["pending"] = False
             pub = store.published()
-            if pub is None or not pub["meta"].get("files_behind"): continue   # a publish made fresh files meanwhile
+            if pub is None or not store.files_stale(pub["meta"]): continue   # a publish made fresh files meanwhile
             if store.remake_files() is False:
                 with _files_lock: _files["pending"] = True
     except BaseException as e:
@@ -149,9 +149,10 @@ def files_now():
     return store.remake_files()
 
 def resume_files():
-    """at start: the files are made again when the published timetable says they are behind"""
+    """at start: the files are made again when the published timetable says they are behind a student change or were
+    made by an older look of the printouts (store.files_stale)"""
     pub = store.published()
-    if pub and pub["meta"].get("files_behind"): schedule_files()
+    if pub and store.files_stale(pub["meta"]): schedule_files()
 
 def follow(pairs, by, batch=None):
     """bring the students these (before, after) rows name up to date on the published timetable, reading the setup as

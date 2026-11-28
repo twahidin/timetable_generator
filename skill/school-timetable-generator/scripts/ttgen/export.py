@@ -6,7 +6,7 @@
 
 The model comes from the solver result in memory (model_from_result) or from the setup workbook plus a timetable
 workbook whose Lessons sheet uses LESSON_HEADERS (model_from_files), so a timetable made another way exports too."""
-import collections, copy, datetime, json, os, re, zipfile
+import collections, copy, datetime, json, math, os, re, zipfile
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter as CL
@@ -26,6 +26,7 @@ PALETTE = [("DCEBFB", "2F6FB5"), ("FDE6D2", "C2610F"), ("DCF1E1", "2E8B4E"), ("F
            ("E7DFF7", "6A4FB3"), ("D3EFEE", "1F8380"), ("EEE2D7", "87573A"), ("E2E7EE", "4A5A70"), ("F7DDEF", "A0408A"),
            ("E5F2D0", "58841C"), ("D6ECF7", "1B76A0"), ("F3E3D3", "9C5B1E"), ("E0E4F8", "4453A8")]
 EXT = ("FFF1CC", "B86E00")
+LOOK = 2   # the number of the printouts' look; raise it when draw_page changes what a stored book shows, and the stored files are made again after the next start
 KINDS = ("classes", "teachers", "rooms", "students")
 
 
@@ -498,8 +499,8 @@ def class_view(m, c):
     nper = len(used)
     stats = [(info["level"], "level"), (str(info["size"] or "-"), "students"), (info["home"] or "-", "home room"), (str(nper), "periods a cycle")]
     sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}"; pl = _parents_text(m, c)
-    return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub + (f" · {pl}" if pl else ""), pdf_subtitle=sub, parents_line=pl, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
-                cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"])
+    return _look(m, dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub + (f" · {pl}" if pl else ""), pdf_subtitle=sub, parents_line=pl, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
+                cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"]), f"{info['level']} · home room {info['home'] or '-'}")
 
 def teacher_view(m, t):
     info = m["teacher_ix"][t]; rows = [x for x in m["lessons"] if t in x["teachers"]]
@@ -520,12 +521,12 @@ def teacher_view(m, t):
         legend.append(dict(color=_color(m, s), label=abbrev(s), text=f"{who}{extra} · {e['periods']} periods · {_common(e['rooms']) or '-'}"))
     busiest = max(per_day.values()) if per_day else 0
     stats = [(str(total), "periods a cycle"), (str(info.get("allowance") or "-"), "allowance"), (str(busiest), "most in a day"), (str(len(per_day)), "days teaching")]
-    sub = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "",
-                                     f"{ext} after-school periods" if ext else "") if x)
+    own = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "") if x)
+    sub = " · ".join(x for x in (own, f"{ext} after-school periods" if ext else "") if x)
     lv = [x["level"] for x in rows]; mine = [c["name"] for c in m["classes"] if t in (c.get("parents") or [])]
     pl = f"{m.get('parents_name') or 'Form teachers'} of {', '.join(mine)}" if mine else ""
-    return dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=((sub or "Teacher") + f" · {pl}") if pl else (sub or "Teacher"), pdf_subtitle=sub or "Teacher", parents_line=pl, stats=stats, codes=_codes_for(m, lv), cells=cells,
-                legend=legend, legend_title="Teaching", group=info["dept"] or "Other")
+    return _look(m, dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=((sub or "Teacher") + f" · {pl}") if pl else (sub or "Teacher"), pdf_subtitle=sub or "Teacher", parents_line=pl, stats=stats, codes=_codes_for(m, lv), cells=cells,
+                legend=legend, legend_title="Teaching", group=info["dept"] or "Other"), own or "Teacher")
 
 def room_view(m, r):
     info = m["room_ix"][r]; parts = m.get("room_parts") or {}; rows = [x for x in m["lessons"] if x["room"] == r or r in single_rooms(x["room"], parts)]   # a lesson in a combined venue is in each of its rooms
@@ -547,8 +548,8 @@ def room_view(m, r):
     eq, cf = ", ".join(info.get("equipment") or []), info.get("configuration") or ""   # read with .get: a model published before this has neither
     more = " · ".join(x for x in (f"Equipment: {eq}" if eq else "", f"Configuration: {cf}" if cf else "") if x)
     made = f" · made of {' + '.join(info['parts'])}" if info.get("parts") else ""   # a combined venue says which rooms it is made of
-    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else "") + made, pdf_subtitle=plain + made, extra_line=more,
-                stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"])
+    return _look(m, dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else "") + made, pdf_subtitle=plain + made, extra_line=more,
+                stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"]), plain + made)
 
 def student_rows(m, cls, groups):
     gs = set(groups)
@@ -567,8 +568,8 @@ def student_view(m, s):
               for s_, e in ent.items()]
     lv = m["class_ix"].get(s["cls"], {}).get("level") or s["level"]; pl = _parents_text(m, s["cls"])
     stats = [(s["cls"], "class"), (lv, "level"), (str(len(s["groups"])), "groups"), (str(len(used)), "periods a cycle")]
-    return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}" + (f" · {pl}" if pl else ""), pdf_subtitle=f"{s['id']} · Class {s['cls']} · {lv}", parents_line=pl,
-                stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"])
+    return _look(m, dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}" + (f" · {pl}" if pl else ""), pdf_subtitle=f"{s['id']} · Class {s['cls']} · {lv}", parents_line=pl,
+                stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"]), f"{s['id']} · Class {s['cls']} · {lv}")
 
 def all_views(m, kind):
     if kind == "classes":
@@ -628,22 +629,104 @@ def _wrap(text, font, size, width, first_width=None):
     if cur: lines.append(cur)
     return lines
 
+# ----------------------------------------------------------------------------------------------- the printout's clock sums and words
+def _mins(m, p):
+    """minutes after midnight at the start of period p (p = NP is the end of the day)"""
+    h, mi = map(int, str(m["school"]["start_time"]).split(":")[:2])
+    return h * 60 + mi + p * int(m["school"]["period_minutes"])
+
+def _clk(t):
+    """minutes after midnight as the school writes a time: 780 is "1.00" """
+    return f"{(t // 60 - 1) % 12 + 1}.{t % 60:02d}"
+
+def _plain(text):
+    """a legend entry without its count of periods"""
+    return re.sub(r"^\d+ periods · ", "", re.sub(r" · \d+ periods(?= · |$)", "", text))
+
+def _look(m, v, print_subtitle):
+    """what the printout reads besides the Excel file's keys: each cell's start and end in minutes, the plain subtitle, each legend entry without its periods"""
+    NP = m["NP"]
+    for c in v["cells"]:
+        c["a"] = _mins(m, max(0, min(NP - 1, int(c["p"])))); c["b"] = _mins(m, max(1, min(NP, math.ceil(c["p"] + c["n"]))))
+    v["print_subtitle"] = print_subtitle
+    for e in v["legend"]: e["plain"] = _plain(e["text"])
+    return v
+
+def _bands(m, v, d):
+    """the runs of assembly, recess and lunch on day d as (start, end, name) in minutes, kept only when a cell of the view that day starts at or after the run's end"""
+    codes = v.get("codes") or []; row = codes[d] if d < len(codes) else None   # a missing row has no bands
+    out = []; NP = min(m["NP"], len(row or "")); p = 0                         # a short row has none past its end
+    while row and p < NP:
+        q = p
+        while q + 1 < NP and row[q + 1] == row[p]: q += 1
+        if row[p] in BREAK:
+            a, b = _mins(m, p), _mins(m, q + 1)
+            if any(c["d"] == d and c["a"] >= b for c in v["cells"]): out.append((a, b, BREAK[row[p]]))
+        p = q + 1
+    return out
+
+def _span(m, v):
+    """the page's length in minutes: the earliest start of a cell or kept band to the latest end of a cell, over all days; None when there is nothing to draw"""
+    if not v["cells"]: return None
+    a0 = min(c["a"] for c in v["cells"]); b1 = max(c["b"] for c in v["cells"])
+    for d in range(m["ND"]):
+        for a, _, _ in _bands(m, v, d): a0 = min(a0, a)
+    return a0, b1
+
+def _hours(a0, b1):
+    """a mark for each whole hour in a0..b1: "8 am" first, then "9", "12 noon", "1 pm", "2" """
+    out = []; h = -(-a0 // 60)
+    while h * 60 <= b1:
+        n = (h + 11) % 12 + 1
+        out.append((h * 60, f"{n} noon" if h == 12 else f"{n} pm" if h == 13 else f"{n} {'am' if h < 12 else 'pm'}" if not out else str(n))); h += 1
+    return out
+
+def _box_lines(cell, w, h):
+    """the lines a lesson box w wide and h tall (points) draws, top to bottom, as (text, font, size, colour): the time, the title, the detail"""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    R, B = _fonts(); full = f"{_clk(cell['a'])}–{_clk(cell['b'])}"; start = _clk(cell["a"]); room = h - 3
+    detail = " · ".join(cell["lines"]); title = cell["title"]
+    def time_at(sz): return full if stringWidth(full, B, sz) <= w - 5.5 else start
+    def shrink(with_detail):
+        """the largest scale from 1.0 down to 0.9 at which the lines fit the box's height, else None"""
+        f = 1.0
+        while True:
+            if (6.2 + 7.4 + (6.3 if with_detail else 0)) * f * 1.16 <= room: return f
+            if f <= 0.9 + 1e-9: return None
+            f = max(0.9, f - 0.02)
+    f = shrink(bool(detail))
+    if f:
+        t, ti, de = 6.2 * f, 7.4 * f, 6.3 * f
+        return [(time_at(t), B, t, SUB), (title, B, ti, INK)] + ([(detail, R, de, MUTED)] if detail else [])
+    f = shrink(False)   # two lines fit: the time and the title share the first when the width allows, so the detail (which class, which room) stays
+    if f:
+        t, ti = 6.2 * f, 7.4 * f
+        if detail and stringWidth(f"{full} {title}", B, ti) <= w - 5.5:
+            return [(f"{full} {title}", B, ti, INK), (detail, R, min(6.3 * f, room / 1.16 - ti), MUTED)]
+        return [(time_at(t), B, t, SUB), (title, B, ti, INK)]   # else the detail goes: time over title
+    ti = 7.4 * 0.9; cut = title   # one line: the start time whole, then as much of the title as fits, cut with "…"
+    if stringWidth(f"{start} {cut}", B, ti) <= w - 5.5: return [(f"{start} {cut}", B, ti, INK)]
+    while cut and stringWidth(f"{start} {cut}…", B, ti) > w - 5.5: cut = cut[:-1]
+    if cut.strip(): return [(f"{start} {cut.rstrip()}…", B, ti, INK)]
+    while ti > 4.4 and stringWidth(start, B, ti) > w - 5.5: ti -= 0.25   # only the time: smaller if it must be, never cut
+    return [(start, B, ti, INK)]
+
 def _lanes(cells):
     """cells that overlap in time share the row height"""
     out = {}
     for d in {c["d"] for c in cells}:
-        cs = sorted((c for c in cells if c["d"] == d), key=lambda c: (c["p"], -c["n"]))
+        cs = sorted((c for c in cells if c["d"] == d), key=lambda c: (c["a"], -c["b"]))
         cluster, end = [], -1
         def flush(cl):
             lanes = []
             for c in cl:
                 for i, e in enumerate(lanes):
-                    if e <= c["p"]: lanes[i] = c["p"] + c["n"]; out[id(c)] = [i, 0]; break
-                else: lanes.append(c["p"] + c["n"]); out[id(c)] = [len(lanes) - 1, 0]
+                    if e <= c["a"]: lanes[i] = c["b"]; out[id(c)] = [i, 0]; break
+                else: lanes.append(c["b"]); out[id(c)] = [len(lanes) - 1, 0]
             for c in cl: out[id(c)][1] = len(lanes)
         for c in cs:
-            if cluster and c["p"] >= end: flush(cluster); cluster, end = [], -1
-            cluster.append(c); end = max(end, c["p"] + c["n"])
+            if cluster and c["a"] >= end: flush(cluster); cluster, end = [], -1
+            cluster.append(c); end = max(end, c["b"])
         if cluster: flush(cluster)
     return out
 
@@ -656,7 +739,7 @@ def _legend_layout(v, R, B, width, max_h=150):
         items = []
         for e in ents:
             lw = stringWidth(e["label"], B, size) + 4
-            lines = _wrap(e["text"], R, size, cw - 9, first_width=cw - 9 - lw)
+            lines = _wrap(e.get("plain", e["text"]), R, size, cw - 9, first_width=cw - 9 - lw)
             items.append((e, lw, lines, len(lines) * lh + 1.6))
         def pack(limit):
             cols, acc = [[]], 0
@@ -680,6 +763,17 @@ def _legend_layout(v, R, B, width, max_h=150):
     lay.update(cols=kept, h=max_h, dropped=n)
     return lay
 
+def _stripes(c, x, y, w, h):
+    """a break band: a pale fill with thin diagonal lines, clipped to the band"""
+    from reportlab.pdfgen.pathobject import PDFPathObject
+    c.saveState()
+    p = PDFPathObject(); p.rect(x, y, w, h); c.clipPath(p, stroke=0, fill=0)
+    c.setFillColor(_hex("F3F5F8")); c.rect(x, y, w, h, stroke=0, fill=1)
+    c.setStrokeColor(_hex("DDE2E8")); c.setLineWidth(0.5)
+    i = -h
+    while i < w: c.line(x + i, y, x + i + h, y + h); i += 4.5
+    c.restoreState()
+
 def draw_page(c, m, v, page=None):
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -693,83 +787,78 @@ def draw_page(c, m, v, page=None):
     c.setFillColor(_hex("FFFFFF")); c.setFont(B, 6.6); c.drawString(M + 5, H - 47.5, kick)
     title, ts = _fit(v["title"], B, 19, 420, 12)
     c.setFillColor(_hex(INK)); c.setFont(B, ts); c.drawString(M + kw + 8, H - 51.5, title)
-    c.setFillColor(_hex(SUB)); c.setFont(R, 8.6); c.drawString(M, H - 66, _fit(v.get("pdf_subtitle", v["subtitle"]), R, 8.6, 420)[0])
+    c.setFillColor(_hex(SUB)); c.setFont(R, 8.6); c.drawString(M, H - 66, _fit(v.get("print_subtitle", v.get("pdf_subtitle", v["subtitle"])), R, 8.6, 420)[0])
     pb = _parents_block(v); xtra = 10.5 * len(pb)   # the form teachers: their own lines under the subtitle, the grid moves down by what they need
     for i, ln in enumerate(pb): c.drawString(M, H - 76 - 10.5 * i + 0.5, ln)
-    x = W - M
-    for val, lab in reversed(v["stats"]):
-        vw = max(stringWidth(str(val), B, 12), stringWidth(lab, R, 6.4)) + 4
-        c.setFillColor(_hex(INK)); c.setFont(B, 12); c.drawRightString(x, H - 52, _fit(str(val), B, 12, 110)[0])
-        c.setFillColor(_hex(MUTED)); c.setFont(R, 6.4); c.drawRightString(x, H - 61, lab)
-        x -= min(vw, 112) + 16
     c.setStrokeColor(_hex(LINE)); c.setLineWidth(0.8); c.line(M, H - 74 - xtra, W - M, H - 74 - xtra)
-    # legend size decides the grid height (rows never shorter than min_rh)
-    foot = 20; gtop = H - 84 - xtra; hdr = 21; wcol = 13 if m["school"]["weeks"] > 1 else 0; dcol = 30
+    # legend size decides the grid height (rows never shorter than min_rh); an hour row (hr high) sits above each week
+    weeks = max(1, sc["weeks"]); per_week = ND // weeks
+    foot = 20; gtop = H - 84 - xtra; hr = 14; wcol = 13 if sc["weeks"] > 1 else 0; dcol = 30
     min_rh = 27 if ND > 6 else 40
-    lay = _legend_layout(v, R, B, W - 2 * M, max_h=gtop - hdr - ND * min_rh - 8 - foot - 6)
+    lay = _legend_layout(v, R, B, W - 2 * M, max_h=gtop - weeks * hr - ND * min_rh - 8 - foot - 6)
     leg_top = foot + 6 + lay["h"]
-    gx = M + wcol + dcol; cw = (W - M - gx) / NP
-    rh = min(72, (gtop - hdr - leg_top - 8) / ND)
-    gbot = gtop - hdr - rh * ND
+    gx = M + wcol + dcol; gw = W - M - gx
+    rh = min(72, (gtop - weeks * hr - leg_top - 8) / ND)
+    def row_top(d): return gtop - (d // per_week + 1) * hr - d * rh   # the top edge of day d's row
+    gbot = row_top(ND - 1) - rh
     leg_top = gbot - 12
-    # period header
-    for p in range(NP):
-        cx = gx + p * cw + cw / 2
-        c.setFillColor(_hex(MUTED)); c.setFont(R, 5.6); c.drawCentredString(cx, gtop - 8, str(p))
-        c.setFillColor(_hex(INK)); c.setFont(B, 6.6 if cw > 22 else 5.8); c.drawCentredString(cx, gtop - 16.5, m["times"][p][0])
-    # rows
-    per_week = ND // max(1, m["school"]["weeks"])
-    for d in range(ND):
-        y = gtop - hdr - (d + 1) * rh
-        wk, dn = _week_day(m["days"][d])
-        c.setFillColor(_hex("FFFFFF" if d % 2 == 0 else "FBFCFD")); c.rect(gx, y, cw * NP, rh, stroke=0, fill=1)
-        c.setFillColor(_hex(INK)); c.setFont(B, 8); c.drawCentredString(M + wcol + dcol / 2, y + rh / 2 - 2.8, dn)
-        if wcol and d % per_week == 0:
-            yb = y - rh * (per_week - 1)
-            c.setFillColor(_hex("EEF1F4")); c.roundRect(M, yb + 1, wcol - 2, rh * per_week - 2, 2, stroke=0, fill=1)
-            c.saveState(); c.translate(M + wcol / 2 + 1.6, yb + rh * per_week / 2); c.rotate(90)
-            c.setFillColor(_hex(SUB)); c.setFont(B, 6); c.drawCentredString(0, 0, f"{(wk or '').upper()} WEEK"); c.restoreState()
-        codes = v["codes"][d] if v["codes"] else None
-        if codes:
-            p = 0
-            while p < NP:
-                ch = codes[p]; q = p
-                while q + 1 < NP and codes[q + 1] == ch: q += 1
-                if ch in BREAK or ch == ".":
-                    c.setFillColor(_hex("EDF0F3" if ch in BREAK else "F7F8FA")); c.rect(gx + p * cw, y, (q - p + 1) * cw, rh, stroke=0, fill=1)
-                    if ch in BREAK:
-                        lab, ls = _fit(BREAK[ch], R, 6.2, (q - p + 1) * cw - 3, 4.6)
-                        c.setFillColor(_hex(MUTED)); c.setFont(R, ls); c.drawCentredString(gx + (p + q + 1) * cw / 2, y + rh / 2 - 2, lab)
-                elif ch == "A":
-                    c.setFillColor(_hex("FFFBF0")); c.rect(gx + p * cw, y, (q - p + 1) * cw, rh, stroke=0, fill=1)
-                p = q + 1
-    c.setStrokeColor(_hex("EEF0F3")); c.setLineWidth(0.4)
-    for p in range(NP + 1): c.line(gx + p * cw, gbot, gx + p * cw, gtop - hdr)
-    for d in range(ND + 1):
-        y = gtop - hdr - d * rh
-        strong = d % per_week == 0
-        c.setStrokeColor(_hex("AEB6C1" if strong and d not in (0, ND) else LINE)); c.setLineWidth(0.9 if strong and d not in (0, ND) else 0.5)
-        c.line(M + wcol, y, gx + NP * cw, y)
+    span = _span(m, v)
+    a0, b1 = span or (0, 1)
+    def X(t): return gx + (t - a0) * gw / max(1, b1 - a0)   # a span that does not end after its start is taken as one minute
+    hours = _hours(a0, b1) if span else []
+    edges = [t for t in (_mins(m, p) for p in range(NP + 1)) if a0 <= t <= b1] if span else []
+    # each week: its hour row, then its day rows
+    for wi in range(weeks):
+        d0 = wi * per_week; top = row_top(d0) + hr; wbot = row_top(d0 + per_week - 1) - rh
+        c.setFillColor(_hex(INK)); c.setFont(B, 6.6)
+        for t, lab in hours:
+            lw = stringWidth(lab, B, 6.6); x = min(max(X(t), gx + lw / 2), gx + gw - lw / 2)   # a label at the page's edge stays inside it
+            c.drawCentredString(x, top - 9.5, lab)
+        for d in range(d0, d0 + per_week):
+            y = row_top(d) - rh
+            wk, dn = _week_day(m["days"][d])
+            c.setFillColor(_hex("FFFFFF" if d % 2 == 0 else "FBFCFD")); c.rect(gx, y, gw, rh, stroke=0, fill=1)
+            c.setFillColor(_hex(INK)); c.setFont(B, 8); c.drawCentredString(M + wcol + dcol / 2, y + rh / 2 - 2.8, dn)
+            if wcol and d == d0:
+                yb = y - rh * (per_week - 1)
+                c.setFillColor(_hex("EEF1F4")); c.roundRect(M, yb + 1, wcol - 2, rh * per_week - 2, 2, stroke=0, fill=1)
+                c.saveState(); c.translate(M + wcol / 2 + 1.6, yb + rh * per_week / 2); c.rotate(90)
+                c.setFillColor(_hex(SUB)); c.setFont(B, 6); c.drawCentredString(0, 0, f"{(wk or '').upper()} WEEK"); c.restoreState()
+            for a, b, name in (_bands(m, v, d) if span else []):
+                bx, bw = X(a), X(b) - X(a)
+                _stripes(c, bx, y, bw, rh)
+                c.setFillColor(_hex(MUTED))
+                if stringWidth(name, R, 6.2) <= bw - 3:
+                    c.setFont(R, 6.2); c.drawCentredString(bx + bw / 2, y + rh / 2 - 2, name)
+                else:   # a narrow band writes its whole name on its side
+                    lab, ls = _fit(name, R, 6.2, rh - 3, 4.0)
+                    c.saveState(); c.translate(bx + bw / 2 + ls * 0.35, y + rh / 2); c.rotate(90)
+                    c.setFont(R, ls); c.drawCentredString(0, 0, lab); c.restoreState()
+        # lines down the week: faint at each period edge, strong at each hour
+        c.setStrokeColor(_hex("EEF0F3")); c.setLineWidth(0.4)
+        for t in edges: c.line(X(t), wbot, X(t), top - hr)
+        c.setStrokeColor(_hex("C3CAD3")); c.setLineWidth(0.7)
+        for t, _ in hours: c.line(X(t), wbot, X(t), top - hr + 2.5)
+        if not span:
+            c.setFillColor(_hex(MUTED)); c.setFont(R, 8); c.drawCentredString(gx + gw / 2, (top - hr + wbot) / 2 - 3, "No lessons.")
+    c.setStrokeColor(_hex(LINE)); c.setLineWidth(0.5)
+    for d in range(ND):   # a line above each day row, and one under each week's last row
+        c.line(M + wcol, row_top(d), gx + gw, row_top(d))
+        if d % per_week == per_week - 1 or d == ND - 1: c.line(M + wcol, row_top(d) - rh, gx + gw, row_top(d) - rh)
     # lessons
     lanes = _lanes(v["cells"])
     for cell in v["cells"]:
         lane, nl = lanes.get(id(cell), (0, 1))
-        bh = rh / nl; x0 = gx + cell["p"] * cw + 1; w = cell["n"] * cw - 2
-        y0 = gtop - hdr - (cell["d"] + 1) * rh + rh - (lane + 1) * bh + 1; h = bh - 2
-        tint, acc = EXT if cell["ext"] else PALETTE[cell["color"] % len(PALETTE)]
+        bh = rh / nl; x0 = X(cell["a"]) + 1; w = X(cell["b"]) - X(cell["a"]) - 2
+        y0 = row_top(cell["d"]) - (lane + 1) * bh + 1; h = bh - 2
+        tint, acc = PALETTE[cell["color"] % len(PALETTE)]
         c.setFillColor(_hex(tint)); c.setStrokeColor(_hex(acc)); c.setLineWidth(0.7)
-        if cell["ext"]: c.setDash(2, 1.4)
-        c.roundRect(x0, y0, w, h, 2.2, stroke=1, fill=1); c.setDash()
+        c.roundRect(x0, y0, w, h, 2.2, stroke=1, fill=1)
         c.setFillColor(_hex(acc)); c.rect(x0 + 0.35, y0 + 0.35, 1.8, h - 0.7, stroke=0, fill=1)
-        ts_, ls_ = (7.4, 6.3) if w > 34 else (6.4, 5.6)
-        lines = [(cell["title"], B, ts_, INK)] + [(l, R, ls_, SUB if i == 0 else MUTED) for i, l in enumerate(cell["lines"])]
-        if cell["ext"]: lines.append(("after school", B, 5.4, "8A5300"))
-        room = h - 3
-        while lines and sum(s * 1.16 for _, _, s, _ in lines) > room: lines.pop()
-        if not lines: lines = [(cell["title"], B, max(4.6, min(ts_, h - 2)), INK)]
+        lines = _box_lines(cell, w, h)
         tot = sum(s * 1.16 for _, _, s, _ in lines); ty = y0 + h / 2 + tot / 2
-        for txt, f, s, col in lines:
-            t2, s2 = _fit(str(txt), f, s, w - 5.5, 4.4)
+        for i, (txt, f, s, col) in enumerate(lines):
+            t2, s2 = (txt, s) if i == 0 else _fit(str(txt), f, s, w - 5.5, 4.4)   # the first line holds the time, already fitted by _box_lines: never cut here
             ty -= s * 1.16; c.setFillColor(_hex(col)); c.setFont(f, s2); c.drawString(x0 + 3.6, ty + s * 0.22, t2)
     # legend
     ly = leg_top
@@ -790,8 +879,7 @@ def draw_page(c, m, v, page=None):
     # footer
     c.setStrokeColor(_hex(LINE)); c.setLineWidth(0.5); c.line(M, foot, W - M, foot)
     c.setFillColor(_hex(MUTED)); c.setFont(R, 6.2)
-    note = "Times are period start times." + (" Shaded columns are breaks; pale yellow cells are after-school slots, used only when needed." if v["codes"] else "")
-    c.drawString(M, foot - 9, note)
+    if v["codes"]: c.drawString(M, foot - 9, "Striped bands are breaks.")
     if page: c.drawRightString(W - M, foot - 9, f"Page {page[0]} of {page[1]}")
 
 def _canvas(path, m, title):
@@ -1022,6 +1110,11 @@ def html_data(m, view="full", student_id=None, app=None):
         names = {t for x in d["lessons"] for t in x[9]}
         d["teachers"] = [t for t in d["teachers"] if t[0] in names]
         d["students"] = [[s["id"], s["name"], s["cls"], s["groups"]]]
+    if not (app is None or app.get("mode") == "committee"):   # planning data (allowances, class sizes, after-school marks and lists, notes) stays with the committee
+        d["teachers"] = [t[:3] + [""] + t[4:] for t in d["teachers"]]
+        d["classes"] = [c[:2] + [""] + c[3:] for c in d["classes"]]
+        d["lessons"] = [x[:11] + [0] + x[12:] for x in d["lessons"]]
+        d["checks"] = dict(d["checks"], after=[], notes=[])
     return d
 
 def render_html(m, view="full", student_id=None, app=None, title=None):
@@ -1039,7 +1132,7 @@ def custom_view(m, cls, groups):
     """a student's timetable from their class and chosen groups (the finder's 'Build a timetable')"""
     info = m["class_ix"][cls]
     v = student_view(m, dict(id="custom", name=f"Class {cls}", cls=cls, level=info["level"], groups=list(groups)))
-    v["subtitle"] = f"Class {cls} · {info['level']} · groups {', '.join(groups) or '-'}"; v.pop("pdf_subtitle", None); v.pop("parents_line", None)
+    v["subtitle"] = f"Class {cls} · {info['level']} · groups {', '.join(groups) or '-'}"; v.pop("pdf_subtitle", None); v.pop("print_subtitle", None); v.pop("parents_line", None)
     return v
 
 def group_options(m, cls):
