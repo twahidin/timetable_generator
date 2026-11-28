@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timetable look: mockup</title>
+<!-- A mockup only: made-up class, teachers and rooms. Open with ?a, ?b or ?p (the phone list) to see one alone. The lead chose A on 2026-11-27, with the day list on phones. -->
+<style>
+:root{--ink:#16202E;--sub:#4A5568;--muted:#7A8699;--line:#E3E8EF;--hour:#B9C3D1;--bg:#F6F8FB;--card:#fff;--break:#EEF1F5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1420px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:20px;margin:0 0 2px}h2{font-size:16px;margin:26px 0 4px}.lede{color:var(--sub);margin:0 0 10px;max-width:980px}
+.tag{display:inline-block;background:#16202E;color:#fff;border-radius:5px;font-size:11px;font-weight:700;padding:2px 7px;margin-right:8px;vertical-align:2px;letter-spacing:.04em}
+.sheet{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 12px 10px;overflow-x:auto}
+.what{margin:8px 0 0;padding-left:18px;color:var(--sub);font-size:13px}.what li{margin:1px 0}
+/* ---------- option A: days down, time across */
+.A{position:relative;min-width:1340px}
+.A .ruler,.A .row{display:grid;grid-template-columns:74px 1fr}
+.A .ruler .ax{position:relative;height:30px}
+.A .hr{position:absolute;top:2px;transform:translateX(-50%);font-weight:700;font-size:13px;color:var(--ink);white-space:nowrap}
+.A .hr small{font-weight:600;color:var(--muted);font-size:10.5px;margin-left:2px}
+.A .tick{position:absolute;bottom:0;width:1px;height:7px;background:var(--hour)}
+.A .wk{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted);padding:6px 0 0 2px}
+.A .row{border-top:1px solid var(--line)}
+.A .day{padding:9px 0 0 2px;font-weight:700}.A .day small{display:block;font-weight:600;color:var(--muted);font-size:10.5px;letter-spacing:.06em}
+.A .lane{position:relative;height:62px}
+.A .vl{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}.A .vl.h{background:var(--hour)}
+.A .brk{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,var(--break) 0 6px,#F7F9FB 6px 12px);color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15}
+.cell{position:absolute;top:4px;bottom:4px;border-radius:7px;border:1px solid;border-left-width:4px;padding:3px 6px 2px;overflow:hidden;display:flex;flex-direction:column;gap:0}
+.cell b{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .t{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.85}
+.cell .s{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.el{background:#E4EEFB;border-color:#7FA6DE}.ma{background:#E1F2E3;border-color:#7DBB86}.sc{background:#FBE1E6;border-color:#E08A9B}
+.mt{background:#FDE8D4;border-color:#E3A064}.hu{background:#FBF0C9;border-color:#D3B24C}.pe{background:#E8EBF0;border-color:#8F9BAD}
+.ar{background:#EAE3F8;border-color:#A690D8}.dt{background:#D9F0EE;border-color:#69B5AE}.ce{background:#F8E0F1;border-color:#D28ABD}
+/* ---------- option B: days across, time down */
+.B{display:grid;grid-template-columns:64px repeat(5,1fr);min-width:1100px}
+.B .hd{font-weight:700;padding:2px 8px 8px;border-bottom:1px solid var(--hour)}.B .hd small{color:var(--muted);font-weight:600;font-size:10.5px;letter-spacing:.06em;margin-right:6px}
+.B .ax,.B .col{position:relative;height:650px}
+.B .col{border-left:1px solid var(--line)}
+.B .hl{position:absolute;left:0;right:0;height:1px;background:var(--line)}.B .hl.h{background:var(--hour)}
+.B .lab{position:absolute;right:8px;transform:translateY(-50%);font-weight:700;font-size:13px;white-space:nowrap}.B .lab small{font-weight:600;color:var(--muted);font-size:10.5px}
+.B .brk{position:absolute;left:0;right:0;background:repeating-linear-gradient(135deg,var(--break) 0 6px,#F7F9FB 6px 12px);color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center}
+.B .cell{top:auto;bottom:auto;left:4px;right:4px;padding:3px 7px}
+.B .cell .top{display:flex;justify-content:space-between;gap:8px}
+/* ---------- phone: one day as a list */
+.phone{width:390px;border:10px solid #16202E;border-radius:34px;background:var(--card);padding:14px 12px 18px;overflow:hidden}
+.phone h3{margin:0 0 2px;font-size:17px}.phone .sub{color:var(--sub);font-size:12.5px;margin:0 0 10px}
+.seg{display:flex;gap:6px;margin:0 0 8px}.seg span{flex:1;text-align:center;border:1px solid var(--hour);border-radius:8px;padding:6px 0;font-weight:700;font-size:13px;color:var(--sub)}.seg span.on{background:#16202E;border-color:#16202E;color:#fff}
+.dl{display:grid;grid-template-columns:92px 1fr;gap:6px 8px;margin-top:10px}
+.dl .tm{font-weight:700;font-size:13px;font-variant-numeric:tabular-nums;padding-top:7px;white-space:nowrap}
+.dl .it{border-radius:8px;border:1px solid;border-left-width:4px;padding:6px 9px}.dl .it b{display:block;font-size:14px}.dl .it span{font-size:12.5px;color:var(--sub)}
+.dl .bk{border-radius:8px;padding:5px 9px;color:var(--muted);font-size:12.5px;background:repeating-linear-gradient(135deg,var(--break) 0 6px,#F7F9FB 6px 12px)}.dl .tm.q{color:var(--muted);font-weight:600}
+.toggle{display:inline-flex;border:1px solid var(--hour);border-radius:8px;overflow:hidden;margin:0 0 8px}.toggle span{padding:4px 12px;font-weight:700;font-size:12.5px}.toggle .on{background:#16202E;color:#fff}
+</style></head><body><main>
+<h1>Class 1A <span style="font-weight:500;color:var(--sub);font-size:14px">· a mockup with made-up names</span></h1>
+<p class="lede">Two ways to make the times easy to read at one glance. In both, every lesson says its own start and end time, and an after-school lesson looks like any other lesson: no dashed edge and no "after school" words.</p>
+
+<section id="a"><h2><span class="tag">A</span>Same shape as today, clearer times</h2>
+<div class="sheet"><div class="A" id="A"></div></div>
+<ul class="what"><li>Each lesson shows its time (8.00–9.00), so you do not look up to the top row.</li><li>A break is drawn only when a lesson comes after it that day: Tuesday of the Odd week has no Lunch band.</li><li>The top row counts in hours (8 am, 9, 10 …) with a strong line down the page at every hour, and it is repeated above the Even week.</li><li>Recess, lunch and assembly are striped bands with their names.</li></ul></section>
+
+<section id="p"><h2><span class="tag">PHONE</span>On a phone: one day as a list</h2>
+<div class="phone" id="P"></div>
+<ul class="what"><li>Opens on today. The buttons change the week and the day.</li><li>A computer and the printouts keep look A.</li></ul></section>
+
+<section id="b"><h2><span class="tag">B</span>Days across, time down the side</h2>
+<div class="toggle"><span class="on">Odd week</span><span>Even week</span></div>
+<div class="sheet"><div class="B" id="B"></div></div>
+<ul class="what"><li>Reads like a diary: time runs down the left side, one column a day, one week at a time.</li><li>A longer lesson is a taller box. Each box still shows its own time.</li><li>Wider boxes, so a band's subjects and its number of groups fit on one line.</li></ul></section>
+</main>
+<script>
+const NP = 26, START = 7 * 60 + 40, MIN = 20;
+const clock = p => { const m = START + p * MIN, h = Math.floor(m / 60), mm = String(m % 60).padStart(2, "0"); return `${h > 12 ? h - 12 : h}.${mm}`; };
+const span = (p, n) => `${clock(p)}–${clock(p + n)}`;
+/* a day: breaks [p, n, name], lessons [p, n, title, line, colour] */
+const usual = [[0, 1, "Assembly"], [7, 2, "Recess"], [18, 2, "Lunch"]], late = [[2, 1, "Assembly"], [9, 2, "Recess"]], fri = [[0, 1, "Assembly"], [9, 2, "Recess"]];
+const WEEKS = [["ODD", [
+  ["Mon", usual, [[1, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [4, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [9, 3, "Music", "Jonas · Music Room", "ar"], [12, 3, "D&T", "Mei Ling, Arjun · Design Room 1", "dt"], [15, 3, "Humanities band 3", "Geog · Hist · 5 groups", "hu"], [20, 3, "Mother Tongue", "12 of 15 groups", "mt"]]],
+  ["Tue", usual, [[1, 3, "Science", "G1 · G2 · G3 · 5 groups", "sc"], [4, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [9, 3, "PE", "Farhan · Hall", "pe"], [12, 3, "Music", "Jonas · Music Room", "ar"], [15, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"]]],
+  ["Wed", usual, [[1, 3, "Science", "G1 · G2 · G3 · 5 groups", "sc"], [4, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [9, 3, "Humanities band 4", "Geog · Hist · 5 groups", "hu"], [12, 3, "Art", "Kavitha · Art Room 1", "ar"], [15, 3, "Character Education", "Hana, Wei Jie · A1-1", "ce"], [20, 2, "Higher MT", "5 groups", "mt"]]],
+  ["Thu", late, [[3, 3, "PE", "Farhan · Hall", "pe"], [6, 3, "D&T", "Mei Ling, Arjun · D&T Lab 1", "dt"], [11, 3, "Humanities band 2", "Geog · Hist · Lit · 5 groups", "hu"], [14, 3, "Mother Tongue", "15 groups", "mt"], [17, 3, "Science", "G1 · G2 · G3 · 5 groups", "sc"]]],
+  ["Fri", fri, [[1, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [4, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [7, 2, "Science", "5 groups", "sc"], [11, 3, "Character Education", "Hana, Wei Jie · A1-1", "ce"], [14, 1, "CP Time", "A1-1", "ce"]]]]],
+ ["EVEN", [
+  ["Mon", usual, [[1, 3, "Mother Tongue", "15 groups", "mt"], [4, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [9, 3, "Humanities band 1", "Geog · Hist · Lit · 5 groups", "hu"], [12, 3, "D&T", "Mei Ling, Arjun · D&T Lab 1", "dt"], [15, 3, "PE", "Farhan · Hall", "pe"], [20, 3, "Science", "G1 · G2 · G3 · 5 groups", "sc"]]],
+  ["Tue", usual, [[1, 3, "Character Education", "Hana, Wei Jie · A1-1", "ce"], [4, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [9, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [12, 3, "Mother Tongue", "15 groups", "mt"], [15, 3, "Science", "G1 · G2 · G3 · 5 groups", "sc"], [20, 3, "Art", "Kavitha · Art Room 1", "ar"]]],
+  ["Wed", usual, [[1, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [4, 3, "Humanities band 3", "Geog · Hist · 5 groups", "hu"], [9, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [12, 3, "Art", "Kavitha · Art Room 1", "ar"], [15, 3, "D&T", "Mei Ling, Arjun · D&T Lab 1", "dt"], [20, 3, "Mother Tongue", "12 of 15 groups", "mt"]]],
+  ["Thu", late, [[3, 3, "Humanities band 2", "Geog · Hist · Lit · 5 groups", "hu"], [6, 3, "Mother Tongue", "15 groups", "mt"], [11, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [14, 3, "Character Education", "Hana, Wei Jie · A1-1", "ce"], [17, 3, "PE", "Farhan · Hall", "pe"], [23, 3, "Science", "1 of 5 groups · Lab 2", "sc"]]],
+  ["Fri", fri, [[1, 3, "Mother Tongue", "15 groups", "mt"], [4, 3, "English Language", "G1 · G2 · G3 · 5 groups", "el"], [11, 3, "Mathematics", "G1 · G2 · G3 · 5 groups", "ma"], [14, 3, "Science", "G1 · G2 · G3 · 5 groups", "sc"]]]]]];
+const pc = p => (p / NP * 100) + "%";
+const hours = []; for (let p = 0; p <= NP; p++) if ((START + p * MIN) % 60 === 0) hours.push(p);
+const hourLabel = p => { const h = Math.floor((START + p * MIN) / 60); return `${h > 12 ? h - 12 : h}<small>${h === 8 ? "am" : h === 12 ? "noon" : h === 13 ? "pm" : ""}</small>`; };
+/* ---- A */
+const ruler = wk => `<div class="ruler"><div class="wk">${wk} WEEK</div><div class="ax">${hours.map(p => `<span class="hr" style="left:${pc(p)}">${hourLabel(p)}</span><i class="tick" style="left:${pc(p)}"></i>`).join("")}</div></div>`;
+const lines = () => Array.from({ length: NP + 1 }, (_, p) => `<i class="vl${hours.includes(p) ? " h" : ""}" style="left:${pc(p)}"></i>`).join("");
+const cellA = ([p, n, title, line, c]) => `<div class="cell ${c}" style="left:calc(${pc(p)} + 2px);width:calc(${pc(n)} - 4px)"><span class="t">${span(p, n)}</span><b>${title}</b><span class="s">${line}</span></div>`;
+const brkA = ([p, n, name]) => `<div class="brk" style="left:${pc(p)};width:${pc(n)}">${n > 1 ? name : name.slice(0, 3) + "."}</div>`;
+document.getElementById("A").innerHTML = WEEKS.map(([wk, days]) => ruler(wk) + days.map(([d, brks, ls]) => `<div class="row"><div class="day"><small>${wk}</small>${d}</div><div class="lane">${lines()}${brks.filter(([p, n]) => ls.some(l => l[0] >= p + n)).map(brkA).join("")}${ls.map(cellA).join("")}</div></div>`).join("")).join("");
+/* ---- B (the Odd week) */
+const H = 650, py = p => (p / NP * H) + "px";
+const hl = () => Array.from({ length: NP + 1 }, (_, p) => `<i class="hl${hours.includes(p) ? " h" : ""}" style="top:${py(p)}"></i>`).join("");
+const cellB = ([p, n, title, line, c]) => `<div class="cell ${c}" style="top:calc(${py(p)} + 2px);height:calc(${py(n)} - 4px)"><div class="top"><b>${title}</b><span class="t">${span(p, n)}</span></div>${n > 1 ? `<span class="s">${line}</span>` : ""}</div>`;
+const brkB = ([p, n, name]) => `<div class="brk" style="top:${py(p)};height:${py(n)}">${name}</div>`;
+const odd = WEEKS[0][1];
+document.getElementById("B").innerHTML = `<div class="hd"></div>${odd.map(([d]) => `<div class="hd"><small>ODD</small>${d}</div>`).join("")}`
+  + `<div class="ax">${hours.map(p => `<span class="lab" style="top:${py(p)}">${hourLabel(p)}</span>`).join("")}</div>`
+  + odd.map(([d, brks, ls]) => `<div class="col">${hl()}${brks.map(brkB).join("")}${ls.map(cellB).join("")}</div>`).join("");
+/* ---- phone (Odd Monday) */
+{ const [d, brks, ls] = WEEKS[0][1][0];
+  const items = [...brks.filter(([p, n]) => ls.some(l => l[0] >= p + n)).map(b => ({ p: b[0], n: b[1], brk: b[2] })), ...ls.map(l => ({ p: l[0], n: l[1], title: l[2], line: l[3], c: l[4] }))].sort((a, b) => a.p - b.p);
+  document.getElementById("P").innerHTML = `<h3>Class 1A</h3><p class="sub">Sec 1 · home room A1-1</p><div class="seg"><span class="on">Odd week</span><span>Even week</span></div><div class="seg">${["Mon", "Tue", "Wed", "Thu", "Fri"].map((x, i) => `<span class="${i ? "" : "on"}">${x}</span>`).join("")}</div><div class="dl">`
+    + items.map(it => it.brk ? `<div class="tm q">${span(it.p, it.n)}</div><div class="bk">${it.brk}</div>` : `<div class="tm">${span(it.p, it.n)}</div><div class="it ${it.c}"><b>${it.title}</b><span>${it.line}</span></div>`).join("") + `</div>`; }
+const only = { "?a": "a", "?b": "b", "?p": "p" }[location.search];
+if (only) { ["a", "b", "p"].forEach(k => { if (k !== only) document.getElementById(k).style.display = "none"; }); if (only !== "a") document.querySelector(".lede").style.display = "none"; }
+if (false) document.getElementById("b").style.display = "none";
+</script></body></html>

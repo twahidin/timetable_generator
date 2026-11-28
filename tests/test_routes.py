@@ -69,19 +69,19 @@ KINDS = {
     "shared teacher": (dict(role="teacher"), {"timetable", "files"}),
     "shared student": (dict(role="student"), {"timetable"}),
     "personal student": (dict(role="personal", sid="S001"), {"own"}),
-    "committee by password": (person(CORA, "password"), BASE | {"relief.settings", "relief.save", "committee", "setup", "history", "codes", "history.own"}),
-    "committee by code": (person(CORA, "code"), BASE | {"relief.settings", "relief.save", "history.own"}),
-    "hod by password": (person(HAL, "password"), BASE | {"relief.plan", "relief.settings", "setup", "history.dept", "history.own"}),
-    "hod by code": (person(HAL, "code"), BASE | {"relief.plan", "relief.settings", "history.own"}),
-    "leader by password": (person(LEE, "password"), BASE | {"relief.plan", "relief.settings", "history.own"}),
-    "teacher by code": (person(TINA, "code"), BASE | {"history.own"}),
-    "executive by code": (person(EVE, "code"), {"timetable", "files", "history.own"}),
-    "teacher on the relief team": (person(RIA, "code"), BASE | {"relief.plan", "relief.settings", "relief.save", "relief.team", "history.own"}),
-    "teacher on exams until tomorrow": (person(ELI, "code"), BASE | {"exams", "history.own"}),
-    "teacher whose exams ended yesterday": (person(MAX, "code"), BASE | {"history.own"}),
-    "admin by password": (person(ADA, "password"), BASE | {"relief.settings", "relief.save", "committee", "setup", "history", "codes", "admin", "history.own"}),
-    "admin by code": (person(ADA, "code"), BASE | {"relief.settings", "relief.save", "history.own"}),
-    "relief stage 1 session": (dict(role="staff", who=TINA), BASE | {"history.own"}),
+    "committee by password": (person(CORA, "password"), BASE | {"codes.look", "relief.settings", "relief.save", "committee", "setup", "history", "codes", "history.own"}),
+    "committee by code": (person(CORA, "code"), BASE | {"codes.look", "relief.settings", "relief.save", "history.own"}),
+    "hod by password": (person(HAL, "password"), BASE | {"codes.look", "staff.reset", "relief.plan", "relief.settings", "setup", "history.dept", "history.own"}),
+    "hod by code": (person(HAL, "code"), BASE | {"codes.look", "relief.plan", "relief.settings", "history.own"}),
+    "leader by password": (person(LEE, "password"), BASE | {"codes.look", "relief.plan", "relief.settings", "history.own"}),
+    "teacher by code": (person(TINA, "code"), BASE | {"codes.look", "history.own"}),
+    "executive by code": (person(EVE, "code"), {"codes.look", "timetable", "files", "history.own"}),
+    "teacher on the relief team": (person(RIA, "code"), BASE | {"codes.look", "relief.plan", "relief.settings", "relief.save", "relief.team", "history.own"}),
+    "teacher on exams until tomorrow": (person(ELI, "code"), BASE | {"codes.look", "exams", "history.own"}),
+    "teacher whose exams ended yesterday": (person(MAX, "code"), BASE | {"codes.look", "history.own"}),
+    "admin by password": (person(ADA, "password"), BASE | {"codes.look", "relief.settings", "relief.save", "committee", "setup", "history", "codes", "admin", "history.own"}),
+    "admin by code": (person(ADA, "code"), BASE | {"codes.look", "relief.settings", "relief.save", "history.own"}),
+    "relief stage 1 session": (dict(role="staff", who=TINA), BASE | {"codes.look", "history.own"}),
 }
 
 def client(keys):
@@ -360,6 +360,10 @@ GUARDS = {
     "relief_tg.unlink": ('relief.save',),
     "restore_setup": ('committee',),
     "status": ('setup',),
+    "staff_reset_do": ('staff.reset',),
+    "staff_reset_page": ('staff.reset',),
+    "student_codes_page": ('codes.look',),
+    "student_codes_show": ('codes.look',),
     "students_published": ('committee',),
     "students_update": ('committee',),
     "students_skeleton": ('committee',),
@@ -482,7 +486,7 @@ def an_executive_does_not_reach_relief():
     c = client(person(EVE, "code"))
     assert to_login(c.get("/relief")) and c.get("/api/relief/me").get_json() == AGAIN and c.get("/api/relief/me").status_code == 401
     r = c.get("/home"); page = r.get_data(as_text=True)              # no Relief tile: Timetables, her own exam duties and her own History
-    assert r.status_code == 200 and re.findall(r'<a class="tile" href="([^"]+)"', page) == ["/timetable", "/exams", "/history"] and "My exam and event duties" in page, page[-600:]
+    assert r.status_code == 200 and re.findall(r'<a class="tile" href="([^"]+)"', page) == ["/timetable", "/student-codes", "/exams", "/history"] and "My exam and event duties" in page, page[-600:]
     assert kept(c)["who"] == EVE
 
 @t
@@ -509,36 +513,36 @@ def tiles(c):
 @t
 def home_shows_exactly_the_tiles_of_the_table():
     shown, greyed, page = tiles(client(person(TINA, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], (shown, greyed)
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], (shown, greyed)
     assert "Exams and events" not in page, "no Exams and events extra: her own exam duties only"
     assert "Your own changes" in page and "Who changed what, and when" not in page
     assert f"Hello, {TINA}" in page and "Signed in with your code" in page and 'href="/logout"' in page and "Sign out" in page
     shown, greyed, page = tiles(client(person(ADA, "password")))
-    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), ("Admin", "/admin"), ("History", "/history")], shown
+    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("Exams and events", "/exams"), ("Admin", "/admin"), ("History", "/history")], shown
     assert greyed == [] and "Signed in with your password" in page
     assert "Who changed what, and when" in page and "Your own changes" not in page
     assert "Until" not in page.split("Exams and events")[1].split("</a>")[0], "the committee's tile has no end date"
     shown, greyed, _ = tiles(client(person(ADA, "code")))           # the committee's code: all but the setup and the admin page
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")], shown   # their own history
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("My exam and event duties", "/exams"), ("History", "/history")], shown   # their own history
     assert greyed == [("Committee page", "/login/password"), ("Admin", "/login/password")], greyed
     shown, greyed, _ = tiles(client(person(CORA, "code")))          # no Admin extra: no Admin tile, greyed or not
     assert greyed == [("Committee page", "/login/password")], greyed
     shown, greyed, _ = tiles(client(person(HAL, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [("Committee page", "/login/password")], (shown, greyed)
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [("Committee page", "/login/password"), ("Reset a password", "/login/password")], (shown, greyed)
     shown, greyed, _ = tiles(client(person(HAL, "password")))
-    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], shown
+    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("Reset a password", "/staff-reset"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], shown
     shown, greyed, _ = tiles(client(person(LEE, "password")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], shown
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], shown
     # Exams and events: the exams pages are on the app now; the tile only while they are
     assert any(r.rule == "/exams" for r in A.app.url_map.iter_rules())
     shown, _, page = tiles(client(person(ELI, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), ("History", "/history")], shown
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("Exams and events", "/exams"), ("History", "/history")], shown
     d = datetime.date.fromisoformat(TOMORROW); assert f"Until {d.day} {d.strftime('%b %Y')}" in page
     real = A._route_exists
     A._route_exists = lambda path: path != "/exams" and real(path)
     try:
-        shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "History"], shown
-        shown, _, _ = tiles(client(person(TINA, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "History"], shown
+        shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "Student codes", "History"], shown
+        shown, _, _ = tiles(client(person(TINA, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "Student codes", "History"], shown
     finally: A._route_exists = real
 
 @t
@@ -737,10 +741,10 @@ def the_plan_with_ai_tile_is_there_only_with_an_ai_and_the_exams_rights():
     PAI.enabled = lambda: True
     try:
         shown, greyed, page = tiles(client(person(ELI, "code")))     # the Exams and events extra until tomorrow
-        assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), PLAN_TILE, ("History", "/history")], shown
+        assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("Exams and events", "/exams"), PLAN_TILE, ("History", "/history")], shown
         assert "Plan an exam or a common test by talking it through" in page and greyed == []
         shown, greyed, _ = tiles(client(person(ADA, "password")))    # the timetable committee
-        assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), PLAN_TILE,
+        assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Student codes", "/student-codes"), ("Exams and events", "/exams"), PLAN_TILE,
                          ("Admin", "/admin"), ("History", "/history")] and greyed == [], shown
         for keys in (person(TINA, "code"), person(MAX, "code"), person(ADA, "code"), person(HAL, "password")):   # no exams right: no tile, never greyed
             shown, greyed, page = tiles(client(keys))

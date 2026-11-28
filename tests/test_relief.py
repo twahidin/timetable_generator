@@ -262,7 +262,7 @@ def the_front_page_is_one_box_for_every_code():
     c = A.app.test_client()
     with published(PUB):
         front = c.get("/login").data
-        assert b"Your code (the one the school gave you)" in front and front.count(b'name="code"') == 1 and b'class="choice' not in front
+        assert b"Please enter your code to access your timetable." in front and front.count(b'name="code"') == 1 and b'class="choice' not in front
         assert c.get("/login?as=relief").data == front                 # the old cards' links still open the page
         assert not hasattr(A, "CHOICES")
 
