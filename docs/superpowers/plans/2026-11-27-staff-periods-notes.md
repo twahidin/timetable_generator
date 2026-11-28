@@ -4,7 +4,9 @@ Design: `docs/superpowers/specs/2026-11-27-staff-periods-design.md`. Plan: `2026
 file. Built 2026-11-27 and 28 on branch `staff-periods`: eight tasks, each by a fresh builder and checked by a fresh
 reviewer, then one review of the whole branch and one round of fixes, with main (PRs #117 and #118) merged in. Then the
 published timetable's new look (PR #119) reached main: it was merged in and the box carried into it (a tenth task,
-reviewed). Last, PR #120 (relief: changing a request) merged in cleanly.
+reviewed). PR #120 (relief: changing a request) merged in cleanly. Then the phone day list (PR #121) reached main: it
+was merged in and the period carried into the list (an eleventh task, reviewed). Last, PR #122 (two files of the
+AI planning chat) merged in cleanly.
 
 ## What was built
 
@@ -35,6 +37,14 @@ The new look places everything by the clock. A teacher-only period's box follows
 - Under the new look a box could now run to its real end (5.30) at little cost, because each page already runs to its
   own last thing. It was kept cut at the end of the day because the lead's answer was "edge is enough". One change in
   `staff_cells` (the cut) would let it run.
+
+## In the phone day list (PR #121)
+
+On a screen 700 px wide or less the published page shows a day list in place of the grid. A teacher-only period is in
+that list on its day, in time order with the lessons: the time words at the left ("3.00–4.10", "3.00 (to 5.30)"), and
+a white outlined box with the name and the place. Tapping it opens nothing. It counts as a lesson for the list's break
+rule. A period with no box on the grid is not in the list; it stays in the lines under it. The list does not draw the
+broken edge of a cut period; the time words say it.
 
 ## Different from the mockup or the design
 
@@ -81,6 +91,10 @@ Each was made without asking, with what it costs if it is wrong.
     was wanted.
 12. The stored printouts' look number (`LOOK`) was not raised: printouts stored before this work hold no period, and a
     publish that brings periods makes its printouts anew.
+13. The phone day list lists a period (see the section above): on a phone the list replaces the grid, so without it a
+    teacher would not see the period there at all. If wrong: one branch in the list's builder comes out.
+14. The two merges of main that had no conflict (PRs #120 and #122) were made by the controller, with every quick
+    suite run on the result, and no builder or reviewer.
 
 ## Known limits
 
@@ -101,12 +115,14 @@ Each was made without asking, with what it costs if it is wrong.
 
 ## Checks made
 
-**Suites, on the final code** (commit eca3231, which holds main 712b86f: PRs #117 to #120), each judged by its exit
+**Suites, on the final code** (commit c7e37cc, which holds main 8fa491a: PRs #117 to #122), each judged by its exit
 status: every quick suite, 73 of 73 passed (every `tests/test_*.py`, `tests/smoke.py`, every `tests/*.test.js`,
-`node --check static/app.js`, and the skill's copy of `ttgen` equal to `ttgen`). The slow suites, one at a time:
-`test_staff_periods` 29, `test_combined` 40, `test_fixes` 77, `smoke` 104, `test_typed` 34, `test_helper` 22, all
-passed. Earlier in the build `test_typed --full` and `test_helper --full` failed once on a busy computer; they failed
-the same way on main itself in two runs made for comparison, and passed in the last two runs on this branch.
+`node --check static/app.js`, and the skill's copy of `ttgen` equal to `ttgen`), and `smoke --full` (104). The other
+slow suites were last run, one at a time, on eca3231 (main up to PR #120): `test_staff_periods` 29, `test_combined` 40,
+`test_fixes` 77, `test_typed` 34, `test_helper` 22, all passed; since then only the published page's template, one
+small route (`/api/today`) and `plan/talk.py` have changed, none of which those suites run. Earlier in the build
+`test_typed --full` and `test_helper --full` failed once on a busy computer; they failed the same way on main itself
+in two runs made for comparison, and passed in the last two runs on this branch.
 
 **In a browser, on a scratch server with the made-up secondary sample saved as the school's setup** (window 1440 px):
 
@@ -131,7 +147,9 @@ the same way on main itself in two runs made for comparison, and passed in the l
 **Not tried in a browser** (the suites cover them): a teacher signed in with their own password seeing only their own
 box; Plan relief's busy list; the exams page's group "In a teacher-only period" and its mark; a head's read-only view
 of step 6; the Excel sheet opened in Excel; Print from the browser; in the new look, a period's box beside an exam box
-on the view of one date, and the board and step 6 again after the last merge (their code did not change in it).
+on the view of one date, and the board and step 6 again after the last merges (their code did not change in them); the
+phone day list on a real phone, in the dark look, and a real tap (it was looked at as two pictures at phone width, made
+by a script from the sample school).
 
 **On the school's real setup** (a scratch copy of the setup only, counts only, deleted afterwards): 99 teachers, 457
 lesson rows. One row for all teachers on one weekday, periods 2 to 5: no fault, 99 people, 99 block-outs. Through the
