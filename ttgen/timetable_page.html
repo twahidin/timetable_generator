@@ -78,7 +78,7 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .dlist{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 10px;margin-top:4px}
 .dlist .tm{font-weight:700;font-size:13px;font-variant-numeric:tabular-nums;padding-top:7px;white-space:nowrap}.dlist .tm.q{color:var(--muted);font-weight:600;padding-top:5px}
 .dlist .it{min-width:0;border-radius:8px;border:1px solid color-mix(in srgb,var(--a) 70%,transparent);border-left:4px solid var(--a);background:var(--t);padding:6px 9px;font-size:12.5px;color:var(--sub);overflow-wrap:anywhere;cursor:pointer}
-.dlist .it b{display:block;font-size:14px;color:var(--ink)}.dlist .it span + span::before{content:" · "}
+.dlist .it b{display:block;font-size:14px;color:var(--ink)}.dlist .it span:not(:last-child)::after{content:"\00a0·"}.dlist .it span + span::before{content:" "}
 .dlist .it.x{opacity:.5;filter:grayscale(.7)}.dlist .it.x b,.dlist .it.x span{text-decoration:line-through}.dlist .it.exam{--t:#F1EAFA;--a:#6b3fa0;cursor:default}.dlist .it.exam b{color:#4A2873}
 .dlist .bkr{border-radius:8px;padding:5px 9px;color:var(--muted);font-size:12.5px;background:repeating-linear-gradient(135deg,var(--stripe) 0 6px,var(--stripe2) 6px 12px)}.dlist .empty{grid-column:1/-1;padding:20px 0}
 .datepick{display:flex;align-items:center;gap:6px}.datepick input{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
@@ -376,7 +376,7 @@ function dayListHTML(v) {
   const items = dayItems(v, d).map(x => { const c = x.c;
     if (!c) return `<div class="tm q">${esc(cellTime(x))}</div><div class="bkr">${esc(x.name)}</div>`;
     const [t, a] = c.exam ? [] : pal(c.color);   /* an exam or event takes its colours from .it.exam */
-    return `<div class="tm">${esc(cellTime(c))}</div><div class="it${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${esc(c.id)}" tabindex="0" style="--t:#${esc(t)};--a:#${esc(a)}"`}><b>${esc(c.title)}</b>${c.lines.map(l => `<span>${esc(l)}</span>`).join("")}</div>`; }).join("");
+    return `<div class="tm">${esc(cellTime(c))}</div><div class="it${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${esc(c.id)}" tabindex="0" style="--t:#${esc(t)};--a:#${esc(a)}"`}><b>${esc(c.title)}</b>${c.lines.map(l => `<span>${esc(l).replace(/ · /g, "\u00a0· ")}</span>`).join("")}</div>`; }).join("");
   return h + `<div class="dlist">${items || `<div class="empty">No lessons this day.</div>`}</div></div>`;
 }
 /* the list's buttons: set the day, the week (the same weekday) or Whole week, then draw the view again as it is now */

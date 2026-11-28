@@ -483,6 +483,18 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(TM.run("S.pd"), 3, "the new answer's day"); assert(list(TM.view()).includes('data-pd="3" aria-pressed="true" class="on"'));
     TM.opt.t += 24 * 3600e3; TM.wins.pageshow.forEach(f => f({})); await TM.tick();
     assert.strictEqual(TM.fetched.filter(u => u === "/api/today").length, 3, "pageshow on yet another date");
+    /* a new date whose answer is the device's own weekday: the reset itself must draw the list again */
+    const TN = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true, { day: 4, t: DAY0 });
+    await TN.tick(); TN.run('show("classes", "3A")'); TN.run("pickDay(1)");
+    assert(list(TN.view()).includes('data-pd="1" aria-pressed="true" class="on"'));
+    TN.opt.t = DAY0 + 24 * 3600e3; TN.wins.pageshow.forEach(f => f({})); await TN.tick();
+    assert(list(TN.view()).includes('data-pd="3" aria-pressed="true" class="on"') && !list(TN.view()).includes('data-pd="1" aria-pressed="true"'), "the old day is not left lit: " + list(TN.view()));
+    /* a line with a dot inside: the list ties the dot to the word before it, the grid keeps the plain text */
+    const DT = boot({ "/api/published/exams": LIST }, APP);
+    await DT.tick(); DT.run('const cv1 = classView; classView = c => { const v = cv1(c); if (c === "3A") v.cells = v.cells.map((x, i) => i === 0 ? Object.assign({}, x, { lines: ["Chinese · Malay"] }) : x); return v; }; show("classes", "3A")');
+    assert(list(DT.view()).includes("<span>Chinese\u00a0· Malay</span>") && !list(DT.view()).includes("Chinese · Malay"), "the list: the dot stays with the word before it");
+    assert(grid(DT.view()).includes("Chinese · Malay") && !grid(DT.view()).includes("\u00a0"), "the grid keeps its plain dot");
+    assert(/\.dlist \.it span:not\(:last-child\)::after\{content:"\\00a0·"\}/.test(PAGE) && !PAGE.includes('span + span::before{content:" · "}'), "the separator between spans sits after the earlier span");
     /* a date view has no Day / Whole week switch; the page keeps the css for old phones */
     assert(PAGE.includes(".seg button{min-height:36px}") && /\.dlist \.it\{background:var\(--panel\);background:color-mix/.test(PAGE), "tap height and a plain dark background first");
     /* a button pressed before the answer wins */
