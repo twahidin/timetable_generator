@@ -329,7 +329,7 @@ GUARDS = {
     "relief_web.work": ('relief',),
     # relief stage 3: the relief team's (relief.team inside, in RELIEF_INSIDE) and the relief teacher's (relief plus "this
     # cover is yours", asked inside)
-    "relief_web.today": ('relief',),
+    "relief_web.today": ('relief',), "relief_web.ahead": ('relief',),
     "relief_web.approve": ('relief',),
     "relief_web.approve_all": ('relief',),
     "relief_web.send_out": ('relief',),
@@ -627,18 +627,18 @@ def no_account_field_reaches_a_page_that_is_not_the_admin_page():
 
 # relief requests (relief stage 2, relief/web.py): every route needs relief (the map above); these also ask a narrower
 # right inside, answered with their own sentence (a 403 that is not the guard's): relief.plan to see who is free, the
-# planned list and the relief sheet; relief.team for What's in. School leaders, HODs and SHs plan; the Relief team extra
+# planned list and the relief sheet; relief.team for All Relief Requests. School leaders, HODs and SHs plan; the Relief team extra
 # plans and is the relief team (R16)
 PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
 CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
-TEAM_ONLY = "Only the relief team can open What's in."
+TEAM_ONLY = "Only the relief team can open this."
 RELIEF_INSIDE = {("GET", "/api/relief/free"): ("relief.plan", CHOOSE_ONLY), ("GET", "/api/relief/absences/planned"): ("relief.plan", PLAN_ONLY),
                  ("GET", "/api/relief/planned.csv"): ("relief.plan", PLAN_ONLY), ("GET", "/api/relief/absences"): ("relief.team", TEAM_ONLY),
                  ("POST", "/api/relief/absences/seen"): ("relief.team", TEAM_ONLY)}
 # relief stage 3: the relief team's routes (Today, approving, changing, splitting, Fill now, the load tracker)
 _X, _K = "abcdef123456", urllib.parse.quote("2026-10-13/Even Tue/5/2/1A/Science/", safe="")
 RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
-    ("GET", "/api/relief/today"), ("POST", f"/api/relief/absences/{_X}/covers/{_K}/approve"), ("POST", "/api/relief/today/approve-all"),
+    ("GET", "/api/relief/today"), ("GET", "/api/relief/ahead"), ("POST", f"/api/relief/absences/{_X}/covers/{_K}/approve"), ("POST", "/api/relief/today/approve-all"),
     ("PUT", f"/api/relief/absences/{_X}/covers/{_K}/relief"), ("GET", f"/api/relief/absences/{_X}/covers/{_K}/free"),
     ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
     ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),

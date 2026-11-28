@@ -132,7 +132,7 @@ NOBODY_ELSE = "Nobody else is free then: choose someone in the app."
 NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 NOT_TOLD = "{officer} is not on Telegram: please tell them yourself."                 # said to a teacher (the form, /relief) when their reporting officer is not on Telegram
-OPEN_TODAY = "Open relief today"                # the button to Today's page (relief/report.py's too)
+OPEN_TODAY = "Open Today's Relief Assignments"   # the button to that tab (relief/report.py's too)
 TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "covered:", "needed:", "unlinked:", "work:", "late:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
 WAITING = ("queued", "sending")                 # ... in which they will be by itself, or are now
@@ -716,7 +716,7 @@ def due(pub, settings, records, now, reach, told, since, team=(), base="", short
     return [i for i in out if not _there(told, i["key"]) and _may(i, now, settings, pub)]
 
 
-# ---- what has been said of a relief (the report, Remind, and Today's page)
+# ---- what has been said of a relief (the report, Remind, and the page of Today's Relief Assignments)
 def key_of(told, r, c, ckey):
     """the key of the relief message of cover c as it is approved now"""
     return _relief_key_for(told, dict(absent=r["teacher"], ckey=ckey, approved_at=c["approved"].get("at"), who=c["relief"]))

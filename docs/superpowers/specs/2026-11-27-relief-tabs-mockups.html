@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relief page changes</title>
+<style>
+:root{--panel:#fff;--ink:#1d2433;--muted:#5d6678;--line:#e3e7ee;--navy:#1f4e78;--accent:#2563eb;--warn:#b42318;--warn-bg:#fdecec;--ok:#067647;--ok-bg:#e7f6ee;--chip:#eef2f8;
+  --lesson:#cfe0f3;--lesson-ink:#1f4e78;--rel:#fbe2c8;--rel-ink:#7a4b00;--exam:#efe4fb;--exam-ink:#6b3fa0;--new:#067647}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#a9c8df 0,#c7d7e4 60%,#dfe7ee 100%);color:var(--ink);font-size:14px;min-height:100vh}
+.wrap{max-width:1120px;margin:0 auto;padding:20px 16px 60px}
+.intro{background:#fff7e6;color:#7a4b00;border:1px solid #f3d9a4;border-radius:12px;padding:10px 14px;margin:0 0 18px;line-height:1.5}
+h1{font-size:20px;margin:0 0 4px}
+.part{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#0f2f4d;margin:28px 0 8px}
+.card{background:rgba(255,255,255,.93);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:14px}
+h2{font-size:17px;margin:0 0 6px}
+h3{font-size:14px;margin:14px 0 6px}
+.muted{color:var(--muted)}.small{font-size:12.5px}
+button{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:7px 12px;cursor:default}
+button.small{padding:3px 9px;font-size:12.5px}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tabs{align-items:flex-start}
+.tabs .tabcol>span:first-child{display:inline-block;padding:8px 16px;border-radius:999px;background:rgba(255,255,255,.85);border:1px solid var(--line);font-weight:500}
+.tabs .tabcol>span.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tabs .tabcol>span.renamed{outline:2px dashed #2563eb;outline-offset:2px}
+.tabs .tabcol>span.added{outline:2px dashed var(--ok);outline-offset:2px;background:#f3fbf6}
+.was{font-size:11px;color:var(--muted);display:block;text-align:center;margin-top:3px}
+.tabcol{display:inline-flex;flex-direction:column;align-items:center}
+.chip{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12.5px;background:var(--chip)}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}.chip.amber{background:#fff4e0;color:#9a5b00}.chip.blue{background:#e6efff;color:#1d4ed8}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.seg span{padding:7px 13px;border-right:1px solid var(--line)}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--navy);color:#fff}
+.seg span.hl{outline:2px dashed var(--accent);outline-offset:-3px}
+table{border-collapse:collapse;width:100%}
+th{color:var(--muted);font-weight:600;font-size:12px;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.day-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin:16px 0 4px;padding-bottom:4px;border-bottom:2px solid var(--navy)}
+.day-h b{font-size:15px;color:var(--navy)}
+.why{font-size:12px;color:var(--muted)}
+.ai{display:inline-block;font-size:11px;font-weight:700;color:#1d4ed8;background:#e6efff;border-radius:4px;padding:0 5px;margin-right:4px}
+.flag{display:inline-block;font-size:12px;color:#9a5b00;background:#fff4e0;border:1px solid #f3d9a4;border-radius:6px;padding:2px 8px;margin-top:6px}
+.flag.big{font-size:13px;padding:5px 10px}
+.answer{background:#f3f8ff;border:1px solid #cfe0f3;border-radius:12px;padding:12px 14px;line-height:1.55}
+.q{background:#fff;border:2px solid var(--accent);border-radius:12px;padding:10px 14px;margin-top:10px;line-height:1.5}
+/* the day strip */
+.dayline{margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fafbfc}
+.dayline .head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.strip{display:grid;grid-template-columns:repeat(20,minmax(0,1fr));gap:2px}
+.strip .p{font-size:10px;color:var(--muted);text-align:center}
+.strip .c{height:30px;border-radius:4px;background:#eef0f3;font-size:10.5px;line-height:1.15;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;padding:0 2px}
+.strip .c.l{background:var(--lesson);color:var(--lesson-ink)}
+.strip .c.r{background:var(--rel);color:var(--rel-ink)}
+.strip .c.x{background:var(--exam);color:var(--exam-ink)}
+.strip .c.n{background:#d8f0e1;color:var(--new);box-shadow:inset 0 0 0 2px var(--new);font-weight:700}
+.strip .run{grid-row:3;height:6px;border-radius:3px;background:#f0b35a}
+.strip.mini .c{height:14px;font-size:0}
+.strip.mini .p{display:none}
+.key{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+.key i{display:inline-block;width:14px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+/* Today's row and the Change list */
+.trow{display:grid;grid-template-columns:92px minmax(0,1.3fr) minmax(0,2fr) minmax(0,1.2fr);gap:6px 14px;padding:10px 6px;border-bottom:1px solid var(--line)}
+.trow.cols{font-size:12px;font-weight:600;color:var(--muted);padding:6px}
+.under{grid-column:1 / -1}
+.tier{font-size:11.5px;font-weight:700;color:var(--navy);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+.cand{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.4fr) auto auto;gap:4px 12px;align-items:center;padding:7px 8px;border-radius:8px}
+.cand:nth-child(even){background:#fafbfc}
+.fat{display:inline-block;background:#f1eafb;color:#6b3fa0;border-radius:4px;padding:0 6px;font-size:11px;font-weight:600}
+.mark{display:inline-block;font-size:11.5px;color:#9a5b00;background:#fff4e0;border-radius:4px;padding:0 5px}
+.setting{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.setting input{width:64px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:#fffdf3;font:inherit}
+.opt{border:1px dashed #9db4cf;border-radius:10px;padding:8px 12px;margin-top:8px}
+@media (max-width:760px){.trow{grid-template-columns:64px minmax(0,1fr)}.trow>.rel,.trow>.st{grid-column:1 / -1}.trow.cols{display:none}.cand{grid-template-columns:minmax(0,1fr) auto}.cand .ministrip{grid-column:1 / -1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Relief page changes: how they could look</h1>
+<div class="intro">A picture to react to, not the finished page. Every name here is made up. Pictures for the design "Relief: clearer tabs, changing a request, seeing a pick, and the morning re-look" (27 Nov). Your answers so far are drawn in; the design document has the details.</div>
+
+<!-- ============ 1. Tabs ============ -->
+<div class="part">1 · The tabs, renamed, with the new one</div>
+<div class="card">
+  <div class="tabs">
+    <span class="tabcol"><span>My absences</span></span>
+    <span class="tabcol"><span>Ask for relief</span></span>
+    <span class="tabcol"><span>Reliefs I'm covering</span></span>
+    <span class="tabcol"><span class="renamed">Relief Planning</span><span class="was">was "Plan relief"</span></span>
+    <span class="tabcol"><span class="renamed">All Relief Requests</span><span class="was">was "What's in"</span></span>
+    <span class="tabcol"><span class="renamed on">Today's Relief Assignments</span><span class="was">was "Today"</span></span>
+    <span class="tabcol"><span class="added">Planned Relief Assignments</span><span class="was">new</span></span>
+    <span class="tabcol"><span class="renamed">Term Relief Report</span><span class="was">was "Load"</span></span>
+    <span class="tabcol"><span>Weekly summary</span></span>
+  </div>
+  <p class="small muted" style="margin:12px 0 0">The new names also go into the headings on each tab, the help lines, the guides and the Telegram messages that name a tab (for example "open Today" becomes "open Today's Relief Assignments").</p>
+</div>
+
+<!-- ============ 2. Planned Relief Assignments ============ -->
+<div class="part">2 · Planned Relief Assignments (new tab) · my proposal</div>
+<div class="card">
+  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
+    <div><h2>Planned Relief Assignments</h2><div class="small muted">Every relief on the school days after today · as of Fri 27 Nov, 15:15</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <div class="seg"><span class="on">Next 2 weeks</span><span>This term</span></div>
+      <button class="small">Refresh</button>
+    </div>
+  </div>
+
+  <div class="day-h"><b>Mon 30 Nov</b><span class="small muted">1 teacher away · 2 lessons · <span class="chip ok">2 approved</span></span></div>
+  <table>
+    <thead><tr><th style="width:110px">Time</th><th>Lesson</th><th>For</th><th>Relief teacher</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      <tr><td><b>P4–P6</b><div class="small muted">08:40–09:40</div></td><td>2A Geography</td><td>Ms Grace Wong</td><td>Mr Team Lee</td><td><span class="chip ok">Approved · acknowledged</span></td><td></td></tr>
+      <tr><td><b>P10–P12</b><div class="small muted">10:40–11:40</div></td><td>2B Geography</td><td>Ms Grace Wong</td><td>Ms Ruth Goh</td><td><span class="chip">Approved · sent out</span></td><td></td></tr>
+    </tbody>
+  </table>
+
+  <div class="day-h"><b>Thu 3 Dec</b><span class="small muted">1 teacher away · 2 lessons · <span class="chip amber">2 waiting for you</span></span></div>
+  <table>
+    <thead><tr><th style="width:110px">Time</th><th>Lesson</th><th>For</th><th>Relief teacher</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      <tr><td><b>P7–P9</b><div class="small muted">09:40–10:40</div></td><td>1A, 1B Science</td><td>Mr Busy Chan</td><td>Ms Fiona Lim <div class="flag">5 h in a row with this relief</div></td><td><span class="chip amber">Waiting for you</span></td><td><button class="small">Open this day</button></td></tr>
+      <tr><td><b>P12–P14</b><div class="small muted">11:20–12:20</div></td><td>1C, 1D Science</td><td>Mr Busy Chan</td><td>Mr Flex Ng <span class="fat">Flexi Adjunct</span></td><td><span class="chip amber">Waiting for you</span></td><td><button class="small">Open this day</button></td></tr>
+    </tbody>
+  </table>
+  <p class="small muted" style="margin:12px 0 0">Read-only in this sketch: "Open this day" takes you to Today's Relief Assignments on that date, where Approve, Change and Split already are.</p>
+</div>
+
+<!-- ============ 3. Needs a nudge ============ -->
+<div class="part">3 · What "Needs a nudge" means</div>
+<div class="card">
+  <div class="answer">
+    <b>It is not about setting work on its own.</b> It lists absences that <b>someone else planned</b> for a teacher (a head planning relief for a colleague on Relief Planning), where that teacher <b>has not acknowledged it yet</b>, and it is now <b>past 15:00 on the school day before</b> the first lesson (the "Remind the absent teacher at" time in Relief settings).
+    It is the same moment the app sends that teacher the Telegram reminder: "Reminder: please acknowledge your relief … and set work." A teacher who asked for relief themselves never shows there.
+  </div>
+  <h3>Settled: renamed "Not acknowledged", and it also lists today's relief teachers who have not acknowledged, as soon as told</h3>
+  <div class="seg"><span>Coming up (2)</span><span class="on hl">Not acknowledged (2)</span><span>Today (1)</span><span>Earlier (0)</span><span>Cancelled (0)</span></div>
+  <table style="margin-top:10px">
+    <thead><tr><th>Submitted</th><th>For</th><th>When</th><th>Not acknowledged by</th></tr></thead>
+    <tbody>
+      <tr><td>Thu 26 Nov, 16:10</td><td>Ms Grace Wong<div class="small muted">planned by Mr Team Lee</div></td><td>Mon 30 Nov<div class="small muted">whole day · 2 lessons</div></td><td><span class="chip amber">absent teacher</span></td></tr>
+      <tr><td>Today, 06:20</td><td>Mr Busy Chan<div class="small muted">for themselves · app</div></td><td>Today<div class="small muted">P1–P9 · 2 lessons</div></td><td><span class="chip amber">relief: Ms Maya Lee, P7–P9</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 4. The relief teacher's day ============ -->
+<div class="part">4 · Seeing the relief teacher's day · my proposal</div>
+<div class="card">
+  <h2>On Today's Relief Assignments: "Their day" under the relief teacher</h2>
+  <div class="trow cols"><div>Time</div><div>Lesson</div><div>Relief teacher and why</div><div>Status</div></div>
+  <div class="trow">
+    <div><b>P7–P9</b><div class="small muted">09:40–10:40</div></div>
+    <div><b>1A, 1B Science</b><div class="small muted">for Mr Busy Chan · work set</div></div>
+    <div class="rel"><b>Ms Fiona Lim</b>
+      <div class="why"><span class="ai">AI</span>Rule 3, "lightest week first": Ms Fiona Lim has the lightest week of those free.</div>
+      <div class="flag">⚠ 5 h in a row with this relief (07:40–12:40)</div>
+      <div style="margin-top:6px"><button class="small">Their day ▾</button></div>
+    </div>
+    <div class="st"><span class="chip amber">Waiting for you</span><div style="display:flex;gap:6px;margin-top:6px"><button class="small primary">Approve</button><button class="small">Change</button><button class="small">Split</button></div></div>
+    <div class="under">
+      <div class="dayline">
+        <div class="head"><b>Ms Fiona Lim on Thu 3 Dec</b><span class="small muted">12 periods teaching · 3 relief (this one) · 1 exam duty</span></div>
+        <div class="strip">
+          <div class="p">P1</div><div class="p">P2</div><div class="p">P3</div><div class="p">P4</div><div class="p">P5</div><div class="p">P6</div><div class="p">P7</div><div class="p">P8</div><div class="p">P9</div><div class="p">P10</div><div class="p">P11</div><div class="p">P12</div><div class="p">P13</div><div class="p">P14</div><div class="p">P15</div><div class="p">P16</div><div class="p">P17</div><div class="p">P18</div><div class="p">P19</div><div class="p">P20</div>
+          <div class="c l" style="grid-column:span 3">3A Maths</div><div class="c l" style="grid-column:span 3">3B Maths</div><div class="c n" style="grid-column:span 3">1A, 1B Science (this relief)</div><div class="c l" style="grid-column:span 3">4A Maths</div><div class="c l" style="grid-column:span 3">4C Maths</div><div class="c"></div><div class="c x" style="grid-column:span 2">Exam duty</div><div class="c"></div><div class="c"></div>
+          <div class="run" style="grid-column:1 / span 15"></div>
+        </div>
+        <div class="key"><span><i style="background:var(--lesson)"></i>their lesson</span><span><i style="background:var(--rel)"></i>another relief</span><span><i style="background:var(--exam)"></i>exam duty or event</span><span><i style="background:#d8f0e1;box-shadow:inset 0 0 0 2px var(--new)"></i>this relief</span><span><i style="background:#f0b35a"></i>run with no free period</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2 style="margin-top:22px">On Change: each free teacher's day in a thin line, so you can compare</h2>
+  <div class="small muted">Free at P7–P9 on Thu 3 Dec: 3 teachers</div>
+  <div class="tier">Science · teaches Science</div>
+  <div class="cand">
+    <div><b>Ms Fiona Lim</b> <span class="why">Science: Maths, Science</span> <span class="mark">5 h in a row with this</span></div>
+    <div class="ministrip"><div class="strip mini"><div class="c l" style="grid-column:span 6"></div><div class="c n" style="grid-column:span 3"></div><div class="c l" style="grid-column:span 6"></div><div class="c"></div><div class="c x" style="grid-column:span 2"></div><div class="c"></div><div class="c"></div></div></div>
+    <span class="small">week 21</span><span class="chip ok">Chosen</span>
+  </div>
+  <div class="cand">
+    <div><b>Ms Maya Lee</b> <span class="why">Science: Science</span></div>
+    <div class="ministrip"><div class="strip mini"><div class="c l" style="grid-column:span 3"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c n" style="grid-column:span 3"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c l" style="grid-column:span 3"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c"></div></div></div>
+    <span class="small">week 23</span><button class="small">Choose</button>
+  </div>
+  <div class="tier">Other departments</div>
+  <div class="cand">
+    <div><b>Mr Art Lim</b> <span class="why">Aesthetics: Art</span></div>
+    <div class="ministrip"><div class="strip mini"><div class="c"></div><div class="c"></div><div class="c"></div><div class="c r" style="grid-column:span 3"></div><div class="c n" style="grid-column:span 3"></div><div class="c"></div><div class="c"></div><div class="c"></div><div class="c l" style="grid-column:span 3"></div><div class="c l" style="grid-column:span 3"></div><div class="c"></div><div class="c"></div></div></div>
+    <span class="small">week 24</span><button class="small">Choose</button>
+  </div>
+  <div class="small muted" style="margin-top:8px">Pointing at a block in the thin line names it ("4A Maths, P10–P12").</div>
+</div>
+
+<div class="card">
+  <h2>In Relief settings: how long counts as too long</h2>
+  <div class="setting">Mark a teacher who would teach more than <input value="3"> h <input value="40"> min in a row (lessons, relief, exam duties, with no free period between). Empty: no check.</div>
+  <div class="small muted" style="margin-top:6px">With 20-minute periods, 3 h 40 min is 11 periods: a run of 11 is fine, 12 or more is marked. You can still approve a marked teacher.</div>
+  <div class="q"><b>You chose: warn and avoid.</b> A long run becomes a mark, like "prefers not": the AI and the app's own order pick someone else when another teacher is free; the warning shows when nobody else is, or when a stronger rule (Flexi Adjunct Teachers first) wins.</div>
+</div>
+
+<!-- ============ 5. Ask the AI again ============ -->
+<div class="part">5 · Ask the AI to choose again, with a note in plain words · my proposal</div>
+<div class="card">
+  <h2>A new button on each row of Today's Relief Assignments</h2>
+  <div class="trow cols"><div>Time</div><div>Lesson</div><div>Relief teacher and why</div><div>Status</div></div>
+  <div class="trow">
+    <div><b>P7–P9</b><div class="small muted">09:40–10:40</div></div>
+    <div><b>1A, 1B Science</b><div class="small muted">for Mr Busy Chan · work set</div></div>
+    <div class="rel"><b>Ms Fiona Lim</b>
+      <div class="why"><span class="ai">AI</span>Rule 3, "lightest week first": Ms Fiona Lim has the lightest week of those free.</div>
+    </div>
+    <div class="st"><span class="chip amber">Waiting for you</span><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><button class="small primary">Approve</button><button class="small">Change</button><button class="small" style="outline:2px dashed var(--ok);outline-offset:2px">Ask AI again</button><button class="small">Split</button></div></div>
+    <div class="under">
+      <div class="dayline" style="background:#fff">
+        <div class="small" style="font-weight:600;margin-bottom:6px">Anything the AI should know this time? (optional)</div>
+        <textarea style="width:100%;min-height:54px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;background:#fffdf3">Try Ms Maya Lee or Mr Sam Tan first, see if they are free.</textarea>
+        <div class="small muted" style="margin-top:4px">Plain words. Names you type are replaced by "Teacher 1", "Teacher 2"… before anything reaches the AI, as with the picks today.</div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="small primary">Ask the AI</button><button class="small">Cancel</button></div>
+      </div>
+      <h3>What comes back</h3>
+      <div class="dayline" style="background:#fff">
+        <div class="small muted">You asked: "Try Ms Maya Lee or Mr Sam Tan first, see if they are free."</div>
+        <div style="margin-top:6px"><b>New pick: Ms Maya Lee</b></div>
+        <div class="why"><span class="ai">AI</span>You asked for Ms Maya Lee or Mr Sam Tan. Ms Maya Lee is free at P7–P9 and teaches Science; Mr Sam Tan is not free then.</div>
+        <div class="small" style="margin-top:6px;color:#7a4b00">Mr Sam Tan is not free then: teaching 3C Maths (P7–P9).</div>
+        <div style="display:flex;gap:6px;margin-top:8px"><button class="small primary">Approve Ms Maya Lee</button><button class="small">Keep Ms Fiona Lim</button></div>
+      </div>
+      <p class="small muted" style="margin:8px 0 0">Whether each name is free is checked by the app itself, not guessed by the AI: anyone teaching, away, on an exam duty or over a limit then is named with the reason.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 6. The relief team edits a request ============ -->
+<div class="part">6 · The relief team changes a request: dates, times, lessons, or cancels it · my proposal</div>
+<div class="card">
+  <h2>On All Relief Requests: an "Edit" button on each request still to come</h2>
+  <table>
+    <thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Relief status</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>Today, 14:26</td><td>Mr Busy Chan<div class="small muted">for themselves · app</div></td><td>Mr Busy Chan</td><td>Wed 2 Dec, Thu 3 Dec<div class="small muted">whole day · 4 lessons</div></td><td>Medical</td><td><span class="chip">2 of 4 approved · 2 waiting</span></td><td><button class="small" style="outline:2px dashed var(--ok);outline-offset:2px">Edit</button></td></tr>
+      <tr><td colspan="7" style="background:#fafbfc">
+        <h3 style="margin-top:4px">Change the dates or times</h3>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+          <div><div class="small muted" style="margin-bottom:4px">Dates</div><div class="seg"><span>Today</span><span>Tomorrow</span><span class="on">Pick dates</span></div><div class="small" style="margin-top:6px"><span class="chip">Thu 3 Dec</span> <span class="chip">Fri 4 Dec</span> <span class="muted">(the two-month calendar opens here, as on Ask for relief)</span></div></div>
+          <div><div class="small muted" style="margin-bottom:4px">Away for</div><div class="seg"><span>Whole day</span><span class="on">Some periods</span></div><div class="small" style="margin-top:6px">From <b>P1</b> to <b>P9</b></div></div>
+        </div>
+        <div class="dayline" style="background:#fff">
+          <div class="small" style="font-weight:600;margin-bottom:6px">What this change does</div>
+          <div class="small">✔ <b>Kept:</b> Thu 3 Dec P7–P9, 1A, 1B Science · Ms Fiona Lim stays (approved), the work set stays</div>
+          <div class="small" style="margin-top:4px">➕ <b>Added:</b> Fri 4 Dec P2–P4, 2C Science · a relief teacher will be picked</div>
+          <div class="small" style="margin-top:4px;color:#7a4b00">✖ <b>No longer needed:</b> Wed 2 Dec P4–P6, 2A Science · Mr Team Lee is told the relief is no longer needed</div>
+          <div class="small" style="margin-top:4px;color:#7a4b00">✖ <b>No longer needed:</b> Thu 3 Dec P12–P14, 1C, 1D Science (after P9 now) · nobody was approved yet</div>
+          <div style="margin-top:8px" class="small">Reason for the change (optional) <input style="width:260px;border:1px solid var(--line);border-radius:6px;padding:4px 7px;background:#fffdf3;font:inherit" value="Back in school on Wed after all"></div>
+          <div style="display:flex;gap:8px;margin-top:8px"><button class="small primary">Save the change</button><button class="small">Cancel</button></div>
+          <div class="small muted" style="margin-top:6px">Mr Busy Chan is told on Telegram what the relief team changed.</div>
+        </div>
+
+        <h3>Or change one lesson</h3>
+        <div class="dayline" style="background:#fff;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+          <div><b>Thu 3 Dec · P7–P9</b> · 1A, 1B Science <span class="small muted">· Ms Fiona Lim, approved</span></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input placeholder="Why (optional)" style="width:180px;border:1px solid var(--line);border-radius:6px;padding:4px 7px;background:#fffdf3;font:inherit"><button class="small">Relief not needed</button></div>
+        </div>
+
+        <h3>Or cancel the whole request</h3>
+        <div class="dayline" style="background:#fff">
+          <div class="small" style="margin-bottom:6px">Say why in a line <b>(needed)</b></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><input style="flex:1 1 240px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:#fffdf3;font:inherit" value="Medical appointment moved to the holidays"><button class="small" style="color:var(--warn)">Cancel the request</button><button class="small">Keep it</button></div>
+          <div class="small muted" style="margin-top:6px">Everyone already told (the relief teachers and Mr Busy Chan) gets a message that it is cancelled.</div>
+        </div>
+      </td></tr>
+    </tbody>
+  </table>
+  <p class="small muted" style="margin:10px 0 0">On Today's Relief Assignments each row also gets <b>Relief not needed</b> (why optional), for when you are already looking at that lesson.</p>
+</div>
+
+<!-- ============ 7. Notify all and the morning re-look ============ -->
+<div class="part">7 · Notify all, and the morning re-look before 07:00</div>
+<div class="card">
+  <h2>Relief on Thu 3 Dec</h2>
+  <div class="small muted">Thu 3 Dec · 2 teachers away · the day rearranges by itself until 07:00</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 12px">
+    <button class="primary" style="outline:2px dashed var(--ok);outline-offset:2px">Notify all</button>
+    <button>Approve all 1 waiting</button><button>Send out 2 approved</button><button>Fill now</button><button class="small">Refresh</button>
+  </div>
+  <div class="small muted" style="margin:-4px 0 12px">Notify all: approves what is waiting and the re-look below, then sends everything out, in one press.</div>
+
+  <div class="dayline" style="background:#f3f8ff;border-color:#cfe0f3">
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>The re-look suggests 2 changes</b><span class="small muted">06:40, after Ms Evelyn Koh asked for relief (English)</span></div>
+    <div class="small" style="margin-top:6px">1. <b>P7–P9 · 3B English</b> (new): <b>Mr Flex Ng</b> <span class="fat">Flexi Adjunct</span></div>
+    <div class="why" style="margin-left:14px"><span class="ai">AI</span>Rule 2, Flexi Adjunct Teachers, "match the subject": Mr Flex Ng teaches English.</div>
+    <div class="small" style="margin-top:6px">2. <b>P7–P9 · 1A, 1B Social Studies</b>: <b>Ms Maya Lee</b> instead of Mr Flex Ng (approved, sent out)</div>
+    <div class="why" style="margin-left:14px"><span class="ai">AI</span>Rule 3, "lightest week first": Ms Maya Lee has the lightest week of those free; Mr Flex Ng is needed for English.</div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="small primary">Approve the rearrangement</button><button class="small">Keep as it was</button></div>
+    <div class="small muted" style="margin-top:6px">Until then Mr Flex Ng keeps Social Studies and nobody is told anything. Once approved, Mr Flex Ng is told the Social Studies relief has moved; both new reliefs go out with Send out or Notify all.</div>
+  </div>
+
+  <div class="trow cols" style="margin-top:12px"><div>Time</div><div>Lesson</div><div>Relief teacher and why</div><div>Status</div></div>
+  <div class="trow">
+    <div><b>P7–P9</b><div class="small muted">09:40–10:40</div></div>
+    <div><b>1A, 1B Social Studies</b><div class="small muted">for Mr Busy Chan · work set</div></div>
+    <div class="rel"><b>Mr Flex Ng</b> <span class="fat">Flexi Adjunct</span><div class="small" style="color:#1d4ed8;margin-top:4px">Re-look: Ms Maya Lee instead (see above)</div></div>
+    <div class="st"><span class="chip">Approved · sent out</span></div>
+  </div>
+  <div class="trow">
+    <div><b>P7–P9</b><div class="small muted">09:40–10:40</div></div>
+    <div><b>3B English</b><div class="small muted">for Ms Evelyn Koh · no work yet</div></div>
+    <div class="rel"><span class="muted">Waiting for the rearrangement above</span></div>
+    <div class="st"><span class="chip amber">Waiting for you</span></div>
+  </div>
+  <p class="small muted" style="margin:10px 0 0">After 07:00 nothing moves by itself: a new lesson is picked on its own, and you rearrange with Change or Ask AI again. A head's own choice, and the relief team's own choices, are never moved.</p>
+</div>
+
+</div>
+</body>
+</html>

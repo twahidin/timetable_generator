@@ -8,7 +8,7 @@ tick (every minute: tell.MINUTE, after relief/report.py's) makes it. The day is 
 raised by tgdb.raise_state before anything is queued, in one step) so that a restart or a second copy of the app never makes it
 twice; it is claimed when there is nothing to cover too, and then nothing is sent. If the app was down at the morning time it goes
 when the app is back, until the cut-off; after the cut-off it is not made for that day. While nobody on duty can be reached the
-day is not claimed. morning:{date}:{name} goes to each, with the button Open relief today, and is dropped when its day is not
+day is not claimed. morning:{date}:{name} goes to each, with the button Open Today's Relief Assignments, and is dropped when its day is not
 today any more, once the cut-off has come, or when its person is not on the team any more (tell.CHECKS).
 
 counts counts every cover of today that needs relief (fill._covers: its lesson needed and not over, of an absence not cancelled,
