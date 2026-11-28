@@ -10,7 +10,7 @@ ENTIRE = "Entire Class"
 KINDS = dict(planned="Relief planned", remind="Reminder to acknowledge", officer="To the reporting officer", ask="Request to change", askpick="New pick for a request to change",
              kept="Relief kept", cancelled="Absence cancelled", gone="No longer needed", moved="Relief moved", stopped="Not happening", again="On again", weekly="Weekly summary",
              late="Late request for today", morning="Morning message", repeat="Reminder of a relief", needed="Relief needed again", covered="Who covers you",
-             unlinked="Bot blocked alert", work="Please set work")       # a relief, a report and an all clear have none (relief/tgweb.py's UNSENT_LEFT_OUT)
+             unlinked="Bot blocked alert", work="Please set work", changed="Request changed", notneeded="Relief not needed", edited="Changed request for today")       # a relief, a report and an all clear have none (relief/tgweb.py's UNSENT_LEFT_OUT)
 
 
 def class_group(x):
