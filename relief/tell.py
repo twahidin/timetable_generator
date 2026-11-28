@@ -31,6 +31,8 @@ changed:{id}:{at} to the absent teacher, of the last change when someone else ma
 added and of those no longer needed, and "acknowledge again" while she has not acknowledged and it, or a change since the last
 one she was told of, cleared the acknowledgement); notneeded:{id}:{key}:{at} to the absent teacher, of
 a lesson someone else (not the app, which marks one a co-teacher is there for) marked not needed, while it is not over;
+changed:{id}:{at}:{planner} and notneeded:{id}:{key}:{at}:{planner} the same to the head who planned the request, when someone
+else (the absent teacher too) made it, the change not when it reaches them as one of the team (edited) (the lead's call, 28 Nov);
 edited:{id}:{at}:{name}, to each of the team but who made it and the absent teacher, of the last change when it was made today
 (the school's date), by anyone, and it added a lesson of today that needs relief or took away one that needed it (counted; a
 lesson a co-teacher is there for counts for nothing; "Changed by {who}" when it was not the absent teacher), in the team's
@@ -223,6 +225,15 @@ def changed_text(by, days, away, added, gone, again):
 
 def notneeded_text(by, lesson, periods, day):
     return f"🚫 Relief not needed · {day}\n{lesson} · {periods}\nMarked by {by}."
+
+
+def planner_changed_text(by, absent, days, away, added, gone):
+    """to the head who planned the relief: someone else changed it (_parts: by lessons that need relief)"""
+    return f"✏️ The relief you planned for {absent} was changed by {by}\nNow: {days} · {away}\n{_parts(added, gone)}"
+
+
+def planner_notneeded_text(by, absent, lesson, periods, day):
+    return f"🚫 Relief not needed · {day}\n{absent} · {lesson} · {periods}\nMarked by {by}."
 
 
 def edited_text(absent, away, added, gone, by=None):
@@ -485,7 +496,8 @@ def _stops(w, key, ref, r, x, c):
 def _absence(w, r):
     """what one absence (not past) has to say of itself"""
     if r.get("cancelled"): return _cancelled(w, r)
-    out = _officer(w, r) + _changed(w, r) + _notneeded(w, r) + _edited(w, r) + _work(w, r)
+    edited = _edited(w, r)
+    out = _officer(w, r) + _changed(w, r) + _planner_changed(w, r, edited) + _notneeded(w, r) + _planner_notneeded(w, r) + edited + _work(w, r)
     if r.get("how") == "planned" and r.get("by") != r["teacher"] and not r.get("acknowledged") and r["teacher"] in w.reach: out = _planned(w, r) + out
     return _late(w, r) + out
 
@@ -634,6 +646,41 @@ def _changed(w, r):
     added, gone = _needs(ch)
     text = changed_text(ch.get("by"), words.days(r), words.away(r), len(added), len(gone), _again(w, r, ch))
     return [_item(f"changed:{r['id']}:{ch['at']}", r["teacher"], "changed", text, [[dict(text=OPEN, url=w.base + "/relief#mine")]], ref=dict(id=r["id"], at=ch["at"]))]
+
+
+def _planner(w, r):
+    """the head who planned the absence (not the absent teacher herself, never of a backup), when they can be reached, else None"""
+    by = r.get("by")
+    if r.get("how") != "planned" or r.get("exams") or by in (None, "app", r["teacher"]) or by not in w.reach: return None
+    return by
+
+
+def _planner_changed(w, r, edited):
+    """changed:{id}:{at}:{planner}, to the head who planned it, of the last change when someone else made it (the absent teacher
+    or the relief team), since the bot was connected, as the absent teacher is told (_changed) and at any hour; not when the change
+    reaches them as one of the team already (edited: _edited's messages, of a change of today: made before the team's window, it waits for it, and the lessons it counts are not over)"""
+    ch, name = _last_change(r), _planner(w, r)
+    if ch is None or name is None or ch.get("by") == name or not _since(w, ch["at"]) or any(x["name"] == name for x in edited): return []
+    added, gone = _needs(ch)
+    text = planner_changed_text(ch.get("by"), r["teacher"], words.days(r), words.away(r), len(added), len(gone))
+    return [_item(f"changed:{r['id']}:{ch['at']}:{name}", name, "changed", text, [[dict(text=OPEN, url=w.base + "/relief#plan")]], ref=dict(id=r["id"], at=ch["at"]))]
+
+
+def _planner_notneeded(w, r):
+    """notneeded:{id}:{key}:{at}:{planner}, to the head who planned it, of each lesson someone else (not the app) marked not needed
+    since the bot was connected, while the lesson is not over, as the absent teacher is told (_notneeded)"""
+    name = _planner(w, r)
+    if name is None: return []
+    out = []
+    for x in r.get("lessons") or []:
+        nn = x.get("not_needed") if isinstance(x, dict) else None
+        if not isinstance(nn, dict) or x.get("needed") or nn.get("by") in (name, "app", None) or not _since(w, nn.get("at")): continue
+        ends = _ends(x, x, w.bnds)
+        if ends <= w.now: continue
+        out.append(_item(f"notneeded:{r['id']}:{x['key']}:{nn['at']}:{name}", name, "notneeded",
+                         planner_notneeded_text(nn["by"], r["teacher"], words.class_group(x), words.periods_text(x), words.day(x["date"])),
+                         ref=dict(id=r["id"], key=x["key"], at=nn["at"], ends=ends.isoformat())))
+    return out
 
 
 def _notneeded(w, r):

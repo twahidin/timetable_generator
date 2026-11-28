@@ -3041,6 +3041,49 @@ def relief_not_needed_by_someone_else_tells_the_absent_teacher():
         at("11:30", 13); assert [x for x in dues() if x["kind"] == "notneeded"] == [], "over"
 
 @t
+def the_head_who_planned_it_hears_of_a_change():
+    """the lead's call (28 Nov): the planner is told when the relief team or the absent teacher changes their planned request, or
+    marks a lesson of it not needed; never of their own doing, nor of a request the teacher asked herself"""
+    by_team = "✏️ The relief you planned for Ms Evelyn Koh was changed by Ms Team Tan\nNow: Tue 13 Oct · P1–P5\n1 lesson no longer needed"
+    nn_k5 = "🚫 Relief not needed · Tue 13 Oct\nMs Evelyn Koh · 1A, 1B Science (G2) · P6–P7\nMarked by Ms Team Tan."
+    assert TE.planner_changed_text(TEAM, EVE, "d", "P1", 1, 0) == "✏️ The relief you planned for Ms Evelyn Koh was changed by Ms Team Tan\nNow: d · P1\n1 lesson needing relief added"
+    with school(EVE, TEAM, HUGO):
+        i = absent(by=HUGO); swept(); when = changed(i, TEAM, periods=[0, 4]); swept()
+        r, = outs("changed", HUGO); assert (r["key"], r["text"], buttons_of(r)) == (f"changed:{i}:{when}:{HUGO}", by_team, [[dict(text="Open in the app", url=BASE + "/relief#plan")]])
+        assert said(HUGO)[-1] == by_team and said(EVE)[-1] == CHANGED_BY_TEAM and "made-up why" not in str(rows("outbox")) and swept() == 0
+        absences.not_needed(i, K2, "a made-up why", TEAM, team=True); swept()
+        assert said(HUGO)[-1].startswith("🚫 Relief not needed · Tue 13 Oct\nMs Evelyn Koh · ") and said(HUGO)[-1].endswith("\nMarked by Ms Team Tan."), said(HUGO)
+        r, = outs("notneeded", HUGO); assert r["key"].endswith(f":{HUGO}") and r["kind"] == "notneeded" and "made-up why" not in r["text"]
+    with school(EVE, TEAM, HUGO):                                                          # a lesson marked not needed by the team
+        i = absent(by=HUGO); swept(); absences.not_needed(i, K5, "", TEAM, team=True); swept(); assert said(HUGO)[-1] == nn_k5 and said(EVE)[-1] == NOT_NEEDED_K5
+    with school(EVE, HUGO):                                                                # by the absent teacher herself: the planner alone
+        i = absent(by=HUGO); swept(); absences.not_needed(i, K5, "", EVE); swept()
+        assert said(HUGO)[-1] == nn_k5.replace("Ms Team Tan", EVE) and told_of("notneeded") == [("notneeded", HUGO)]
+        absences.needed_again(i, K5, EVE); at("09:05"); changed(i, EVE, periods=[0, 4], team=False); swept()
+        assert said(HUGO)[-1] == by_team.replace("Ms Team Tan", EVE) and told_of("changed") == [("changed", HUGO)]
+    with school(EVE, HUGO):                                                                # by the planner: never to them
+        i = absent(by=HUGO); swept(); absences.not_needed(i, K5, "", HUGO); changed(i, HUGO, periods=[0, 4], team=False); swept()
+        assert told_of("changed", HUGO) == [] and told_of("notneeded", HUGO) == [] and told_of("changed") == [("changed", EVE)]
+    with school(EVE, TEAM, HUGO):                                                          # asked by the teacher: no planner
+        i = absent(); swept(); changed(i, TEAM, periods=[0, 4]); swept(); assert told_of("changed") == [("changed", EVE)]
+    with school(EVE, TEAM, HUGO):                                                          # queued, then changed again before it went: dropped, the last said
+        i = absent(by=HUGO); first = changed(i, TEAM, periods=[0, 4]); TE.sweep(); at("09:05"); changed(i, TEAM, dates=["2026-10-14"]); send()
+        assert state(f"changed:{i}:{first}:{HUGO}") == "dropped"; swept(); assert [x.splitlines()[1] for x in said(HUGO) if x.startswith("✏️")] == ["Now: Wed 14 Oct · whole day"]
+    with school(EVE, TEAM):                                                                # not reached, or before the bot was connected: nothing
+        i = absent(by=HUGO); changed(i, TEAM, periods=[0, 4]); assert [x for x in dues() if x["name"] == HUGO] == []
+        assert [x for x in dues(reach={HUGO: 1, EVE: 1}, since="2026-10-12T09:30:00+08:00") if x["name"] == HUGO] == []
+    with school(EVE, TEAM, LEE, HUGO):                                                     # a planner on the relief team, of a change of today: the team's message alone
+        i = absent(by=HUGO); swept(); at("08:00", 13); changed(i, TEAM, periods=[5, 11]); team = (TEAM, LEE, HUGO)
+        got = sorted((x["kind"], x["name"]) for x in dues(team=team) if x["kind"] in ("changed", "edited"))
+        assert got == [("changed", EVE), ("edited", HUGO), ("edited", LEE)], got
+    with record(HUGO, extras=dict(relief=True, exams=None, admin=False)), school(EVE, TEAM, LEE, HUGO):   # made at 05:00: the team's message alone, from the morning time
+        i = absent(by=HUGO); swept(); at("05:00", 13); changed(i, TEAM, periods=[5, 11]); swept(); assert told_of("changed", HUGO) == [] and told_of("edited") == []
+        at("06:30", 13); swept(); assert told_of("edited", HUGO) == [("edited", HUGO)] and told_of("changed", HUGO) == []
+    with school(EVE, TEAM, LEE, HUGO):                                                     # the same planner, of a change of another day: their own message
+        i = absent(by=HUGO); swept(); changed(i, TEAM, dates=["2026-10-13", "2026-10-14"])
+        assert ("changed", HUGO) in [(x["kind"], x["name"]) for x in dues(team=(TEAM, LEE, HUGO))]
+
+@t
 def the_team_hears_when_a_teacher_changes_today():
     with record(EVE, extras=dict(relief=True, exams=None, admin=False)), school(EVE, TEAM, LEE):
         i = absent(); swept(); at("08:00", 13); when = changed(i, EVE, periods=[5, 11], team=False); swept()

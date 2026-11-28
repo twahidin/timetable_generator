@@ -116,8 +116,10 @@ exam or event schedule, so change the duty instead.
 - **On Telegram:** when somebody other than the absent teacher changes the request, marks one of its lessons not needed
   or cancels it, the absent teacher is told what changed and by whom (never the reason typed). When a change adds a lesson
   to a request a head planned, the absent teacher is asked to acknowledge again and set work for it; a change that only
-  takes lessons away keeps the acknowledgement. When anyone changes a request for today, the rest of the relief team is
-  told (who changed it, when it was not the absent teacher). The counts in these messages are of lessons that need relief:
+  takes lessons away keeps the acknowledgement. The head who planned a request is told the same way when somebody else
+  (the relief team, or the absent teacher) changes it or marks one of its lessons not needed; a head who is also on the
+  relief team gets the team's message alone for a change of today. When anyone changes a request for today, the rest of
+  the relief team is told (who changed it, when it was not the absent teacher). The counts in these messages are of lessons that need relief:
   a lesson a co-teacher is there for counts for nothing, and a change of today that moves only such lessons pings nobody. A reporting officer who was told of the absence is told the new dates and times (with the kind of reason alone). Relief teachers already
   told hear "no longer needed" or "cancelled", as before. When several changes come close together, only the last is told.
 

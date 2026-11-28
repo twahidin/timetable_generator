@@ -57,7 +57,7 @@ ticked on its Added line; something left to cover (a request whose new lessons a
    as a late request by a head is told: the design named the teacher's own case.
 10. (Fix wave) Out of the wave, written here instead: a dropped lesson an exam or event cover takes back is announced only
     as "No longer needed" (the same teacher may be asked again minutes later); the planner is not told when the team or the
-    teacher changes their planned relief (the lead's call); a teacher whose own request was cancelled by someone else before
+    teacher changes their planned relief (the lead's call: settled 28 Nov, see "The lead's calls, 28 Nov" below); a teacher whose own request was cancelled by someone else before
     this piece may get the cancel message once after the deploy; the record's dates and periods after a change describe
     earlier days by the new periods; a lesson whose timetable changed shows as No longer needed plus Added on opening.
 11. All Relief Requests' view buttons ask first (a confirm box) when an open Edit holds unsaved choices; the Edit view stays
@@ -142,3 +142,16 @@ passwords, real clicks and typing (the From and To lists were set by form_input:
   Ask for relief anyway on a shared lesson in the Edit view made it a lesson to cover and a relief teacher was picked; the
   Edit stayed open after the step; a request changed earlier opens on "Nothing changes yet."; no console errors.
 - Not tried: a real phone; a screen reader; a real Telegram bot (never called); Print.
+
+## The lead's calls, 28 Nov (after the merge of PR #120)
+
+1. **The head who planned a request is told** when somebody else changes it: the relief team, or the absent teacher herself.
+   They get "✏️ The relief you planned for {teacher} was changed by {who}", the new dates and times and the counts (as the
+   absent teacher's message), with "Open in the app" to Relief Planning; and "🚫 Relief not needed · {day}" with
+   "{teacher} · {lesson} · {periods}" and "Marked by {who}" for a lesson marked not needed. Never of their own doing, never the
+   typed reason, at any hour (as the absent teacher's), the last change alone when several come close together. A head who is
+   also on the relief team gets only the team's "Changed request for today" for a change of today's lessons, not both. The
+   Edit view's line under Save names them too: "{teacher} and {head} are told on Telegram, if they have linked it." Built on
+   branch `relief-planner-told`.
+2. **The relief team hears of a head's change of today** as well as the teacher's: kept as built (ruling 9).
+
