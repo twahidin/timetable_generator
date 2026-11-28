@@ -703,7 +703,7 @@ def unfilled_rows(spec):
 
 def normalise(spec):
     """the editor's JSON -> the exact spec an agent would read from the workbook (codes, periods and lesson lengths worked out)"""
-    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices"): spec.setdefault(k, [])
+    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices", "staff_periods"): spec.setdefault(k, [])
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp: path = tmp.name
     try:
         write_template(spec, path); return read_template(path)
@@ -3067,6 +3067,7 @@ REPUBLISHED = "The timetable was published again: reload the page."
 NO_DAY_CAL = "The school calendar is not set yet, so the timetable cannot be shown on a date."
 ONLY_STAFF_PRINTS = "Only staff can open the seating plans and rosters."
 ONLY_OWN_DUTIES = "Sign in with your own code or password to see your exam and event duties."
+ONLY_OWN_PERIODS = "Sign in with your own code or password to see your teacher-only periods."
 ONLY_OWN_EVENTS = "Sign in with your own code or password to start or open an event."
 
 def _exams_gate():
@@ -3520,6 +3521,19 @@ def exams_my_duties():
     if rights is None: return {"error": ONLY_OWN_DUTIES}, 403   # the shared heads', teacher and student codes are nobody's
     return jsonify(exams_published.my_duties(pub, _exam_cal(pub), exams_schedules.on_site(), rights[1], _exams_today()))
 
+@app.get("/api/timetable/my-periods")
+@need("timetable")
+def timetable_my_periods():
+    """a person's own teacher-only periods from the published timetable, signed in by name any way (the shared committee code: no one's, so none;
+    the shared heads', teacher and student codes: refused). The staff page is one page kept for all staff, so a teacher's periods come here"""
+    from ttgen import export
+    pub = store.published(); rights = _exams_rights(pub)
+    if rights is None: return {"error": ONLY_OWN_PERIODS}, 403
+    if not pub: return jsonify(staff=[], lines=[])
+    m = pub["model"]; me = rights[1]
+    return jsonify(staff=[[c["teacher"], c["d"], c["p"], c["n"], c["name"], c["place"], c["t0"], c["t1"], c["before"], c["after"], c["m0"], c["m1"]] for c in export.staff_cells(m, me)],
+                   lines=export.staff_lines(m, me))
+
 @app.get("/api/me/exams")
 @need("own")
 def exams_my_exams():
@@ -3679,7 +3693,7 @@ def _exam_away(pub, s, by, now, b):
     if ap is None: raise ValueError(exams_approval.NOT_ON_SITE)
     d, got = _exam_candidates(pub, ap, key, room, approved=True)
     if d is None: raise ValueError("That duty is not on the main site.")
-    if name not in {c["name"] for g in ("freed", "free", "backups") for c in got[g]}: raise ValueError("%s is not free then." % name)
+    if name not in {c["name"] for g in ("freed", "free", "backups", "period") for c in got[g]}: raise ValueError("%s is not free then." % name)
     exams_approval.replace(s, key, room, away, name, by, now)
 
 @app.post("/api/exams/<id>/away")
@@ -3872,7 +3886,7 @@ def _event_send(pub, s, by, now, b):
     exams_approval.send(s, pub["model"], by, now, False, exams_events.send_errors(pub, _exam_cal(pub), s, busy, others))
 
 def _event_free(pub, s):
-    """who may stand in for someone going with the approved event: the names relief finds free then (freed, then free)"""
+    """who may stand in for someone going with the approved event: the names relief finds free then (freed, then free, then those in a teacher-only period)"""
     ap = exams_approval.as_schedule(s)
     if ap is None: raise ValueError(exams_approval.NOT_ON_SITE)
     return exams_events.who_free(pub, _exam_cal(pub), ap, exams_schedules.elsewhere(s.get("id"), pub["model"], own=ap))
@@ -3880,7 +3894,7 @@ def _event_free(pub, s):
 def _event_away(pub, s, by, now, b):
     away, name = b["away"], b["name"]
     if not all(isinstance(x, str) for x in (away, name)): raise ValueError(exams_schedules.EVENT_WRONG)
-    if name not in {c["name"] for g in ("freed", "free") for c in _event_free(pub, s)[g]}: raise ValueError("%s is not free then." % name)
+    if name not in {c["name"] for g in ("freed", "free", "period") for c in _event_free(pub, s)[g]}: raise ValueError("%s is not free then." % name)
     exams_approval.replace_going(s, away, name, by, now)
 
 @app.get("/api/events/<id>/review")

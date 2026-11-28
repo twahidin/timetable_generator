@@ -842,6 +842,48 @@ def test_a_preview_of_a_trade_shows_both_classes_changed():
     assert sorted(g["name"] for g in j["classes"]) == sorted(CLASSES) and _row(j, CLASSES[0], 1)["mark"] == "changed" and _row(j, CLASSES[1], 2)["mark"] == "changed"
     assert _row(j, CLASSES[0], 1)["teachers"] == [T1] and _row(j, CLASSES[1], 2)["teachers"] == [T0] and fixes_stored() == [] and taught(1) == [[T0]]
 
+def test_a_forced_lesson_on_a_teacher_only_period_publishes():
+    assert L1 == 1 and DAYS[0] == "Mon" and SPEC["school"]["start_time"] == "07:30" and int(SPEC["school"]["period_minutes"]) == 30   # periods 1 and 2 of Monday are 8.00 to 9.00
+    who = TEACHERS[1]; staff = [dict(_id="z1", name="Staff meeting", all=False, depts=[], teachers=[who], week="Both", days=["Mon"], times=["08:00", "09:00"], place="Hall")]
+    assert c.put("/api/setup", json=dict(spec=dict(SPEC, staff_periods=staff), why="a staff meeting")).status_code == 200
+    sent, real = [], store.publish
+    try:
+        fresh(CLEAN); f = move(2, (0, L1 + 1)); why = f"{who} has Staff meeting then (Mon 8.00 to 9.00)."
+        raises(ValueError, lambda: draft.fix(f), why); draft.fix(dict(f, force=True, why=why))
+        j = draft.info(); text = f"{who} has {SUBJ2} for {CLASSES[1]} on {DAYS[0]} period {L1 + 1} during Staff meeting (8.00 to 9.00)."
+        ws = [w for w in j["warnings"] if w["text"] == text and not w["decision"]]
+        assert len(ws) == 1 and ws[0]["staff"] == why and j["critical"] == 0 and not [w for w in j["warnings"] if "staff" in w and w["text"] != text], [w["text"] for w in j["warnings"]]
+        store.publish = lambda *a, **k: sent.append(k)
+        r = c.post("/api/draft/publish"); assert r.status_code == 200 and len(sent) == 1 and text in sent[0]["extra"]["left"], r.get_json()
+    finally:
+        store.publish = real
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
+def test_the_preview_shows_a_teacher_only_period_from_the_setup_as_it_is_now():
+    import re
+    who = TEACHERS[1]; staff = [dict(_id="z2", name="Zone computing class", all=False, depts=[], teachers=[who], week="Both", days=["Tue"], times=["15:00", "16:00"], place="West Zone centre")]
+    assert c.put("/api/setup", json=dict(spec=dict(SPEC, staff_periods=staff), why="a zone class")).status_code == 200
+    try:
+        fresh(); html = c.get("/draft/preview").get_data(as_text=True)
+        data = json.loads(re.search(r"<script>const DATA = (.*?);</script>", html, re.S).group(1).replace("<\\/", "</"))
+        assert data["staff"] and all(r[0] == who and r[4] == "Zone computing class" for r in data["staff"]) and list(data["staff_lines"]) == [who], data["staff"]
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
+def test_the_board_holds_the_teacher_only_periods_of_the_setup_and_nothing_else_changes():
+    who, other = TEACHERS[1], TEACHERS[0]; staff = [dict(_id="z3", name="Staff meeting", all=False, depts=[], teachers=[who], week="Both", days=["Mon"], times=["08:00", "09:00"], place="Hall")]
+    try:
+        fresh(); plain = draft.board(); assert plain["staff"] == []
+        assert c.put("/api/setup", json=dict(spec=dict(SPEC, staff_periods=staff), why="a staff meeting")).status_code == 200
+        fresh(); j = draft.board(); assert j["staff"], j["staff"]
+        assert all(r["teacher"] == who and r["name"] == "Staff meeting" and r["place"] == "Hall" and r["p"] is not None and r["n"] > 0 and r["d"] == 0 for r in j["staff"]), j["staff"]
+        assert set(j["staff"][0]) == {"teacher", "d", "p", "n", "name", "place", "t0", "t1", "before", "after"} and not [r for r in j["staff"] if r["teacher"] == other]
+        assert j["cards"] == plain["cards"] and j["unplaced"] == plain["unplaced"] and j["days"] == plain["days"] and j["NP"] == plain["NP"] and j["day"] == plain["day"] and j["codes"] == plain["codes"]
+        got = c.get("/api/draft/board").get_json(); assert got["staff"] == j["staff"]
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+    fresh(); assert draft.board()["staff"] == []
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

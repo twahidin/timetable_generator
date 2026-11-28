@@ -56,7 +56,7 @@ for case in CASES:
 # constants and ids
 assert sync.MERGE == {"teachers": ("can_teach",), "students": ("groups",)}
 assert sync.LISTS == ("venues", "classes", "subjects", "teachers", "blocks", "lessons",
-                      "rules", "students", "combinations", "roles", "choices")
+                      "rules", "staff_periods", "students", "combinations", "roles", "choices")
 i = sync.new_id()
 assert len(i) == 10 and all(c in "abcdefghijklmnopqrstuvwxyz0123456789" for c in i)
 assert sync.new_id() != sync.new_id()
@@ -140,6 +140,18 @@ assert "provisional" in refused[1][1] and all(w.endswith(".") for _, w in refuse
 assert sync.head_split(spec, []) == ([], [])
 assert sync.head_may(spec, batch) == refused[0][1]
 assert sync.head_split(spec, ["x", [["set"]]])[1][0] == (0, "Department heads cannot send that change.")
+passed += 1
+
+# a teacher-only period is a list of its own: rows get an _id, change by row, and a head may not touch them
+row = {"name": "Zone class", "teachers": ["A"], "days": ["Tue"], "times": ["15:00", "17:30"], "place": ""}
+base, spec = {"staff_periods": []}, {"staff_periods": [row]}
+assert sync.ensure_ids(spec) is True and row["_id"]
+ops = sync.diff(base, spec)
+assert len(ops) == 1 and ops[0][:2] == ["add", "staff_periods"] and ops[0][2]["_id"] == row["_id"], ops
+nxt = copy.deepcopy(spec); nxt["staff_periods"][0]["place"] = "Hall"
+assert sync.diff(spec, nxt) == [["set", "staff_periods", row["_id"], "place", "Hall"]]
+for op in (ops[0], ["set", "staff_periods", row["_id"], "place", "Hall"], ["del", "staff_periods", row["_id"]]):
+    assert sync.head_may(spec, [op]) == "Department heads cannot change teacher-only periods.", op
 passed += 1
 
 # choices are a list; ensure_ids links each to its rule by the rule's _id, and a head cannot touch them

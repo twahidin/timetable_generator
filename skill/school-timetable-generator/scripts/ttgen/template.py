@@ -12,7 +12,7 @@ from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
 from . import choices, parents as PA
 from .reader import parents_max
-from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules, _made_of
+from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules, staff_rows, _clock_min, _made_of
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
 HF = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -71,7 +71,7 @@ def write_template(spec, path, extra_rows=120):
     TAGH, TAGS = ("G-level", "G-levels") if secondary else ("Level tag", "Level tags")
     B = Book(); wb = B.wb
     V, C, S, T, BL, L = "1 Venues", "2 Classes", "3 Subjects", "4 Teachers", "5 Blocks", "6 Lessons"
-    TA, FX, MR = "Teacher availability", "Fixed lessons", "More rules"
+    TA, FX, MR = "Teacher availability", "Fixed lessons", "More rules"; TOP = "Teacher-only periods"
     rules = split_rules(spec)
     NCLS = max([9] + [len(x.get("classes") or []) for x in spec["blocks"] + spec["lessons"]])
     NTCH = max([3] + [len(PA.names(x)) for x in spec["lessons"]])   # the widest lesson's teachers, never fewer than three columns
@@ -96,7 +96,7 @@ def write_template(spec, path, extra_rows=120):
              ("5", BL, "Name each block of groups that run together and pick its classes (Step 2). Its groups, student totals and longest periods fill in from Step 6."),
              ("6", L, "One row per group (or per class for whole-class subjects): pick level, subject (Step 3), block (Step 5), classes (Step 2) and teachers (Step 4). "
                       "The group code, periods, lesson pattern, room kind and checks fill in."),
-             ("7", f"{TA}, {FX}, {MR}, Students", "Optional: block-out times, lessons at set times, any other rule, and each student's class, combination and groups.")]
+             ("7", f"{TA}, {TOP}, {FX}, {MR}, Students", "Optional: block-out times, weekly periods for teachers with no students, lessons at set times, any other rule, and each student's class, combination and groups.")]
     rd["A1"] = f"{sc['name']} {sc['timetable']} timetable setup"; rd["A1"].font = TITLE
     rd["A2"] = "Fill the sheets in order. Each step's list becomes the drop-down for the next, so nothing is typed twice and nothing can be misspelt."; rd["A2"].font = BF
     rd["A3"] = "Blue text on yellow = type or pick.  Grey = worked out by formulas.  Red in a Check column = something to fix."; rd["A3"].font = BF
@@ -456,6 +456,23 @@ def write_template(spec, path, extra_rows=120):
     B.dv(aw, f"A5:A{aL}", "=TeacherList", "Pick a teacher from Step 4."); B.dv(aw, f"B5:B{aL}", week_src, "Odd, Even or Both.")
     B.dv(aw, f"C5:C{aL}", day_src, "All or a day.")
 
+    # ---------------- Teacher-only periods (a weekly period for named teachers with no students; read back into spec["staff_periods"])
+    sw = B.sheet(TOP, "Weekly periods for teachers with no students (optional)", ["One row per period. All teachers: Yes, or leave empty and name departments or teachers (both are added together). "
+                 "Week: Odd, Even or Both. Days: Mon-Fri, separated by commas.", "Every teacher it names cannot teach in the periods these times overlap. Times as on Period times."],
+                 [("Name", 30), ("All teachers", 9), ("Departments", 24), ("Teachers", 36), ("Week", 8), ("Days", 18), ("From", 10), ("To", 10), ("Place", 24)], set(range(1, 10)), hr=4)
+    sr = staff_rows(spec)
+    for i, x in enumerate(sr):
+        tm = [v if _clock_min(v) is not None else None for v in (list(x.get("times") or []) + [None, None])[:2]]
+        for j, v in enumerate([x.get("name") or None, "Yes" if x.get("all") is True else None, ", ".join(names_list(x.get("depts"))) or None, ", ".join(names_list(x.get("teachers"))) or None,
+                               x.get("week") or "Both", ", ".join(names_list(x.get("days"))) or None, _t(tm[0]) if tm[0] else None, _t(tm[1]) if tm[1] else None, x.get("place") or None], start=1):
+            c = sw.cell(5 + i, j, v)
+            if j in (7, 8): c.number_format = "h:mm AM/PM"
+    sL = 5 + len(sr) + 40
+    B.paint(sw, sL, set(range(1, 10)), 9, first=5)
+    for r in range(5, sL + 1): sw[f"G{r}"].number_format = sw[f"H{r}"].number_format = "h:mm AM/PM"
+    B.dv(sw, f"B5:B{sL}", '"Yes"', "Yes, or leave empty."); B.dv(sw, f"C5:C{sL}", "=DeptList", "Pick a department, or type several separated by commas.", strict=False)
+    B.dv(sw, f"D5:D{sL}", "=TeacherList", "Pick a teacher from Step 4, or type several separated by commas.", strict=False); B.dv(sw, f"E5:E{sL}", week_src, "Odd, Even or Both.")
+
     # ---------------- Fixed lessons
     fw = B.sheet(FX, "Lessons that must sit at a set time (optional)", ["Leave empty to let the timetable place everything. Start period as numbered on Period times.",
                  f"Class '{EVERY_CLASS}': that subject for every class of the level (Level All: the whole school), such as CCE at one time for everyone."],
@@ -569,7 +586,7 @@ def write_template(spec, path, extra_rows=120):
     B.paint(cb, 4 + len(combos) + 40, set(range(1, nsub + 5)), nsub + 4, first=4)
     B.name("ComboList", "OFFSET(Combinations!$B$4,0,0,MAX(1,COUNTA(Combinations!$B$4:$B$500)),1)")
 
-    order = ["README"] + extra + ["Settings", "Period times", "Day structure", V, C, S, T, "Roles", BL, L, TA, FX, MR, choices.SHEET, "Rule types", "Students", "Combinations", "Lists"]
+    order = ["README"] + extra + ["Settings", "Period times", "Day structure", V, C, S, T, "Roles", BL, L, TA, TOP, FX, MR, choices.SHEET, "Rule types", "Students", "Combinations", "Lists"]
     wb._sheets = [wb[n] for n in order]
     wb.active = 0
     from openpyxl.workbook.properties import CalcProperties

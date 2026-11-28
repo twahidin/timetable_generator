@@ -1318,5 +1318,27 @@ def calendar_names_a_holiday_without_a_name_holiday():
     got, off = RC.school_days(cal, day_names(2), datetime.date(2026, 10, 12))
     assert off == {datetime.date(2026, 10, 14): "Holiday"}, off
 
+@t
+def a_teacher_in_a_teacher_only_period_is_busy_with_its_name():
+    pub = world(); setup = pub["model"]["setup"]
+    setup["school"] = dict(start_time="08:00", period_minutes=30, periods_per_day=12)
+    setup["staff_periods"] = [dict(_id="s1", name="Staff meeting", all=False, depts=[], teachers=[MAYA], week="Both", days=["Tue"], times=["10:30", "11:30"], place="")]
+    ls = lesson_of(pub)
+    got = FR.free_then(pub, settings(), [], ls, EVE)
+    inside = [x for g in got["groups"] for x in names(g)]
+    assert MAYA not in inside and dict(name=MAYA, why="Teacher-only period: Staff meeting") in got["busy"], got["busy"]
+    assert [b["name"] for b in got["busy"]].count(MAYA) == 1
+    setup["staff_periods"][0]["days"] = ["Wed"]
+    got = FR.free_then(pub, settings(), [], ls, EVE)
+    assert MAYA in [x for g in got["groups"] for x in names(g)] and not got["busy"], got["busy"]
+    # a plain Must "Not available" still drops the person silently
+    setup["staff_periods"][0]["days"] = ["Tue"]
+    setup["rules"] = [dict(scope="Teacher", target=MAYA, rule="Not available", week="Both", day="Tue", strength="Must", **{"from": 5, "to": 6})]
+    got = FR.free_then(pub, settings(), [], ls, EVE)
+    assert [b["name"] for b in got["busy"]].count(MAYA) == 1
+    setup["staff_periods"] = []
+    got = FR.free_then(pub, settings(), [], ls, EVE)
+    assert MAYA not in [x for g in got["groups"] for x in names(g)] and not got["busy"], got["busy"]
+
 
 print(f"{COUNT} relief request tests passed")

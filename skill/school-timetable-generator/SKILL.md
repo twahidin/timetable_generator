@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.11 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill; the last number counts up, so 2026-11.11 is newer than 2026-11.9). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.12 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill; the last number counts up, so 2026-11.12 is newer than 2026-11.9). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -21,7 +21,7 @@ subject-based banding) schools, and for any school that fills the same template.
 
 - The filled setup workbook (`.xlsx`). Its sheets, in order: `README`, `Settings`, `Period times`, `Day structure`,
   `1 Venues`, `2 Classes`, `3 Subjects`, `4 Teachers`, `Roles`, `5 Blocks`, `6 Lessons`, `Teacher availability`,
-  `Fixed lessons`, `More rules`, `Rule types`, `Students`, `Combinations`, `Lists` (the current setup layout, from template v9 on; a school's
+  `Teacher-only periods`, `Fixed lessons`, `More rules`, `Rule types`, `Students`, `Combinations`, `Lists` (the current setup layout, from template v9 on; a school's
   own notes sheet may follow `README`). Workbooks in the older layout (a `7 Rules` sheet) read too.
   The setup web app and the timetable pages call a block a **band** (a card on step 5, Teaching groups & deployment); the workbook keeps `5 Blocks` and
   the `Block` columns. When talking to the committee, say band.
@@ -153,6 +153,7 @@ one row per typed rule in the order `python -m ttgen check` lists them; Result i
 | 5 Blocks | block | Block name, Level, Class 1-9 (more if needed): classes whose students are split into groups that all have lessons at the same time |
 | 6 Lessons | group, or class for a whole-class subject | Level, Subject, Block (empty = whole class), Class 1-9, Teacher 1-3, Students, optional Periods / Code overrides; formulas show Group code, Periods, Doubles and Triples (or the lesson lengths in use), Room kind, Teacher periods, Check |
 | Teacher availability | block-out | Teacher, Week, Day (All or Mon-Fri), From, To (clock times; every period they overlap is blocked), Reason |
+| Teacher-only periods | a weekly period for teachers with no students | Name, All teachers, Departments, Teachers, Week, Days, From, To, Place. Every teacher it names is not available in the periods the times overlap, as a Must `Not available`; `ttgen` does this when it reads the setup. |
 | Fixed lessons | lesson at a set time (optional) | Level (a level, or All), Class(es) or group (a class, a group code from 6 Lessons, or `Every class`: that subject for every class of the level, or of the whole school with Level All, such as whole-school CCE; one row per slot), Subject, Week, Day, Start period, Note |
 | More rules | any other constraint | Applies to (kind), Applies to, Subject (optional; for Only these subjects several, comma separated), Rule, Week, Day, From/To period, Number, Venues (for Only in venues: rooms, comma separated), Must/Prefer, In words (the sentence of a rule in words: Rule = In words) |
 | Students | student (recommended) | Student ID, Name, Level, Class, Combination, Choice 1-3, Merit, Groups (codes from 6 Lessons, comma separated), Source |
@@ -296,7 +297,9 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    tag). For each kind: NoOverlap over the class's whole-class lessons plus the block lessons that kind attends.
    Also NoOverlap(whole-class lessons of the class + all lessons of each block listing the class).
 5. **Teachers.** NoOverlap over every lesson they take part in, plus fixed intervals for Must "Not available" and
-   "Keep free together" (department). A teacher with a Department 2 counts in both departments.
+   "Keep free together" (department). A teacher with a Department 2 counts in both departments. A `Teacher-only periods`
+   row (a weekly period for named teachers with no students) is one more Must "Not available" for each teacher it names,
+   in the periods its times overlap; `ttgen` adds these when it reads the setup, so they need no rule row of their own.
 6. **Rooms.** Per room kind, AddCumulative with capacity = number of rooms of that kind (a room's "At most N at
    once" rule counts it N times); demand = groups of that kind in the lesson; rows with no kind use classrooms.
    For a kind that has a combined venue, count single rooms instead. Each group keeps its set E of allowed venues: the
@@ -345,6 +348,7 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
     - HTML: one file with the data embedded as JSON and plain JavaScript (no external files) for search, lists,
       grids, the lesson filter table, the free finder and the student builder.
       In 2026-11.11 the page the app publishes also has a `staff` mode: a teacher's own timetable and the classes.
+      In 2026-11.12 the setup workbook has a `Teacher-only periods` sheet: weekly periods for teachers with no students, kept out of every lesson and count.
 
 ## Lessons learned
 

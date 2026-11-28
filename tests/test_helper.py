@@ -3,6 +3,7 @@ import copy, os, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); sys.path.insert(0, ROOT)
 import fixes, helper  # noqa: E402
 from ttgen import export, reader, verify  # noqa: E402
+from ttgen import spec as spec_mod  # noqa: E402
 from ttgen.export import ENTIRE  # noqa: E402
 from ttgen.samples import primary  # noqa: E402
 n = 0
@@ -327,5 +328,18 @@ def a_change_of_teacher_names_everyone_whose_periods_change():
     assert helper.disturbs(m, sp, DAYS, [dict(f, teachers=[P, Q])], [ok]) == [f"{P} rises to 3 periods.", f"{Q} rises to 3 periods."]   # nobody leaves, both gain
     one = [lesson(1, 0, 2, 1, [A], "English Language", ENTIRE, [P, Q], level=LV)]; m1, sp1 = model_with(one)
     assert helper.disturbs(m1, sp1, DAYS, [dict(f, teachers=[Q, P])], [ok]) == ["Nothing else moves."]   # the same teachers in another order: nobody's count changes
+@t
+def a_suggestion_never_puts_a_lesson_into_a_teacher_only_period():
+    tp = "Sabrina Koh"; school = dict(SP["school"], start_time="07:40", period_minutes=20)   # periods 1 to 3 of Monday are 8.00 to 9.00
+    staff = [dict(_id="z1", name="Staff meeting", all=False, depts=[], teachers=[tp], week="Both", days=["Mon"], times=["08:00", "09:00"], place="")]
+    L = [lesson(1, 0, 1, 1, [A], "Mathematics", ENTIRE, [tp], level=LV), lesson(2, 1, 0, 1, [B], "Art", ENTIRE, [tp], level=LV)]
+    m, sp = model_with(L, school=school, staff_periods=staff, rules=spec_mod.rules_with_staff(dict(SP, school=school, staff_periods=staff, rules=[rule(B, "Not in periods", 0, 0)])))
+    inside = lambda rows: {x["id"] for x in rows if tp in x["teachers"] and x["d"] == 0 and x["p"] <= 3 and x["p"] + x["n"] > 1}
+    ws = verify.rules(m, sp)[0]; w = next(w for w in ws if "staff" in w); other = next(w for w in ws if "staff" not in w)
+    assert helper._rule_row(m["checked_setup"], w["key"])[1]["staff"] == "Staff meeting" and "staff" not in helper._rule_row(sp, other["key"])[1]
+    for x in (w, other):
+        out = helper.suggest(m, sp, DAYS, x); assert out["suggestions"], out
+        for s in out["suggestions"]: assert inside(helper.chain(m, sp, DAYS, s["fixes"])["lessons"]) <= inside(m["lessons"]) - ({1} if x is w else set()), s
+
 
 print(f"{n} checks passed")

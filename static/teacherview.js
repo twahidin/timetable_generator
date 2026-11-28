@@ -81,10 +81,11 @@ var TeacherView = (function () {
   /* where a teacher's name is used: row numbers (from 0) of groups, classes and Teacher rules, the numbers (from 1)
      of typed rules that say it, how many notes say it, and whether two teacher rows have exactly this name */
   function uses(spec, name) {
-    var out = { lessons: [], classes: [], rules: [], typed: [], notes: 0, twice: false };
+    var out = { lessons: [], classes: [], rules: [], staff: [], typed: [], notes: 0, twice: false };
     if (typeof name !== "string" || name.trim() === "" || !isRow(spec)) return out;
     list(spec.lessons).forEach(function (l, i) { if (isRow(l) && list(l.teachers).indexOf(name) >= 0) out.lessons.push(i); });
     list(spec.classes).forEach(function (c, i) { if (isRow(c) && list(c.parents).indexOf(name) >= 0) out.classes.push(i); });
+    list(spec.staff_periods).forEach(function (r, i) { if (isRow(r) && list(r.teachers).indexOf(name) >= 0) out.staff.push(i); });
     var typed = 0;
     list(spec.rules).forEach(function (r, i) {
       if (!isRow(r)) return;
@@ -137,7 +138,7 @@ var TeacherView = (function () {
     for (var j = 0; j < teachers.length; j++) {
       if (j !== ti && isRow(teachers[j]) && P.key(teachers[j].name) === P.key(now)) return { error: teachers[j].name + " is already a teacher." };
     }
-    var u = uses(spec, was), r = { was: was, now: now, groups: 0, classes: [], rules: 0, typed: u.typed, notes: u.notes, twice: u.twice, short: null };
+    var u = uses(spec, was), r = { was: was, now: now, groups: 0, classes: [], rules: 0, staff: 0, typed: u.typed, notes: u.notes, twice: u.twice, short: null };
     if (!u.twice) {
       u.lessons.forEach(function (i) {
         var ts = spec.lessons[i].teachers;
@@ -150,6 +151,11 @@ var TeacherView = (function () {
         for (var k = 0; k < ps.length; k++) if (ps[k] === was) ps[k] = now;
       });
       u.rules.forEach(function (i) { spec.rules[i].target = now; r.rules++; });
+      u.staff.forEach(function (i) {
+        var ts = spec.staff_periods[i].teachers;
+        r.staff++;
+        for (var k = 0; k < ts.length; k++) if (ts[k] === was) ts[k] = now;
+      });
     }
     var earlier = list(t.earlier_names).filter(function (n) { return n !== was; });
     earlier.push(was);
@@ -174,6 +180,7 @@ var TeacherView = (function () {
     if (r.groups) parts.push("on " + plural(r.groups, "group", "groups"));
     if (r.classes.length) parts.push("form teacher of " + andList(r.classes));
     if (r.rules) parts.push(plural(r.rules, "rule", "rules"));
+    if (r.staff) parts.push(plural(r.staff, "teacher-only period", "teacher-only periods"));
     if (parts.length) out += ": " + parts.join(", ") + ". Undo, at the top, brings it back.";
     else if (r.twice) out += ". Two teachers were called " + r.was + ", so their groups were not changed: pick the right teacher on each.";
     else out += ".";

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teacher-only periods: mockup</title>
+<!-- A mockup only: made-up teachers, classes and rooms. Open with ?1, ?2 or ?3 to see one part alone. -->
+<style>
+:root{--ink:#16202E;--sub:#4A5568;--muted:#7A8699;--line:#E3E8EF;--hour:#B9C3D1;--bg:#F6F8FB;--card:#fff;--break:#EEF1F5;--blue:#2457C5;--warn:#8A5300}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1420px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:20px;margin:0 0 2px}h2{font-size:16px;margin:28px 0 6px}h3{font-size:15px;margin:0 0 2px}
+.lede{color:var(--sub);margin:0 0 10px;max-width:1000px}
+.tag{display:inline-block;background:#16202E;color:#fff;border-radius:5px;font-size:11px;font-weight:700;padding:2px 7px;margin-right:8px;vertical-align:2px;letter-spacing:.04em}
+.sheet{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 14px 12px;overflow-x:auto}
+.muted{color:var(--muted)}.small{font-size:12.5px}
+.what{margin:8px 0 0;padding-left:18px;color:var(--sub);font-size:13px}.what li{margin:2px 0}
+/* ---------- part 1: step 6 */
+.tabs{display:flex;gap:6px;margin:0 0 14px}.tabs span{border:1px solid var(--hour);border-radius:8px;padding:4px 12px;font-weight:600;font-size:13px;background:#fff}.tabs .on{background:#16202E;color:#fff;border-color:#16202E}
+table{border-collapse:collapse;width:100%}th{text-align:left;font-size:12px;color:var(--muted);font-weight:700;padding:4px 8px;border-bottom:1px solid var(--hour)}
+td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}td.days,td.nw{white-space:nowrap}
+.inp{display:inline-block;border:1px solid var(--hour);border-radius:6px;padding:3px 8px;background:#fff;min-height:26px;white-space:nowrap}
+.inp.wide{min-width:190px}.chip{display:inline-block;background:#E9EEF6;border:1px solid #C9D3E3;border-radius:12px;padding:1px 9px;margin:1px 3px 1px 0;font-size:12.5px;white-space:nowrap}
+.chip.all{background:#16202E;color:#fff;border-color:#16202E}.chip.dept{background:#E1F2E3;border-color:#7DBB86}
+.dayb{display:inline-block;border:1px solid var(--hour);border-radius:6px;padding:2px 7px;margin-right:2px;font-size:12.5px;color:var(--muted);background:#fff}.dayb.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.btn{display:inline-block;border:1px solid var(--hour);border-radius:8px;padding:5px 12px;font-weight:600;background:#fff}.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.calc{color:var(--sub);font-size:12.5px}.late{color:var(--warn);font-size:12.5px}
+.x{color:var(--muted);font-weight:700}
+/* ---------- part 2: a teacher's timetable (look A of the timetable-look mockup) */
+.A{position:relative;min-width:1340px}
+.A .ruler,.A .row{display:grid;grid-template-columns:74px 1fr}
+.A .ruler .ax{position:relative;height:30px}
+.A .hr{position:absolute;top:2px;transform:translateX(-50%);font-weight:700;font-size:13px;white-space:nowrap}
+.A .hr small{font-weight:600;color:var(--muted);font-size:10.5px;margin-left:2px}
+.A .tick{position:absolute;bottom:0;width:1px;height:7px;background:var(--hour)}
+.A .wk{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--muted);padding:6px 0 0 2px}
+.A .row{border-top:1px solid var(--line)}
+.A .day{padding:9px 0 0 2px;font-weight:700}.A .day small{display:block;font-weight:600;color:var(--muted);font-size:10.5px;letter-spacing:.06em}
+.A .lane{position:relative;height:62px}
+.A .vl{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}.A .vl.h{background:var(--hour)}
+.A .brk{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,var(--break) 0 6px,#F7F9FB 6px 12px);color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15}
+.cell{position:absolute;top:4px;bottom:4px;border-radius:7px;border:1px solid;border-left-width:4px;padding:3px 6px 2px;overflow:hidden;display:flex;flex-direction:column}
+.cell b{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .t{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.85}
+.cell .s{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.el{background:#E4EEFB;border-color:#7FA6DE}.cp{background:#D9F0EE;border-color:#69B5AE}
+.staff{background:#fff;border:1.5px solid #5B6677;border-left-width:4px;border-radius:7px}
+.staff.on{border-right-style:dashed}
+.staff .t i{font-style:normal;background:#16202E;color:#fff;border-radius:4px;padding:0 5px;margin-left:4px;font-size:10.5px}
+.also{display:flex;gap:22px;flex-wrap:wrap;margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);font-size:12.5px;color:var(--sub)}.also b{color:var(--ink)}.legend{display:flex;gap:18px;margin:10px 0 0;font-size:12.5px;color:var(--sub);align-items:center}.legend i{display:inline-block;width:26px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:6px}
+/* ---------- part 3: the board's box */
+.box{max-width:520px;border:1px solid var(--hour);border-radius:12px;background:#fff;padding:14px 16px;box-shadow:0 6px 20px rgba(22,32,46,.12)}
+.box p{margin:6px 0}.box .row{display:flex;gap:8px;margin-top:12px}
+</style></head><body><main>
+<h1>Teacher-only periods <span style="font-weight:500;color:var(--sub);font-size:14px">· a mockup with made-up names</span></h1>
+<p class="lede">A period for named teachers with no students: a zone class after school, a staff meeting. You enter it once on step 6. It then shows on those teachers' timetables and keeps lessons, relief and exam duties away from them.</p>
+
+<section id="p1"><h2><span class="tag">1</span>Step 6, Teachers tab: where you enter it</h2>
+<div class="sheet">
+  <div class="tabs"><span>School</span><span>Levels</span><span>Subjects</span><span class="on">Teachers</span><span>Rooms</span></div>
+  <h3>Teacher-only periods</h3>
+  <p class="muted small" style="margin:0 0 8px">A period for teachers with no students, the same every week: a meeting, a zone class. It shows on their timetables. Lessons are kept away from it; a lesson you put there by hand gets a warning. A change here shows on the published timetable after you publish again on step 9.</p>
+  <table>
+    <tr><th>Name on the timetable</th><th>Who</th><th>Week</th><th>Days</th><th>From</th><th>To</th><th>Place (optional)</th><th></th></tr>
+    <tr><td><span class="inp wide">Zone computing class</span></td>
+      <td><span class="chip">Mr Arjun Rao ✕</span><span class="chip">Ms Mei Ling Koh ✕</span><span class="chip">Mr Farhan Aziz ✕</span><br><span class="small" style="color:var(--blue)">+ Add teachers</span></td>
+      <td><span class="inp">Both ▾</span></td>
+      <td class="days"><span class="dayb">Mon</span><span class="dayb on">Tue</span><span class="dayb">Wed</span><span class="dayb on">Thu</span><span class="dayb">Fri</span></td>
+      <td><span class="inp">3.00 pm</span></td><td class="nw"><span class="inp">5.30 pm</span><div class="late">after the last period (4.20 pm)</div></td>
+      <td><span class="inp wide">West Zone centre</span></td><td class="x">✕</td></tr>
+    <tr><td><span class="inp wide">Staff meeting</span></td>
+      <td><span class="chip all">All teachers</span><br><span class="small muted">58 teachers now. A new teacher is included.</span></td>
+      <td><span class="inp">Odd ▾</span></td>
+      <td class="days"><span class="dayb on">Mon</span><span class="dayb">Tue</span><span class="dayb">Wed</span><span class="dayb">Thu</span><span class="dayb">Fri</span></td>
+      <td><span class="inp">3.00 pm</span></td><td><span class="inp">4.20 pm</span></td>
+      <td><span class="inp wide">Hall</span></td><td class="x">✕</td></tr>
+    <tr><td><span class="inp wide">Department meeting</span></td>
+      <td><span class="chip dept">Mathematics department</span><br><span class="small muted">9 teachers now.</span></td>
+      <td><span class="inp">Even ▾</span></td>
+      <td class="days"><span class="dayb">Mon</span><span class="dayb">Tue</span><span class="dayb on">Wed</span><span class="dayb">Thu</span><span class="dayb">Fri</span></td>
+      <td><span class="inp">2.20 pm</span></td><td><span class="inp">3.20 pm</span></td>
+      <td><span class="inp wide">&nbsp;</span></td><td class="x">✕</td></tr>
+  </table>
+  <p style="margin:12px 0 18px"><span class="btn">+ Add a teacher-only period</span></p>
+  <h3>Teacher availability</h3>
+  <p class="muted small" style="margin:0">Times a teacher cannot teach (part-time days…). As today: these are not shown on any timetable.</p>
+</div>
+<ul class="what"><li>One row holds many teachers and more than one day, so the zone class on Tuesday and Thursday is one row.</li><li>"Who" can be names, a whole department, or all teachers.</li><li>Times are clock times, as in Teacher availability today.</li></ul></section>
+
+<section id="p2"><h2><span class="tag">2</span>The teacher's published timetable: how it shows</h2>
+<div class="sheet"><h3 style="margin-bottom:8px">Mr Arjun Rao <span class="muted small" style="font-weight:500">· Teacher · Department English</span></h3><div class="A" id="A"></div>
+<div class="also"><b>Teacher-only periods</b><span>Staff meeting · Odd Mon · 3.00 to 4.20 · Hall</span><span>Zone computing class · Tue and Thu · 3.00 to 5.30 · West Zone centre</span></div><div class="legend"><span><i class="el" style="border:1px solid #7FA6DE"></i>A lesson (coloured by subject, as today)</span><span><i class="staff" style="border-width:1.5px"></i>A teacher-only period: white with a dark outline, no class under it</span></div></div>
+<ul class="what"><li>The box says its own name, time and place.</li><li>Under the timetable, one line for each period with its full times. On a printout this is where the real end time is easiest to read.</li><li>The timetable ends at 4.20 pm. A period that runs later stops at the edge, with a broken edge and its real end time marked (<b>to 5.30</b>).</li><li>It shows on the teacher's page, the teacher's printout and step 8's board for that teacher. Class and student timetables never show it.</li></ul></section>
+
+<section id="p3"><h2><span class="tag">3</span>Step 8's board: a lesson dropped on it</h2>
+<div class="box"><b>English Language · 2B</b> to Odd Tue period 23 (3.20)
+  <p><b>Mr Arjun Rao has Zone computing class then</b> (Tue 3.00–5.30).</p>
+  <div class="row"><span class="btn pri">Put it here anyway</span><span class="btn">Cancel</span></div></div>
+<ul class="what"><li>A warning, never a refusal. It stays on step 8's list as a warning and does not stop publishing.</li></ul></section>
+</main>
+<script>
+const NP = 26, START = 7 * 60 + 40, MIN = 20;
+const clock = p => { const m = START + p * MIN, h = Math.floor(m / 60), mm = String(m % 60).padStart(2, "0"); return `${h > 12 ? h - 12 : h}.${mm}`; };
+const span = (p, n) => `${clock(p)}–${clock(p + n)}`;
+const usual = [[0, 1, "Assembly"], [7, 2, "Recess"], [18, 2, "Lunch"]], late = [[2, 1, "Assembly"], [9, 2, "Recess"]], fri = [[0, 1, "Assembly"], [9, 2, "Recess"]];
+/* lessons [p, n, title, line, colour]; staff periods [p, n, name, place, shown time, later end or ""] */
+const ZONE = [22, 4, "Zone computing class", "West Zone centre", "3.00–5.30", "to 5.30"], MEET = [22, 4, "Staff meeting", "Hall", "3.00–4.20", ""];
+const WEEKS = [["ODD", [
+  ["Mon", usual, [[1, 3, "English Language", "2B · B2-3", "el"], [9, 3, "English Language", "1A · A1-1", "el"], [12, 3, "English Language", "2EL3 (2A, 2B) · B2-4", "el"]], [MEET]],
+  ["Tue", usual, [[4, 3, "English Language", "1A · A1-1", "el"], [9, 3, "English Language", "2B · B2-3", "el"], [15, 3, "Character Education", "1A · A1-1", "cp"]], [ZONE]],
+  ["Wed", usual, [[1, 3, "English Language", "2EL3 (2A, 2B) · B2-4", "el"], [12, 3, "English Language", "1A · A1-1", "el"], [20, 3, "English Language", "2B · B2-3", "el"]], []],
+  ["Thu", late, [[3, 3, "English Language", "2B · B2-3", "el"], [11, 3, "English Language", "1A · A1-1", "el"], [14, 3, "English Language", "2EL3 (2A, 2B) · B2-4", "el"]], [ZONE]],
+  ["Fri", fri, [[1, 3, "English Language", "1A · A1-1", "el"], [4, 3, "English Language", "2B · B2-3", "el"], [11, 3, "Character Education", "1A · A1-1", "cp"]], []]]],
+ ["EVEN", [
+  ["Mon", usual, [[4, 3, "English Language", "2B · B2-3", "el"], [9, 3, "English Language", "2EL3 (2A, 2B) · B2-4", "el"], [15, 3, "English Language", "1A · A1-1", "el"]], []],
+  ["Tue", usual, [[1, 3, "Character Education", "1A · A1-1", "cp"], [9, 3, "English Language", "1A · A1-1", "el"], [12, 3, "English Language", "2B · B2-3", "el"]], [ZONE]],
+  ["Wed", usual, [[4, 3, "English Language", "1A · A1-1", "el"], [9, 3, "English Language", "2B · B2-3", "el"], [15, 3, "English Language", "2EL3 (2A, 2B) · B2-4", "el"]], []],
+  ["Thu", late, [[3, 3, "English Language", "1A · A1-1", "el"], [6, 3, "English Language", "2B · B2-3", "el"], [14, 3, "Character Education", "1A · A1-1", "cp"]], [ZONE]],
+  ["Fri", fri, [[1, 3, "English Language", "2EL3 (2A, 2B) · B2-4", "el"], [4, 3, "English Language", "1A · A1-1", "el"], [11, 3, "English Language", "2B · B2-3", "el"]], []]]]];
+const pc = p => (p / NP * 100) + "%";
+const hours = []; for (let p = 0; p <= NP; p++) if ((START + p * MIN) % 60 === 0) hours.push(p);
+const hourLabel = p => { const h = Math.floor((START + p * MIN) / 60); return `${h > 12 ? h - 12 : h}<small>${h === 8 ? "am" : h === 12 ? "noon" : h === 13 ? "pm" : ""}</small>`; };
+const ruler = wk => `<div class="ruler"><div class="wk">${wk} WEEK</div><div class="ax">${hours.map(p => `<span class="hr" style="left:${pc(p)}">${hourLabel(p)}</span><i class="tick" style="left:${pc(p)}"></i>`).join("")}</div></div>`;
+const lines = () => Array.from({ length: NP + 1 }, (_, p) => `<i class="vl${hours.includes(p) ? " h" : ""}" style="left:${pc(p)}"></i>`).join("");
+const cellA = ([p, n, title, line, c]) => `<div class="cell ${c}" style="left:calc(${pc(p)} + 2px);width:calc(${pc(n)} - 4px)"><span class="t">${span(p, n)}</span><b>${title}</b><span class="s">${line}</span></div>`;
+const staffA = ([p, n, name, place, time, later]) => `<div class="cell staff${later ? " on" : ""}" style="left:calc(${pc(p)} + 2px);width:calc(${pc(n)} - 4px)"><span class="t">${time.split("–")[0]}${later ? `<i>${later} ›</i>` : "–" + time.split("–")[1]}</span><b>${name}</b><span class="s">${place}</span></div>`;
+const brkA = ([p, n, name]) => `<div class="brk" style="left:${pc(p)};width:${pc(n)}">${n > 1 ? name : name.slice(0, 3) + "."}</div>`;
+document.getElementById("A").innerHTML = WEEKS.map(([wk, days]) => ruler(wk) + days.map(([d, brks, ls, st]) => `<div class="row"><div class="day"><small>${wk}</small>${d}</div><div class="lane">${lines()}${brks.map(brkA).join("")}${ls.map(cellA).join("")}${st.map(staffA).join("")}</div></div>`).join("")).join("");
+const only = location.search.slice(1);
+if (/^[123]$/.test(only)) { for (const i of "123") if (i !== only) document.getElementById("p" + i).style.display = "none"; }
+</script></body></html>

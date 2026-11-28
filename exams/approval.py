@@ -291,7 +291,7 @@ def _swap(duty, away, name) -> None:
         duty["reasons"] = {}
     duty["reasons"].pop(away, None)
     duty["reasons"][name] = "replaces %s, who is away" % away
-    for k in ("backup", "not_free"):
+    for k in ("backup", "not_free", "marks"):
         if isinstance(duty.get(k), dict):
             duty[k].pop(away, None)
 
@@ -301,7 +301,7 @@ def _drop(duty, away) -> None:
     duty["names"] = [x for x in duty["names"] if x != away]
     if duty.get("chief") == away:
         duty["chief"] = duty["names"][0] if duty["names"] else None
-    for k in ("reasons", "backup", "not_free"):
+    for k in ("reasons", "backup", "not_free", "marks"):
         if isinstance(duty.get(k), dict):
             duty[k].pop(away, None)
     if isinstance(duty.get("need"), int):
