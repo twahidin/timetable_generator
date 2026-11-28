@@ -194,7 +194,7 @@ const PB = (() => {
 /* the clock sums: a lesson is placed by its start and end in minutes (a, b), not by period number */
 const clk = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padStart(2, "0")}`;   /* minutes after midnight as the school writes a time: 480 is "8.00", 780 is "1.00" */
 const hm = t => mins(t) === null ? t : clk(mins(t));   /* "08:20" as the school writes it: "8.20"; anything that is not a time stays as it is */
-const hmAll = text => String(text == null ? "" : text).replace(/(?<!\d)(\d{1,2}):(\d{2})(?!\d)/g, (w, h, m) => +h < 24 && +m < 60 ? clk(+h * 60 + +m) : w);   /* every clock time inside a text, written the school's way */
+const hmAll = text => String(text == null ? "" : text).replace(/(^|\D)(\d{1,2}):(\d{2})(?!\d)/g, (w, pre, h, m) => +h < 24 && +m < 60 ? pre + clk(+h * 60 + +m) : w);   /* every clock time inside a text, written the school's way */
 const edge = (p, n) => { const hi = PB.length - 1, i = q => Math.max(0, Math.min(hi, Math.floor(q))); return [PB[i(p)][0], PB[i(Math.ceil(p + n) - 1)][1]]; };   /* p held inside the day as time() holds it */
 const cellTime = c => `${clk(c.a)}–${clk(c.b)}`, cellStart = c => clk(c.a);   /* a box holds both; its real width decides which shows */
 /* the runs of assembly, recess and lunch on day d, in minutes, kept only when a lesson (or exam, event) of that day starts at or after the run's end */
@@ -702,8 +702,8 @@ function myExams() {
   if (S.me.error) return $("#view").insertAdjacentHTML("afterbegin", `<p class="note" id="myexams">${esc(S.me.error)}</p>`);
   const ss = S.me.schedules.filter(s => (s.papers || []).length || (s.days || []).length);
   if (!ss.length) return;   /* no papers and no event days: nothing shows */
-  const row = p => `<tr><td>${esc(niceDate(p.date))}${p.report ? ` · report ${esc(hmAll(p.report))}` : ""}</td><td>${esc(p.label)}</td><td>${esc(hm(p.start))}–${esc(hm(p.end))}</td><td>${esc(p.room || "")}</td><td>${p.seat ? `Seat ${esc(p.seat)}` : ""}</td><td>${esc(p.note || "")}</td></tr>`;
-  const evRow = s => d => `<tr><td>${esc(niceDate(d.date))}</td><td>${esc([s.name, s.where, `${hm(d.start)}–${hm(d.end)}`].filter(Boolean).join(" · "))}</td><td>${esc(d.note || "")}</td></tr>`;   /* an event's day: its name, where and times */
+  const row = p => `<tr><td>${esc(niceDate(p.date))}${p.report ? ` · report ${esc(hmAll(p.report))}` : ""}</td><td>${esc(p.label)}</td><td>${esc(hm(p.start))}–${esc(hm(p.end))}</td><td>${esc(p.room || "")}</td><td>${p.seat ? `Seat ${esc(p.seat)}` : ""}</td><td>${esc(hmAll(p.note || ""))}</td></tr>`;
+  const evRow = s => d => `<tr><td>${esc(niceDate(d.date))}</td><td>${esc([s.name, s.where, `${hm(d.start)}–${hm(d.end)}`].filter(Boolean).join(" · "))}</td><td>${esc(hmAll(d.note || ""))}</td></tr>`;   /* an event's day: its name, where and times */
   $("#view").insertAdjacentHTML("afterbegin", `<div class="card myexams" id="myexams"><h2>My exam timetable</h2>${ss.map(s => `<h3>${esc(s.name)}</h3><div class="tablebox"><table class="lt"><tbody>${(s.papers || []).map(row).join("")}${(s.days || []).map(evRow(s)).join("")}</tbody></table></div>`).join("")}</div>`);
 }
 

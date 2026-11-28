@@ -247,7 +247,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const m = R.view();
     assert(R.fetched.includes("/api/me/exams") && !R.fetched.includes("/api/published/exams"), R.fetched.join(", "));
     assert(m.startsWith('<div class="card myexams" id="myexams"><h2>My exam timetable</h2><h3>Sec 3 Learning Journey</h3>'), m);
-    assert(m.includes("<tr><td>Mon 5 Oct</td><td>Sec 3 Learning Journey · Off site (museum) · 7.40–10.40</td><td>then lessons from 10:40</td></tr>"), m);
+    assert(m.includes("<tr><td>Mon 5 Oct</td><td>Sec 3 Learning Journey · Off site (museum) · 7.40–10.40</td><td>then lessons from 10.40</td></tr>") && !m.includes("10:40"), m);
     assert(!m.includes("Sec 4 Exam"), "a schedule with no papers and no days does not show");
     const N = boot({ "/api/me/exams": [200, { schedules: [Object.assign({}, trip, { days: [] })] }] }, ME);
     await N.tick();
@@ -647,6 +647,10 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(h("Bus marshal 07:45"), "Bus marshal 7.45");
     assert.strictEqual(h("13:00 to 14:30"), "1.00 to 2.30");
     assert.strictEqual(h("Hall"), "Hall"); assert.strictEqual(h("2026-10-05"), "2026-10-05");
+    assert.strictEqual(h("07:45,08:00"), "7.45,8.00"); assert.strictEqual(h("07:45–08:00"), "7.45–8.00");
+    assert.strictEqual(h("1207:45"), "1207:45", "a time right after a digit is not a time");
+    /* no lookbehind in the page's script: Safari before 16.4 cannot parse one, and then the whole page would be blank */
+    assert(!SCRIPT.includes("(?<!") && !SCRIPT.includes("(?<="), "the script holds a regex lookbehind");
     assert.strictEqual(h("Room 12: 30 seats"), "Room 12: 30 seats");
     assert.strictEqual(P.run("hmAll(null)"), ""); assert.strictEqual(P.run("hmAll(undefined)"), "");
     /* the Exams and events tab for staff: the event, its day and its duty */
