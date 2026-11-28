@@ -178,7 +178,8 @@ def saving_keeps_the_cover_of_a_kept_lesson_and_ends_a_dropped_one():
     assert g["relief"] is None and g["approved"] is None and g["sent_out"] is None, g
     assert g["history"][-1] == dict(what="dropped", who=MAYA, by=GRACE, at=NOW, why=AB.CHANGED_WHY), g["history"]
     assert r2["changes"] == [dict(at=NOW, by=GRACE, why="", dates=["2026-10-13"], periods=[5, 11], before=dict(dates=["2026-10-13"], periods=None),
-                                  added=[], gone=[K2], again=False)], r2["changes"]
+                                  added=[], gone=[K2], again=False, chosen=dict(dates=["2026-10-13"], periods=[5, 11]),
+                                  added_needed=[], gone_needed=[K2])], r2["changes"]
     assert r2["changed_at"] == NOW and r2["dates"] == ["2026-10-13"] and r2["periods"] == [5, 11], r2
     same(r2, r["id"])
     r3, p = change(r["id"], ["2026-10-13", "2026-10-16"], [0, 1], by=GRACE, why="  Only the first two now  ")
@@ -186,6 +187,8 @@ def saving_keeps_the_cover_of_a_kept_lesson_and_ends_a_dropped_one():
     assert keys(r3["gone"]) == [K2, K5], "a lesson with nothing to keep (K8: not needed, no relief) is not listed in gone"
     assert r3["gone"][-1]["gone"]["why"] == "Only the first two now" and r3["gone"][-1]["history"][-1]["why"] == "Only the first two now", r3["gone"]
     assert r3["changes"][-1]["before"] == dict(dates=["2026-10-13"], periods=[5, 11]) and r3["changes"][-1]["added"] == [KF], r3["changes"]
+    assert r3["changes"][-1]["added_needed"] == [KF] and r3["changes"][-1]["gone_needed"] == [K5], "K8 needed no relief: it is not counted"
+    assert r3["changes"][-1]["chosen"] == dict(dates=["2026-10-13", "2026-10-16"], periods=[0, 1]), r3["changes"]
     assert r3["dates"] == ["2026-10-13", "2026-10-16"] and r3["periods"] == [0, 1], "the dates are the choice's, though no lesson of 13 Oct is left"
     same(r3, r["id"])
 
@@ -361,6 +364,86 @@ def a_shared_lesson_added_is_not_needed_while_the_co_teacher_is_there():
 
 
 @t
+def a_request_moved_onto_shared_lessons_asks_for_relief_anyway():
+    """I1: the only lesson the change brings in is shared with a co-teacher who is there: without a tick nothing is left to cover
+    (blocked: the preview still lists it); ticked "Ask for relief anyway" (ask) it is needed, counted and saved"""
+    fresh()
+    i = absent(dates=("2026-10-16",))["id"]
+    p = plan(i, ["2026-10-13"], [8, 8])
+    assert keys(p["added"]) == [K8] and keys(p["gone"]) == [KF] and p["blocked"] == AB.SHARED_ONLY and p["added"][0]["needed"] is False, p
+    assert "Ask for relief anyway" in AB.SHARED_ONLY
+    refuses(AB.SHARED_ONLY, lambda: change(i, ["2026-10-13"], [8, 8]))
+    got = AB.plan_change(AB.load(i), dict(dates=["2026-10-13"], periods=[8, 8], ask=[K8]), PUB, AB.all_records(), None, FL._when(AB._now()))
+    assert got["blocked"] == "" and got["added"][0]["needed"] is True and got["added"][0]["not_needed"] is None, got
+    refuses(AB.WRONG, lambda: AB.change(i, dict(dates=["2026-10-13"], periods=[8, 8], ask="K8"), EVE, PUB))
+    r, _ = AB.change(i, dict(dates=["2026-10-13"], periods=[8, 8], ask=[K8, "not a lesson of it"]), EVE, PUB)
+    x = AB._lesson(r, K8)
+    assert x["needed"] is True and x["not_needed"] is None and keys(r["lessons"]) == [K8], r
+    assert r["changes"][-1]["added_needed"] == [K8] and r["changes"][-1]["gone_needed"] == [KF], r["changes"]
+    same(r, i)
+    fresh()                                                       # a tick on a lesson of another, needed anyway: as it was
+    i = absent(dates=("2026-10-16",))["id"]
+    r, _ = AB.change(i, dict(dates=["2026-10-13", "2026-10-16"], periods=None, ask=[K8]), GRACE, PUB, team=True)
+    assert [AB._lesson(r, k)["needed"] for k in (K2, K5, K8)] == [True, True, True], r
+    fresh()                                                       # not ticked: it comes in not needed, and the app's mark may be undone
+    i = absent(dates=("2026-10-16",))["id"]
+    r, _ = change(i, ["2026-10-13", "2026-10-16"])
+    assert AB._lesson(r, K8)["not_needed"]["by"] == "app" and r["changes"][-1]["added_needed"] == [K2, K5], r["changes"]
+    r = AB.needed_again(i, K8, TEAMER, team=True)
+    assert AB._lesson(r, K8)["needed"] is True and AB._lesson(r, K8)["not_needed"] is None
+
+@t
+def the_change_keeps_what_was_chosen():
+    """I2: a request cut back today keeps today in its dates for the lesson under way; the change keeps the dates and periods
+    chosen, and planning from them changes nothing"""
+    fresh()
+    old_today, old_now = LS.today, AB._now
+    try:
+        LS.today = lambda: D13
+        AB._now = lambda: "2026-10-13T09:10:00+08:00"             # K2 (09:00) is under way
+        i = absent(dates=("2026-10-13", "2026-10-16"))["id"]
+        r, _ = change(i, ["2026-10-16"], why="Back after this lesson")
+        assert keys(r["lessons"]) == [K2, KF] and r["dates"] == ["2026-10-13", "2026-10-16"] and r["periods"] is None, r
+        ch = r["changes"][-1]
+        assert ch["chosen"] == dict(dates=["2026-10-16"], periods=None) and ch["dates"] == ["2026-10-13", "2026-10-16"], ch
+        p = plan(i, ch["chosen"]["dates"], ch["chosen"]["periods"])
+        assert p["unchanged"] is True and p["added"] == p["gone"] == [], p
+        p = plan(i, r["dates"], r["periods"])
+        assert keys(p["added"]) == [K5, K8], "from the record's own dates, today's dropped lessons would come back"
+        refuses(AB.NOTHING, lambda: change(i, ch["chosen"]["dates"], ch["chosen"]["periods"]))
+    finally:
+        LS.today, AB._now = old_today, old_now
+
+@t
+def a_lesson_that_is_over_is_not_marked():
+    """M4: Relief not needed and Needed again are refused once the lesson's last period has ended; under way, they are not"""
+    fresh()
+    old_today, old_now = LS.today, AB._now
+    try:
+        LS.today = lambda: D13
+        AB._now = lambda: "2026-10-12T16:00:00+08:00"
+        i = absent()["id"]
+        AB._now = lambda: "2026-10-13T10:45:00+08:00"             # K2 (09:00 to 10:30) is over, K5 (10:30) under way, K8 (12:00) to come
+        now = FL._when(AB._now())
+        x2, x5, x8 = (AB._lesson(AB.load(i), k) for k in (K2, K5, K8))
+        assert [AB._over(PUB, x, now) for x in (x2, x5, x8)] == [True, False, False]
+        assert AB._over(PUB, dict(x5, date="2026-10-12"), now) and not AB._over(PUB, dict(x5, date="2026-10-14"), now)
+        refuses(AB.OVER, lambda: AB.not_needed(i, K2, "", EVE, pub=PUB))
+        refuses(AB.OVER, lambda: AB.not_needed(i, K2, "", TEAMER, team=True, pub=PUB))
+        assert AB.OVER == "This lesson is over."
+        r = AB.not_needed(i, K5, "", TEAMER, team=True, pub=PUB)
+        assert AB._lesson(r, K5)["needed"] is False
+        r = AB.needed_again(i, K5, TEAMER, team=True, pub=PUB)
+        assert AB._lesson(r, K5)["needed"] is True
+        AB.not_needed(i, K5, "", TEAMER, team=True, pub=PUB)
+        AB._now = lambda: "2026-10-13T11:30:00+08:00"             # K5 has ended (11:30)
+        refuses(AB.OVER, lambda: AB.needed_again(i, K5, TEAMER, team=True, pub=PUB))
+        refuses(AB.OVER, lambda: AB.not_needed(i, K5, "", EVE, pub=PUB))
+    finally:
+        LS.today, AB._now = old_today, old_now
+
+
+@t
 def the_old_gone_still_writes_app():
     fresh()
     r = absent(by=GRACE, lessons=[dict(key=K2, relief=MAYA)])
@@ -422,7 +505,7 @@ def the_preview_says_what_each_lesson_does():
     x5 = AB._lesson(AB.load(i), K5)
     assert x5["approved"] and CV.sent_out(x5), x5
     got = preview(staff(GRACE), i, ["2026-10-13", "2026-10-16"], [5, 11])
-    assert set(got) == {"kept", "added", "gone", "earlier", "dates", "periods", "unchanged", "day_periods"}, got
+    assert set(got) == {"kept", "added", "gone", "earlier", "dates", "periods", "unchanged", "blocked", "day_periods"} and got["blocked"] == "", got
     assert lines(got, "kept") == ["Mr Sam Tan stays (approved)", "relief not needed"], got["kept"]     # K8: Mr Busy Chan is there
     assert keys(got["kept"]) == [K5, K8] and got["added"] == [] and keys(got["gone"]) == [K2], got
     assert lines(got, "gone") == ["nobody was approved yet"], got["gone"]
@@ -457,7 +540,7 @@ def the_absent_teacher_alone_sees_no_name_before_it_is_acknowledged():
     got = preview(eve, i, ["2026-10-13", "2026-10-16"], [5, 11])
     assert lines(got, "kept") == ["a relief teacher stays (approved)", "relief not needed"], got["kept"]
     got = preview(eve, i, ["2026-10-13"], [0, 4])                              # K5 goes: its relief has reached Mr Sam Tan
-    assert lines(got, "gone") == ["a relief teacher is told the relief is no longer needed", "nobody was approved yet"], got["gone"]
+    assert lines(got, "gone") == ["a relief teacher is told the relief is no longer needed", "relief was not needed"], got["gone"]     # K8: Mr Busy Chan is there
     assert SAM not in json.dumps(got), "no name anywhere in the answer"
     assert lines(preview(staff(GRACE), i, ["2026-10-13"], [0, 4]), "gone")[0] == "Mr Sam Tan is told the relief is no longer needed"
     CV.acknowledge(i, K5, SAM)
@@ -490,11 +573,11 @@ def every_kind_of_line_reads_as_it_should():
     got = preview(grace, i, ["2026-10-13"], [0, 4])
     assert lines(got, "kept") == ["split into 2 parts: each keeps its relief teacher"], got["kept"]
     got = preview(grace, i, ["2026-10-13"], [5, 11])
-    assert lines(got, "gone") == ["Mr Flex Ng was approved, not told yet: the relief ends; nobody was approved yet"], got["gone"]
+    assert lines(got, "gone") == ["P3: Mr Flex Ng was approved, not told yet: the relief ends; P4–P5: nobody was approved yet"], got["gone"]
     CV.send_out(i, K2 + "#0", FLEX, TEAMER, PUB, ST)
     got = preview(grace, i, ["2026-10-13"], [5, 11])
-    assert lines(got, "gone") == ["Mr Flex Ng is told the relief is no longer needed; nobody was approved yet"], got["gone"]
-    assert lines(preview(eve, i, ["2026-10-13"], [5, 11]), "gone") == ["a relief teacher is told the relief is no longer needed; nobody was approved yet"]
+    assert lines(got, "gone") == ["P3: Mr Flex Ng is told the relief is no longer needed; P4–P5: nobody was approved yet"], got["gone"]
+    assert lines(preview(eve, i, ["2026-10-13"], [5, 11]), "gone") == ["P3: a relief teacher is told the relief is no longer needed; P4–P5: nobody was approved yet"]
     # an exam or event stops a lesson
     class Stops:
         def stopped(s, x): return "5A is on Sec 1 Art Exam" if x.get("key") == K8 else ""
@@ -602,6 +685,69 @@ def who_may_preview_and_save():
     assert keys(got["lessons"]) == [KR6], got
     store.published = lambda: None
     no(team.post(preview_url(a), json=body), 409, "Publish the timetable first: relief reads the teachers from it.")
+
+
+@rt
+def a_shared_lesson_added_has_its_tick():
+    """I1: an added lesson a co-teacher is there for is shared (the page's tick); with ask it is asked for anyway; a preview with
+    nothing else to cover is blocked, not refused, so the tick can be given"""
+    fresh()
+    i = absent(dates=("2026-10-16",))["id"]
+    eve = staff(EVE)
+    got = preview(eve, i, ["2026-10-13", "2026-10-16"])
+    k8 = next(x for x in got["added"] if x["key"] == K8)
+    assert k8["shared"] is True and k8["asked"] is False and k8["line"] == "Mr Busy Chan is there: no relief needed", k8
+    assert all("shared" not in x for x in got["added"] if x["key"] != K8) and got["blocked"] == "", got["added"]
+    got = ok(eve.post(preview_url(i), json=dict(dates=["2026-10-13", "2026-10-16"], periods=None, ask=[K8])))
+    k8 = next(x for x in got["added"] if x["key"] == K8)
+    assert k8["asked"] is True and k8["line"] == "Mr Busy Chan is there · relief asked for anyway: a relief teacher will be picked", k8
+    got = preview(eve, i, ["2026-10-13"], [8, 8])
+    assert got["blocked"] == AB.SHARED_ONLY and keys(got["added"]) == [K8] and keys(got["gone"]) == [KF], got
+    no(eve.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[8, 8], why="", shown=shown(got))), 400, AB.SHARED_ONLY)
+    got = ok(eve.post(save_url(i), json=dict(dates=["2026-10-13"], periods=[8, 8], why="", ask=[K8], shown=shown(got))))
+    assert [(x["key"], x["needed"]) for x in got["lessons"]] == [(K8, True)], got["lessons"]
+
+@rt
+def an_added_lesson_of_today_under_way_or_over_says_so():
+    """M5: a lesson the change adds that has begun is under way; one that has ended gets no relief teacher"""
+    fresh()
+    old_today, old_now = LS.today, AB._now
+    try:
+        LS.today = lambda: D13
+        AB._now = lambda: "2026-10-12T16:00:00+08:00"
+        i = absent(dates=("2026-10-16",))["id"]
+        AB._now = lambda: "2026-10-13T10:45:00+08:00"             # K2 is over, K5 under way, K8 to come
+        got = preview(staff(EVE), i, ["2026-10-13", "2026-10-16"])
+        assert lines(got, "added") == ["already over: no relief teacher is picked", "under way · a relief teacher will be picked",
+                                       "Mr Busy Chan is there: no relief needed"], got["added"]
+    finally:
+        LS.today, AB._now = old_today, old_now
+
+@rt
+def a_lesson_over_is_marked_so_and_refused():
+    """M4: the record and Today's rows say a lesson is over; Relief not needed and Needed again on it are refused"""
+    fresh()
+    old_today, old_now = LS.today, AB._now
+    try:
+        LS.today = lambda: D13
+        AB._now = lambda: "2026-10-12T16:00:00+08:00"
+        i = absent()["id"]
+        AB._now = lambda: "2026-10-13T10:45:00+08:00"
+        team = staff(TEAMER)
+        got = ok(team.get(f"/api/relief/absences/{i}"))
+        assert [(x["key"], x["over"]) for x in got["lessons"]] == [(K2, True), (K5, False), (K8, False)], got["lessons"]
+        rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert [(v["key"], v["over"]) for v in rows if v["id"] == i] == [(K2, True), (K5, False)], rows
+        q = lambda k, what: f"/api/relief/absences/{i}/lessons/{k.replace('/', '%2F').replace(' ', '%20')}/{what}"
+        before = snap()
+        no(team.post(q(K2, "not-needed"), json=dict(why="")), 400, AB.OVER)
+        no(staff(EVE).post(q(K2, "not-needed"), json=dict(why="")), 400, AB.OVER)
+        assert snap() == before
+        ok(team.post(q(K5, "not-needed"), json=dict(why="")))
+        AB._now = lambda: "2026-10-13T11:30:00+08:00"
+        no(team.post(q(K5, "needed"), json={}), 400, AB.OVER)
+    finally:
+        LS.today, AB._now = old_today, old_now
 
 
 print(f"{COUNT} relief change tests passed")
