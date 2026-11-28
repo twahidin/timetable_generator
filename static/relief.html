@@ -69,6 +69,18 @@ nav.rtabs button .n:empty{display:none}
 .rd-sum b{font-weight:600}
 .rd-full{font-size:12.5px;color:#9a5b00}
 .rd-note{margin:8px 0 0}
+/* Change the dates or times, on an absence card (relief-change.js) */
+.rc{margin:2px 0 10px;background:#fafbfc;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.rc h3{margin:0 0 10px;font-size:15px}
+.rc .field{margin:0 0 12px}
+.rc-does{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.rc-h{font-weight:600;font-size:13px;margin:0 0 6px}
+.rc-l{margin:4px 0 0}
+.rc-l.rc-gone{color:#7a4b00}
+.rc-why{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center}
+.rc-why label{font-size:12.5px}
+.rc-why input{flex:1 1 240px;max-width:440px}
+.rc-told{margin:6px 0 0}
 /* the person picker */
 .picker{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px;max-width:440px}
 .picker .row{flex-wrap:nowrap}
@@ -262,6 +274,7 @@ table.sm-table{min-width:620px}
 </main>
 <script src="/static/relief-form.js"></script>
 <script src="/static/relief-dates.js"></script>
+<script src="/static/relief-change.js"></script>
 <script src="/static/relief.js"></script>
 <script src="/static/relief-telegram.js"></script>
 <script src="/static/relief-plan.js"></script>

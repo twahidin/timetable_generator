@@ -49,6 +49,15 @@ class El {
     const attrs = Object.entries(this.attrs).map(([k, v]) => ` ${k}="${encode(v)}"`).join("");
     return VOID.has(this.tag) ? `<${this.tag}${attrs}>` : `<${this.tag}${attrs}>${this.innerHTML}</${this.tag}>`;
   }
+  set outerHTML(v) {   /* the element, in its place, is what the HTML says; it leaves the page */
+    const at = this.parent, made = new El(this.page, "div");
+    assert.ok(at, "the stand-in cannot write an element that is in nothing");
+    this.page.parse(made, String(v));
+    for (const k of made.kids) if (k instanceof El) k.parent = at;
+    at.kids.splice(at.kids.indexOf(this), 1, ...made.kids);
+    this.parent = null;
+    this.page.drawn.push(at);
+  }
   one(compound) {   /* tag, #id, .class, [attr], [attr="v"], :disabled, :not(:disabled) */
     let rest = compound;
     while (rest) {

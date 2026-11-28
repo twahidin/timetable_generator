@@ -105,7 +105,9 @@
      acknowledged): what is typed is kept in drafts (absence id -> lesson key -> work, with known: the file ids the
      lesson had when the draft began) until it is saved, so a redraw never loses it. A save sends known, so a file
      someone else added meanwhile is kept. A file is sent at once and attached when the work is saved. My absences and
-     Planned by me (relief-plan.js) each have one. opts: load() -> {ok, data: [records]} or a refusal as api() gives it; empty (HTML when there are none); show(r) (which records are drawn;
+     Planned by me (relief-plan.js) each have one. A request still to come (not a backup for an exam or event) has Change dates
+     or times: the editor (relief-change.js) opens under the card's lessons, one at a time in each box, kept in M.change while the
+     card is drawn again. opts: load() -> {ok, data: [records]} or a refusal as api() gives it; empty (HTML when there are none); show(r) (which records are drawn;
      all when left out); side(r, x) (HTML beside a lesson to cover, in place of "Relief: …"; escape what goes in it);
      extra(r, x) (HTML under that lesson); painted() (after each drawing). It gives {mount(box), load(), dirty(), list(),
      error(), find(id), put(record), paint(id, focus), paintAll()}. */
@@ -137,8 +139,11 @@
   }
 
   function absences(opts) {
-    const M = { box: null, list: null, err: null, seq: 0, drafts: new Map(), msg: new Map(), lerr: new Map(), busy: new Set(), up: new Map(), ask: null };
+    const M = { box: null, list: null, err: null, seq: 0, drafts: new Map(), msg: new Map(), lerr: new Map(), busy: new Set(), up: new Map(), ask: null, change: null };
     const open = r => !r.cancelled && owner(r);
+    const live = r => (r.dates || []).some(d => d >= RF.today());   /* every date past: nothing left to change, only to acknowledge */
+    const changeable = r => open(r) && live(r) && !r.exams && !!window.ReliefChange;   /* a backup follows its exam or event: change the duty instead */
+    const changing = r => !!(M.change && M.change.id === r.id && changeable(r));
     const find = id => (M.list || []).find(r => r.id === id);
     const painted = () => { if (opts.painted) opts.painted(); };
 
@@ -177,22 +182,23 @@
         return date + lessonRow(r, x, i, editable);
       }).join("");
       let acts = "";
-      const live = (r.dates || []).some(d => d >= RF.today());   /* every date past: nothing left to change, only to acknowledge */
-      if (editable && (live || needAck(r))) {
-        const asking = live && M.ask && M.ask.id === r.id && M.ask.key === null;
-        const cancel = !live ? "" : asking
+      const later = live(r), edit = changing(r);
+      const change = changeable(r) && !edit ? `<button type="button" data-act="change" ${busy ? "disabled" : ""}>Change dates or times</button>` : "";
+      if (editable && (later || needAck(r))) {
+        const asking = later && M.ask && M.ask.id === r.id && M.ask.key === null;
+        const cancel = !later ? "" : asking
           ? `<div class="ab-ask"><label for="why-${esc(r.id)}">Cancel this absence? Say why in a line.</label><input id="why-${esc(r.id)}" data-why="1" maxlength="200" value="${esc(M.ask.why)}" autocomplete="off">
               <button type="button" class="danger" data-act="cancel-go" ${busy ? "disabled" : ""}>Cancel the absence</button><button type="button" data-act="ask-off">Keep it</button></div>`
           : `<button type="button" class="danger" data-act="cancel-ask" ${busy ? "disabled" : ""}>Not needed at all: cancel</button>`;
         const main = needAck(r)
-          ? `<button type="button" class="primary" data-act="ack" ${busy ? "disabled" : ""}>${live ? "Acknowledge and save the work" : "Acknowledge"}</button>`
+          ? `<button type="button" class="primary" data-act="ack" ${busy ? "disabled" : ""}>${later ? "Acknowledge and save the work" : "Acknowledge"}</button>`
           : `<button type="button" class="primary" data-act="save" ${busy || !dirtyOf(r) ? "disabled" : ""}>Save the work</button>`;
-        acts = asking ? `${cancel}<div class="bar">${main}${say(M.msg.get(r.id))}</div>` : `<div class="bar">${cancel}<span class="grow"></span>${main}</div><div class="bar">${say(M.msg.get(r.id))}</div>`;
+        acts = asking ? `${cancel}<div class="bar">${change}${main}${say(M.msg.get(r.id))}</div>` : `<div class="bar">${cancel}${change}<span class="grow"></span>${main}</div><div class="bar">${say(M.msg.get(r.id))}</div>`;
       } else if (M.msg.get(r.id)) acts = `<div class="bar">${say(M.msg.get(r.id))}</div>`;
       return `<div class="card ab${r.cancelled ? " cancelled" : ""}" data-id="${esc(r.id)}">
         <div class="ab-top"><div>${head.join(" · ")}</div><span class="chip ${tone}">${esc(chip)}</span></div>
         <div class="small muted ab-sub">${esc(sub.join(" · "))}</div>
-        ${lessons || `<p class="muted small">No lessons.</p>`}${acts}</div>`;
+        ${lessons || `<p class="muted small">No lessons.</p>`}${edit ? `<div class="rc-box"></div>` : ""}${acts}</div>`;
     }
 
     function lessonRow(r, x, i, editable) {
@@ -248,14 +254,44 @@
       }
       const list = M.list.filter(r => !opts.show || opts.show(r));
       box.innerHTML = (M.err ? `<div class="card"><p>${say(M.err)}</p></div>` : "") + (M.list.length ? list.map(card).join("") : (opts.empty || ""));
+      placeChange();
       RF.fitAll(box);
       painted();
+    }
+
+    /* the open editor, into its card's box once the card is drawn: the same editor, as it was; it ends when its record can no
+       longer be changed (cancelled, its dates past, gone from the list) */
+    function placeChange() {
+      if (!M.change) return;
+      const id = M.change.id, r = find(id);
+      if (!r || !changeable(r)) { if (M.change.ed) M.change.ed.stop(); M.change = null; return; }
+      const c = M.box && [...M.box.querySelectorAll(".ab")].find(el => el.dataset.id === id), box = c && c.querySelector(".rc-box");
+      if (!box) return;   /* its card is not drawn now (Planned by me shows one): it is placed again when it is */
+      if (M.change.ed) M.change.ed.attach(box, r);
+      else M.change.ed = window.ReliefChange.mount(box, r, { onDone: (rec, said) => changeDone(id, rec, said) });
+    }
+
+    function openChange(r) {
+      if (M.change && M.change.ed && M.change.ed.busy()) return;   /* one being saved: it finishes first */
+      const old = M.change;
+      if (old && old.ed) old.ed.stop();
+      M.change = { id: r.id, ed: null };
+      M.msg.delete(r.id);
+      if (old && old.id !== r.id) paintCard(old.id);
+      paintCard(r.id, ".rc .seg button.on");
+    }
+
+    function changeDone(id, rec, said) {   /* saved (the answered record) or closed (null) */
+      if (M.change && M.change.id === id) M.change = null;
+      if (rec) { put(rec); M.msg.set(id, { text: said, bad: false }); }
+      paintCard(id, '[data-act="change"]');
     }
 
     function paintCard(id, focus) {
       const r = find(id), el = r && M.box && [...M.box.querySelectorAll(".ab")].find(c => c.dataset.id === id);
       if (!el) { paintAll(); return; }
       el.outerHTML = card(r);
+      placeChange();
       const now = [...M.box.querySelectorAll(".ab")].find(c => c.dataset.id === id);
       if (now) { RF.fitAll(now); if (focus) { const t = now.querySelector(focus); if (t) t.focus(); } }
       painted();
@@ -351,6 +387,7 @@
         case "ask-off": M.ask = null; paintCard(r.id); return;
         case "cancel-go": cancel(r); return;
         case "nn-go": if (x) notNeeded(r, x); return;
+        case "change": openChange(r); return;
         case "needed": if (x) act(r, [() => api(`/api/relief/absences/${enc(r.id)}/lessons/${enc(x.key)}/needed`, json("POST", {}))]).then(got => { if (got) paintCard(r.id); }); return;
         case "addfile": if (row) { const input = row.querySelector('input[data-w="file"]'); if (input) input.click(); } return;
         case "unfile": if (x) { editDraft(r, x).files.splice(Number(b.dataset.j), 1); M.lerr.delete(lkey(r.id, x.key)); paintCard(r.id); } return;
@@ -417,7 +454,7 @@
 
     return {
       mount, load, find, put, paint: paintCard, paintAll, list: () => M.list, error: () => M.err,
-      dirty() { return (M.list || []).some(dirtyOf) || [...M.up.values()].some(n => n > 0); },
+      dirty() { return (M.list || []).some(dirtyOf) || [...M.up.values()].some(n => n > 0) || !!(M.change && M.change.ed && (M.change.ed.dirty() || M.change.ed.busy())); },
     };
   }
 
