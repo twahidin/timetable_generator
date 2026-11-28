@@ -219,6 +219,16 @@ t("Close: nothing is sent", async () => {
 t("someone else saving it: the absent teacher is told on Telegram", async () => {
   const p = await editor(rec({ how: "planned", by: GRACE }), { me: GRACE });
   has(p, `${EVE} is told on Telegram, if they have linked it.`);
+  hasNot(p, `${EVE} and ${GRACE}`);
+});
+t("the relief team saving a planned request: the absent teacher and the head who planned it are told", async () => {
+  const p = await editor(rec({ how: "planned", by: GRACE }), { me: SAM });
+  has(p, `${EVE} and ${GRACE} are told on Telegram, if they have linked it.`);
+});
+t("the absent teacher saving her planned request: the head who planned it is told", async () => {
+  const p = await editor(rec({ how: "planned", by: GRACE }), { me: EVE });
+  has(p, `${GRACE} is told on Telegram, if they have linked it.`);
+  hasNot(p, `${EVE} is told`);
 });
 
 /* ---------------------------------------------------------------- Or change one lesson, or cancel the whole request (the relief team's Edit) */
