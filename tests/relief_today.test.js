@@ -49,18 +49,18 @@ t("no bot connected: as the page was, whatever the rows say", async () => {
   for (const more of [{ telegram: false }, { telegram: undefined }, { telegram: null }, { telegram: "yes" }, { telegram: 1 }])
     for (const x of [null, "sent", "unsure", "queued", "failed", "dropped"]) {
       const p = await today(day([row({ told: x && told(x) }), maya({ linked: false })], more)), what = JSON.stringify([more, x]);
-      assert.strictEqual(p.state(), `Approved: they see it in ${SEES} ${BY} Change`, what); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Send out approved (off)", "Fill now", "Refresh"], what);
+      assert.strictEqual(p.state(), `Approved: they see it in ${SEES} ${BY} Change Relief not needed`, what); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Send out approved (off)", "Fill now", "Refresh"], what);
       await p.tick(60000); assert.strictEqual(p.reads(), 1, "nothing is read again"); assert.ok(!p.text("#pane-today").includes("Telegram") && !p.text("#pane-today").includes("Remind") && !p.text("#pane-today").includes("ent"  + " 07"), what);
     }
 });
 t("what was said of an approved relief, before who approved it", async () => {
   const cases = [[told("sent"), "Sent 07:20"], [told("sent", "2026-10-12T15:00:00+08:00"), "Sent Mon 12 Oct, 15:00"], [told("unsure"), "May not have been sent: remind them"], [told("queued"), "Being sent…"], [told("failed"), "Could not be sent: remind them"],
     [null, "Not sent yet"], [undefined, "Not sent yet"], [told("dropped"), "Not sent yet"], [told("odd"), "Not sent yet"], [told("sent", null), "Sent"]];
-  for (const [x, line] of cases) { const p = await today(day([row({ told: x })])); assert.strictEqual(p.state(), `Approved ${line} ${BY} Change Remind`); }
+  for (const [x, line] of cases) { const p = await today(day([row({ told: x })])); assert.strictEqual(p.state(), `Approved ${line} ${BY} Change Remind Relief not needed`); }
   for (const [x, line] of [[null, NOT_ON], [told("dropped"), NOT_ON], [told("queued"), NOT_ON], [told("unsure"), NOT_ON], [told("failed"), NOT_ON], [told("sent"), "Sent 07:20 · not on Telegram now"]]) {
-    const p = await today(day([row({ told: x, linked: false })])); assert.strictEqual(p.state(), `Approved ${line} ${BY} Change`);
+    const p = await today(day([row({ told: x, linked: false })])); assert.strictEqual(p.state(), `Approved ${line} ${BY} Change Relief not needed`);
   }
-  const p = await today(day([row({ approved: null })])); assert.strictEqual(p.state(), "Approved Sent 07:20 Change Remind");
+  const p = await today(day([row({ approved: null })])); assert.strictEqual(p.state(), "Approved Sent 07:20 Change Remind Relief not needed");
 });
 t("on a date past, only what is so", async () => {
   const YESTERDAY = "2026-10-12", lines = [[told("sent"), true, "Sent 07:20"], [told("unsure"), true, "May not have been sent"], [told("queued"), true, "Being sent…"], [told("failed"), true, "Could not be sent"], [null, true, "Not sent"], [told("dropped"), true, "Not sent"],
@@ -516,14 +516,14 @@ t("no line above the rows when nothing is held, and none about the cut-off on an
 });
 t("a sent row says what it said, with no line of the new states", async () => {
   const p = await today(day([row({ out: "sent" })], { hours: HOURS }));
-  assert.strictEqual(p.state(), `Approved Sent 07:20 ${BY} Change Remind`);
+  assert.strictEqual(p.state(), `Approved Sent 07:20 ${BY} Change Remind Relief not needed`);
 });
 t("a row not sent out has Send out, Change and no Remind, whether a bot is connected or not", async () => {
   for (const telegram of [true, false]) {
     const p = await today(day([row({ out: "unsent", told: null })], { telegram }));
-    assert.strictEqual(p.state(), `Approved Approved · not sent out ${BY} Send out Change`);
+    assert.strictEqual(p.state(), `Approved Approved · not sent out ${BY} Send out Change Relief not needed`);
     const h = await today(day([row({ out: "held", goes_at: "2026-10-13T06:45:00+08:00", told: null })], { telegram }));
-    assert.strictEqual(h.state(), `Approved Will be sent at 06:45 ${BY} Change`);
+    assert.strictEqual(h.state(), `Approved Will be sent at 06:45 ${BY} Change Relief not needed`);
   }
 });
 t("a day with a next school day that is not tomorrow is named by its day; no next day, no button", async () => {
@@ -545,11 +545,11 @@ t("the page opens on the server's date, and Refresh keeps the date shown", async
 /* ---- Send-out, Task 8 ---- */
 t("a head's own choice: Planned by them before its line, and no Send out", async () => {
   const p = await today(day([row({ planned_by: TEAM })]));
-  assert.strictEqual(p.state(), `Approved Planned by ${TEAM} · Sent 07:20 ${BY} Change Remind`); assert.strictEqual(p.btn("Send out"), null);
+  assert.strictEqual(p.state(), `Approved Planned by ${TEAM} · Sent 07:20 ${BY} Change Remind Relief not needed`); assert.strictEqual(p.btn("Send out"), null);
   const h = await today(day([row({ planned_by: TEAM, out: "held", goes_at: "2026-10-13T06:45:00+08:00", told: null })], { hours: HOURS }));
-  assert.strictEqual(h.state(), `Approved Planned by ${TEAM} · Will be sent at 06:45 ${BY} Change`);
+  assert.strictEqual(h.state(), `Approved Planned by ${TEAM} · Will be sent at 06:45 ${BY} Change Relief not needed`);
   const q = await today(day([row({ planned_by: TEAM })], { telegram: false }));
-  assert.strictEqual(q.state(), `Approved: they see it in ${SEES} Planned by ${TEAM} ${BY} Change`);
+  assert.strictEqual(q.state(), `Approved: they see it in ${SEES} Planned by ${TEAM} ${BY} Change Relief not needed`);
   const n = await today(day([row()])); assert.ok(!n.state().includes("Planned by"), "the team's own: no such line");
   assert.ok(p.text("#pane-today").includes("Nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning."));
 });
@@ -605,6 +605,109 @@ t("showDay on an open tab reads the asked day once, and again once for the day a
   assert.strictEqual(p.find("#tdDate") ? p.find("#tdDate").value : "2026-10-16", "2026-10-16");
   p.window.Relief.showDay("2026-10-16"); await p.settle();
   assert.strictEqual(asked("2026-10-16"), 2, "the same day again reads once more");
+});
+
+/* ---------------------------------------------------------------- Relief not needed */
+const NN = "Relief not needed", WHOLE = "Relief not needed for the whole lesson";
+const nnPosts = p => p.calls.filter(c => c.url.endsWith("/not-needed")).map(c => [c.method, c.url, c.body]);
+t("Relief not needed: on each row not cancelled nor stopped; for the whole lesson on a part of a split one", async () => {
+  for (const state of ["open", "waiting", "acknowledged", "change"]) {
+    const p = await today(day([inState(state)]));
+    assert.ok(p.btn(NN), state); assert.strictEqual(p.btn(NN).getAttribute("data-td"), "nn");
+  }
+  const p = await today(day([row(), row({ ckey: "k5#1", split: true, p: 7, n: 1 }), inState("stopped", { ckey: "k3", key: "k3" }), inState("cancelled", { ckey: "k4", key: "k4" })]));
+  assert.ok(p.btn(NN) && !p.btn(WHOLE), "a whole lesson");
+  assert.ok(p.btn(WHOLE, "k5#1") && !p.btn(NN, "k5#1"), "a part of a split lesson");
+  for (const k of ["k3", "k4"]) assert.ok(!p.btn(NN, k) && !p.btn(WHOLE, k), k);
+});
+t("Relief not needed: none on a date past", async () => {
+  const p = await today(c => ok(day([row()], { date: c.url.slice(-10) }))), input = p.find("#tdDate");
+  input.value = "2026-10-12";
+  for (const f of p.find("#pane-today").on.change) f({ target: input });
+  await p.tick(400);
+  assert.strictEqual(p.btn(NN), null);
+});
+t("Relief not needed: none on a row whose lesson is over; an open box closes when it is over by a reading", async () => {
+  const p = await today(day([row({ over: true }), row({ ckey: "k6", key: "k6", p: 8, n: 1 })]));
+  assert.strictEqual(p.btn(NN), null, "over: nothing more is marked");
+  assert.ok(p.btn(NN, "k6"));
+  await p.click(p.btn(NN, "k6"));
+  assert.ok(p.$('#tdRows input[data-td="nn-why"]'));
+  p.day = day([row({ over: true }), row({ ckey: "k6", key: "k6", p: 8, n: 1, over: true })]);
+  await p.click("#pane-today button", "Refresh");
+  assert.strictEqual(p.$('#tdRows input[data-td="nn-why"]'), null);
+  assert.strictEqual(p.btn(NN, "k6"), null);
+});
+t("Relief not needed: its box, Back, and one open at a time with Split's", async () => {
+  const p = await today(day([row(), maya({ state: "waiting", approved: null, n: 2, told: null })]));
+  await p.press(NN);
+  assert.strictEqual(p.under(), "Why is relief not needed? (optional) Mark relief not needed Back");
+  const why = p.row().querySelector('input[data-td="nn-why"]');
+  assert.strictEqual(why.getAttribute("maxlength"), "200"); assert.strictEqual(p.focus(), why, "the focus is on the reason");
+  assert.strictEqual(p.btn(NN).getAttribute("aria-expanded"), "true");
+  assert.strictEqual(p.btn("Mark relief not needed").getAttribute("data-td"), "nn-go"); assert.strictEqual(p.btn("Back").getAttribute("data-td"), "nn-off");
+  await p.press(NN, "k2");
+  assert.strictEqual(p.under(), "", "only one open"); assert.ok(p.under("k2").startsWith("Why is relief not needed?"));
+  await p.press("Split", "k2");
+  assert.ok(p.under("k2").startsWith("Split ") && !p.under("k2").includes("Why is relief"), "Split's in its place");
+  await p.press(NN, "k2");
+  assert.ok(!p.under("k2").includes("Split after"), "and the other way");
+  await p.press("Back", "k2");
+  assert.strictEqual(p.under("k2"), ""); assert.strictEqual(p.focus(), p.btn(NN, "k2"));
+  assert.deepStrictEqual(nnPosts(p), []);
+});
+t("Relief not needed on a part: the box says it ends every part", async () => {
+  const p = await today(day([row({ ckey: "k5#1", split: true, p: 7, n: 1 })]));
+  await p.press(WHOLE, "k5#1");
+  assert.strictEqual(p.under("k5#1"), "This ends every part of 1A Science. Why is relief not needed? (optional) Mark relief not needed Back");
+});
+t("Mark relief not needed: what it sends, and the row gone, said above the rows", async () => {
+  const p = await today(day([row(), maya()]));
+  await p.press(NN);
+  await p.type('.td-row[data-ckey="k5"] input[data-td="nn-why"]', "  Class on a trip ");
+  p.day = day([maya()]);
+  await p.press("Mark relief not needed");
+  assert.deepStrictEqual(nnPosts(p), [["POST", "/api/relief/absences/a1/lessons/k5/not-needed", { why: "Class on a trip" }]]);
+  assert.strictEqual(p.all('.td-row[data-ckey="k5"]').length, 0, "the row is gone");
+  assert.ok(p.top().includes("1A Science: relief not needed."), p.top());
+});
+t("Mark relief not needed: a part sends its lesson's key; Return sends it; a refusal beside the row, the box still open", async () => {
+  const p = await today(day([row({ ckey: "k5#1", split: true, p: 7, n: 1 })]));
+  await p.press(WHOLE, "k5#1");
+  p.steps = no(400, "That lesson is before today: it stays as it was.");
+  await p.key(p.row("k5#1").querySelector('input[data-td="nn-why"]'), "Enter");
+  assert.deepStrictEqual(nnPosts(p), [["POST", "/api/relief/absences/a1/lessons/k5/not-needed", { why: "" }]]);
+  assert.ok(p.under("k5#1").startsWith("That lesson is before today: it stays as it was."), p.under("k5#1"));
+  assert.ok(p.under("k5#1").includes("Mark relief not needed"));
+});
+t("after Mark relief not needed the focus goes to the next row, else the one before, else the line above the rows", async () => {
+  const third = row({ ckey: "k9", key: "k9", p: 9, n: 1, pick: { who: RUTH, by: "team", reason: "" } });
+  let p = await today(day([row(), maya(), third]));
+  await p.press(NN); p.day = day([maya(), third]); await p.press("Mark relief not needed");
+  assert.strictEqual(p.focus(), p.row("k2").querySelector("button"), "the next row's first button");
+  p = await today(day([maya(), row()]));
+  await p.press(NN); p.day = day([maya()]); await p.press("Mark relief not needed");
+  assert.strictEqual(p.focus(), p.row("k2").querySelector("button"), "the row before, when it was the last");
+  p = await today(day([row()]));
+  await p.press(NN); p.day = day([]); await p.press("Mark relief not needed");
+  const line = p.find("#tdTop [data-said]");
+  assert.strictEqual(p.text(line), "1A Science: relief not needed."); assert.strictEqual(line.getAttribute("tabindex"), "-1");
+  assert.strictEqual(p.focus(), line, "the line that says it");
+});
+t("only the newest such line can take the focus", async () => {
+  const p = await today(day([row(), maya()]));
+  await p.press(NN); p.day = day([maya()]); await p.press("Mark relief not needed");
+  await p.press(NN, "k2"); p.day = day([]); await p.press("Mark relief not needed", "k2");
+  assert.deepStrictEqual(p.all("#tdTop [data-said]").map(e => p.text(e)), ["1A Science: relief not needed."]);
+  assert.strictEqual(p.top().length, 2);
+});
+t("what is typed in the box stays through a reading of the day", async () => {
+  const p = await today(day([row()], { filling: true }));
+  await p.press(NN);
+  await p.type('.td-row[data-ckey="k5"] input[data-td="nn-why"]', "On a trip");
+  p.day = day([row({ pick: { who: MAYA, by: "ai", reason: "Teaches Science." } })], { filling: true });
+  await p.tick(3000);
+  assert.strictEqual(p.row().querySelector('input[data-td="nn-why"]').value, "On a trip");
 });
 
 run(all);
