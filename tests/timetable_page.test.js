@@ -81,11 +81,11 @@ function boot(answers, app, tweak) {
   const adopt = o => { if (o.id) reg.set(o.id, o); scan(o); };
   const scan = e => { for (const m of e._html.matchAll(/id="([^"]+)"/g)) if (!reg.has(m[1])) reg.set(m[1], el(m[1])); };
   for (const id of ["q", "results", "status", "theme", "tabs", "main", "browse", "fq", "chips", "list", "view", "dlg", "dlgT", "dlgB", "school", "ttl"]) reg.set(id, el(id));
-  const header = el("", "header");
+  const header = el("", "header"), on = {};   /* on: the page's own document listeners (click, keydown), to call with a fake event */
   const document = {
     documentElement: { classList: el("html").classList, dataset: {} },
     querySelector: sel => sel === "header.top" ? header : sel === ".search" ? el("") : (/^#([\w-]+)$/.exec(sel) ? reg.get(sel.slice(1)) || null : null),
-    querySelectorAll: () => [], createElement: t => el("", t), addEventListener() {}, activeElement: { tagName: "BODY" }
+    querySelectorAll: () => [], createElement: t => el("", t), addEventListener: (t, f) => { (on[t] = on[t] || []).push(f); }, activeElement: { tagName: "BODY" }
   };
   const loc = { hash: "", href: "http://x/timetable" };
   const ctx = {
@@ -107,12 +107,15 @@ function boot(answers, app, tweak) {
   vm.runInContext(SCRIPT, ctx);
   const tick = () => new Promise(r => setImmediate(r)).then(() => new Promise(r => setImmediate(r))).then(() => new Promise(r => setImmediate(r)));
   const pick = async iso => { reg.get("onDate").listeners.change[0]({ target: { value: iso } }); await tick(); };
-  return { run: c => vm.runInContext(c, ctx), view: () => reg.get("view")._html, el: id => reg.get(id), fetched, tick, pick };
+  return { run: c => vm.runInContext(c, ctx), view: () => reg.get("view")._html, el: id => reg.get(id), fetched, tick, pick, on };
 }
 
 const APP = { mode: "teacher", tabs: ["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], pdf: true, logout: "/logout", files: [], dates: true, exams: true, published_at: STAMP };
 const LIST = [200, { schedules: [], banner: null }];
 const count = (s, w) => s.split(w).length - 1;
+/* a page's day list (the phone's drawing) and its grid, each alone: a count in one does not meet the other */
+const list = s => s.slice(s.indexOf('class="dwrap"'), s.indexOf('class="gridwrap"'));
+const grid = s => s.indexOf('class="gridwrap"') < 0 ? "" : s.slice(s.indexOf('class="gridwrap"'));
 const keys = h => [...h.matchAll(/data-key="([^"]+)"/g)].map(m => m[1]).join(",");
 const names = (v, from, to) => [...v.split(from)[1].split(to)[0].matchAll(/data-key="([^"]+)"/g)].map(m => m[1]);
 let n = 0; const t = async (name, f) => { await f(); n++; };
@@ -369,7 +372,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(count(h, 'class="ruler"') === 2 && h.includes(">ODD WEEK<") && h.includes(">EVEN WEEK<"), "an hour row above each week");
     assert(count(h, 'class="row') === 10, "ten day rows");
     assert(h.includes('<span class="t"><span class="tf">7.40–8.20</span><span class="ts">7.40</span></span><b>EL</b>'), "the time comes first in a lesson's box");
-    assert(count(h, ">Recess<") === 1 && !h.includes(">Lunch<"), "a band only where a lesson follows: " + count(h, ">Recess<"));
+    assert(count(grid(h), ">Recess<") === 1 && !grid(h).includes(">Lunch<"), "a band only where a lesson follows: " + count(grid(h), ">Recess<"));
     assert(h.includes("8<small>am</small>") && !h.includes(">noon<"), "3A's page ends at 10.40");
     assert(!h.includes("after school") && !/class="cell[^"]* ext/.test(h), "no after-school mark");
     assert(h.includes("Striped bands are breaks. Click a lesson for every group, teacher and room in it."));
@@ -386,6 +389,75 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert(count(h, 'class="track" style="--h:62px"') === 10, "a row with nothing side by side is 62px");
     assert(PAGE.includes(".tt .track{position:relative;height:var(--h)}"), "the track's height comes from --h");
     assert(/@media print\{[^\n]*\.tt \.track\{height:calc\(var\(--h\) \* 56 \/ 62\)\}\.tt \.row\{break-inside:avoid\}\.tt \.ruler\{break-after:avoid\}/.test(PAGE), "print: 56px rows, a row never split, an hour row kept with its row");
+  });
+
+  await t("the phone's day list: drawn before the grid, the week and day buttons, a lesson's time beside it, Whole week", async () => {
+    const P = boot({ "/api/published/exams": LIST }, APP);
+    await P.tick();
+    P.run('show("classes", "3A")'); let h = P.view();
+    assert(h.indexOf('class="dwrap"') > 0 && h.indexOf('class="dwrap"') < h.indexOf('class="gridwrap"'), "the list comes before the grid, and both are drawn");
+    let L = list(h);
+    assert(L.includes('<button data-pv="day" class="on">Day</button><button data-pv="week">Whole week</button>'), L);
+    assert(L.includes('<button data-pw="0" class="on">Odd week</button><button data-pw="1">Even week</button>'), L);
+    assert(L.includes('<button data-pd="0" class="on">Mon</button>') && L.includes('<button data-pd="4">Fri</button>') && !L.includes('data-pd="5"'), "the shown week's days only");
+    assert.strictEqual(P.run('JSON.stringify(dayItems(classView("3A"), 0).map(x => [x.a, x.b, x.name || x.c.title]))'),
+      JSON.stringify([[460, 500, "EL"], [540, 560, "Recess"], [580, 640, "CS"]]));
+    assert(L.includes('<div class="tm">7.40–8.20</div><div class="it" data-id="0"') && L.includes('<div class="tm q">9.00–9.20</div><div class="bkr">Recess</div>') && !L.includes("Lunch"), L);
+    assert(L.includes('<div class="tm">9.40–10.40</div><div class="it" data-id="2" tabindex="0" style="--t:#edd;--a:#322"><b>CS</b><span>3CS1</span><span>Ms Grace Yeo</span><span>3-02</span></div>') && !L.includes("…"), "the title and every line whole: " + L);
+    assert.strictEqual(P.run("S.pdBy"), false, "no button pressed yet");
+    P.run("pickDay(1)"); L = list(P.view());
+    assert(L.includes('<button data-pd="1" class="on">Tue</button>') && L.includes('<div class="empty">No lessons this day.</div>') && P.run("S.pdBy") === true, L);
+    P.run("pickWeek(1)"); assert.strictEqual(P.run("S.pd"), 6, "the same weekday in the other week");
+    L = list(P.view());
+    assert(L.includes('<button data-pw="0">Odd week</button><button data-pw="1" class="on">Even week</button>') && L.includes('<button data-pd="6" class="on">Tue</button>') && L.includes('<button data-pd="5">Mon</button>') && !L.includes('data-pd="4"'), L);
+    assert(!/class="card[^"]* whole/.test(P.view()), "Day is the start");
+    P.run("pickWhole(true)"); assert(/class="card[^"]* whole/.test(P.view()) && list(P.view()).includes('<button data-pv="week" class="on">Whole week</button>'), P.view().slice(0, 300));
+    assert.strictEqual(P.run("location.hash"), "#classes/3A", "the same page");
+    P.run("pickWhole(false)"); assert(!/class="card[^"]* whole/.test(P.view()));
+    /* the buttons and a list item through the page's own click and Enter handling */
+    const fake = (ds, match) => { const o = { dataset: ds, closest: s => s.split(",").some(x => x.trim() === match) ? o : null, matches: s => s === match, classList: { contains: c => c === "it" && match === ".it[data-id]" } }; return o; };
+    P.on.click[0]({ target: fake({ pd: "7" }, "[data-pd]") }); assert.strictEqual(P.run("S.pd"), 7);
+    P.on.click[0]({ target: fake({ pw: "0" }, "[data-pw]") }); assert.strictEqual(P.run("S.pd"), 2);
+    P.on.click[0]({ target: fake({ pv: "week" }, "[data-pv]") }); assert.strictEqual(P.run("S.whole"), true);
+    P.on.click[0]({ target: fake({ pv: "day" }, "[data-pv]") }); assert.strictEqual(P.run("S.whole"), false);
+    P.on.click[0]({ target: fake({ id: "2" }, ".it[data-id]") });
+    assert(P.el("dlgT").innerHTML.includes(">CS</b>") && P.el("dlgB").innerHTML.includes("<b>Combined Science</b>") && P.el("dlgB").innerHTML.includes("3CS1"), "a click on a list item opens the lesson's box: " + P.el("dlgT").innerHTML);
+    P.el("dlgT").innerHTML = "";
+    for (const f of P.on.keydown) f({ key: "Enter", target: fake({ id: "0" }, ".it[data-id]") });
+    assert(P.el("dlgT").innerHTML.includes("EL") && P.run("S.tab") === "classes", "Enter on a list item opens it too: " + P.el("dlgT").innerHTML);
+    /* the Lessons tab's class grids stay grids; a class with no lessons says so, with no list */
+    P.run('show("lessons", null)');
+    assert(!P.view().includes('class="dwrap"') && !P.el("ltab").innerHTML.includes('class="dwrap"') && P.el("ltab").innerHTML.includes('class="gridwrap"'), P.el("ltab").innerHTML.slice(0, 300));
+    P.run('const cv0 = classView; classView = c => c === "3B" ? Object.assign(cv0(c), { cells: [] }) : cv0(c); show("classes", "3B")');
+    assert(P.view().includes('<div class="empty">No lessons.</div>') && !P.view().includes('class="dwrap"'), P.view());
+    /* the styles: the list on a narrow screen only, the grid when printed */
+    assert(PAGE.includes(".dwrap{display:none}") && /@media \(max-width:700px\)\{[^\n]*\.dwrap\{display:block\}[^\n]*\.card:not\(\.whole\) \.gridwrap\{display:none\}/.test(PAGE), "the list shows on a narrow screen, in place of the grid");
+    assert(/@media \(max-width:700px\)\{[^\n]*\.card \.lcls \.gridwrap\{display:block\}/.test(PAGE), "the Lessons tab's class grids stay grids on a phone");
+    assert(/@media print\{[^\n]*\n[^\n]*\.dwrap\{display:none!important\}\.gridwrap\{display:block!important\}/.test(PAGE), "print: the grid, never the list");
+  });
+
+  await t("the day list with one week, on a date, on a built timetable and on a student's own page", async () => {
+    const ONE = d => { d.school.weeks = 1; d.days = ["Mon", "Tue", "Wed", "Thu", "Fri"]; d.grid["Sec 3"] = d.grid["Sec 3"].slice(0, 5); d.grid["Sec 4"] = d.grid["Sec 4"].slice(0, 5); };
+    const A = boot({ "/api/published/exams": LIST }, APP, ONE);
+    await A.tick(); A.run('show("classes", "3A")');
+    let L = list(A.view());
+    assert(!L.includes('class="seg pw"') && !L.includes("data-pw") && count(L, "data-pd=") === 5 && L.includes('<button data-pd="0" class="on">Mon</button>'), "no week buttons, five days: " + L);
+    const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
+    await P.tick(); P.run('show("classes", "3A")'); P.run("pickDay(3)"); await P.pick("2026-10-05");
+    L = list(P.view());
+    assert(!L.includes("data-pw") && !L.includes("data-pd") && L.includes('<button data-pv="day" class="on">Day</button>'), "a date shows its own day: no week or day buttons: " + L);
+    assert(L.includes('<div class="tm">7.40–8.20</div><div class="it x" data-id="0"') && L.includes('<div class="tm">7.50–8.50</div><div class="it exam"><b>Sec 3 English Paper 1</b><span>3-01</span></div>'), "the crossed-out lesson and the paper: " + L);
+    P.run("pickWhole(true)");
+    assert(P.view().includes('<p class="onday">') && /class="card[^"]* whole/.test(P.view()) && P.run("S.on.date") === "2026-10-05", "the date stays: " + P.view().slice(0, 400));
+    P.run("pickWhole(false)");
+    P.run('show("students", "__build")'); P.run("pickWhole(true)");
+    assert(P.view().startsWith('<div class="card whole">') && P.el("bview").innerHTML.startsWith("<div>") && P.el("bview").innerHTML.includes('class="dwrap"'), "the built timetable: the outer card switches, no card inside: " + P.el("bview").innerHTML.slice(0, 200));
+    assert(P.run("location.hash").startsWith("#build/"), P.run("location.hash"));
+    const ME = boot({ "/api/me/exams": [200, { schedules: [] }] }, { mode: "personal", exams: true, pdf: true, logout: "/logout", files: [] });
+    await ME.tick();
+    assert(list(ME.view()).includes('<button data-pd="0" class="on">Mon</button>'), ME.view().slice(0, 300));
+    ME.run("pickDay(2)");
+    assert(list(ME.view()).includes('<button data-pd="2" class="on">Wed</button>') && ME.view().includes("Student 3A-01"), "a student's own page draws again: " + ME.view().slice(0, 300));
   });
 
   await t("an after-school lesson looks like any other; three lessons at once make a taller row", async () => {
