@@ -249,7 +249,7 @@
       lines.push({ text: `${one ? "1 relief sent out: it" : `${held.length} reliefs sent out: they`} will be sent at ${at} on ${day(d)}. You can still change ${one ? "it" : "them"} until then.` });
     }
     lines.push(...T.top);
-    lines.forEach((m, i) => { lines[i] = `<p class="td-top">${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">show today</button>.` : ""}</p>`; });
+    lines.forEach((m, i) => { lines[i] = `<p class="td-top"${m.said ? ` tabindex="-1" data-said="1"` : ""}>${say(m)}${m.today ? ` <button type="button" class="linkish" data-td="day" data-v="${esc(m.today)}">show today</button>.` : ""}</p>`; });
     if (T.data && T.data.filling) lines.push(`<p class="td-top small td-busy">Being picked… The page reads the day again every 3 seconds.</p>`);
     if (T.err && T.data) lines.push(`<p class="td-top">${say(T.err)} <button type="button" class="small" data-td="reload">Try again</button></p>`);
     if (lines.join("") !== T.lines) $("#tdTop", T.pane).innerHTML = T.lines = lines.join("");   /* a live region: what is there already is not said again */
@@ -512,13 +512,22 @@
     }
   }
 
-  function notNeeded(k, r) {   /* the whole lesson (every part of a split one): it leaves the list, so it is said above the rows */
+  /* the whole lesson (every part of a split one): it leaves the list, so it is said above the rows, and the focus goes to the
+     next row still there (else the one before, else that line) */
+  async function notNeeded(k, r) {
     if (T.busy.has(k) || T.all) return;
-    act(k, "POST", `/api/relief/absences/${enc(r.id)}/lessons/${enc(r.key)}/not-needed`, { why: T.nnWhy.trim() }, () => {
-      T.nn = null; T.nnWhy = "";
-      T.top.push({ text: `${RF.title(r)}: relief not needed.`, bad: false });
+    const order = rows().map(rid), i = order.indexOf(k), said = { text: `${RF.title(r)}: relief not needed.`, bad: false, said: true };
+    let done = false;
+    await act(k, "POST", `/api/relief/absences/${enc(r.id)}/lessons/${enc(r.key)}/not-needed`, { why: T.nnWhy.trim() }, () => {
+      T.nn = null; T.nnWhy = ""; done = true;
+      T.top.forEach(m => { delete m.said; });
+      T.top.push(said);
       return "";
     }, true, false);
+    if (!done || R.cur !== "today" || rowEl(k) || (document.activeElement && document.activeElement !== document.body)) return;
+    const next = [...order.slice(i + 1), ...order.slice(0, Math.max(i, 0)).reverse()].map(rowEl).find(Boolean);
+    const b = next && [...next.querySelectorAll("button")].find(x => !x.disabled), line = $("#tdTop [data-said]", T.pane);
+    if (b) b.focus({ preventScroll: true }); else if (line) line.focus({ preventScroll: true });
   }
 
   function onInput(e) { if (e.target.dataset && e.target.dataset.td === "nn-why") T.nnWhy = e.target.value; }

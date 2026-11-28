@@ -100,11 +100,12 @@ async function page(list) {
     if (call.url === "/api/relief/me") return ok({ name: "Mr Hugo Ong", depts: [], published: true, today: TODAY, can_team: true, can_plan: true, can_settings: false });
     if (call.url === "/api/relief/absences") return ok({ absences: p.list, as_of: "2026-10-12T09:00:00+08:00" });
     if (call.url === "/api/relief/school-days") return ok({ today: TODAY, days: weekdays(TODAY, "2026-11-20"), off: {} });
-    if (call.url.endsWith("/change/preview")) return ok({ kept: [], added: [], gone: [], earlier: 0, dates: ["2026-10-13"], periods: null, unchanged: true, day_periods: [] });
+    if (call.url.endsWith("/change/preview")) return ok(Object.assign({ kept: [], added: [], gone: [], earlier: 0, dates: ["2026-10-13"], periods: null, unchanged: true, day_periods: [] }, p.preview));
+    if (call.url.endsWith("/change")) return p.save;
     if (call.url.includes("/lessons/") || call.url.endsWith("/cancel")) return p.step;
     return ok({ absences: [], covers: [], lessons: [], periods: [] });
   } });
-  p.list = list; p.step = ok({});
+  p.list = list; p.step = ok({}); p.preview = {}; p.save = ok({});
   p.run("relief-form.js", "relief-dates.js", "relief-change.js", "relief.js", "relief-inbox.js");
   await p.settle();
   p.reads = () => p.calls.filter(c => c.method === "GET" && c.url === "/api/relief/absences").length;
@@ -136,16 +137,46 @@ t("a cancelled row's chip spans to the last column", async () => {
   assert.strictEqual(p.all("#inBox thead th").length, 9);
   assert.strictEqual(p.all('#inBox [data-in="edit"]').length, 0);
 });
-t("what is chosen stays through a Refresh and a view shown again", async () => {
+t("what is chosen stays through a Refresh; a view without its row closes it, and nothing hidden counts as unsaved", async () => {
   const p = await page([record({ id: "a", lessons: [LESSON] })]);
   await p.click(p.edit("a"));
   await p.type('#inBox input[data-rc="cwhy"]', "Appointment moved");
+  assert.strictEqual(p.window.Relief.dirtyAny(), true);
   await p.click("#inBox button", "Refresh");
   assert.strictEqual(p.find('#inBox input[data-rc="cwhy"]').value, "Appointment moved");
   await p.click('#inBox [data-in="view"][data-v="cancelled"]');
   assert.strictEqual(p.all("#inBox tr.in-edit").length, 0);
+  assert.strictEqual(p.window.Relief.dirtyAny(), false);
   await p.click('#inBox [data-in="view"][data-v="coming"]');
-  assert.strictEqual(p.find('#inBox input[data-rc="cwhy"]').value, "Appointment moved");
+  assert.strictEqual(p.all("#inBox tr.in-edit").length, 0, "closed, not hidden");
+  assert.strictEqual(p.edit("a").getAttribute("aria-expanded"), "false");
+  assert.ok(!p.text("#inBox").includes("can no longer be changed"), "the person's own step: nothing to say");
+});
+t("a save refused because the request changed meanwhile: the list is read again, the Edit stays open", async () => {
+  const LOOKED = "The request has changed since you looked: look again before saving.";
+  const p = await page([record({ id: "a", lessons: [LESSON] })]);
+  await p.click(p.edit("a"));
+  p.preview = { dates: [TODAY], unchanged: false, gone: [{ key: "k5", date: "2026-10-13", p: 5, n: 2, title: "1A Science", periods: "P6–P7", line: "nobody was approved yet" }] };
+  await p.click("#inBox tr.in-edit button", "Today");
+  assert.ok(!p.find("#inBox tr.in-edit button", "Save the change").disabled);
+  const before = p.reads();
+  p.save = { status: 400, data: { error: LOOKED } };
+  await p.click("#inBox tr.in-edit button", "Save the change");
+  assert.strictEqual(p.reads(), before + 1, "read again");
+  assert.strictEqual(p.all("#inBox tr.in-edit").length, 1);
+  assert.ok(p.text("#inBox tr.in-edit").includes(LOOKED), p.text("#inBox tr.in-edit"));
+});
+t("a Refresh finds the request can no longer be changed: the Edit closes and the line above the table says so", async () => {
+  const cancelled = { by: "Ms Grace Wong", why: "Well again", at: "2026-10-12T08:00:00+08:00" };
+  for (const now of [record({ id: "a", cancelled }), record({ id: "a", dates: ["2026-10-09"] }), null]) {
+    const p = await page([record({ id: "a", lessons: [LESSON] }), record({ id: "b", teacher: "Mr Sam Tan", by: "Mr Sam Tan" })]);
+    await p.click(p.edit("a"));
+    p.list = now ? [now, p.list[1]] : [p.list[1]];
+    await p.click("#inBox button", "Refresh");
+    assert.strictEqual(p.all("#inBox tr.in-edit").length, 0, JSON.stringify(now));
+    assert.strictEqual(p.text("#inBox .in-said"), "Ms Evelyn Koh's request can no longer be changed.");
+    assert.strictEqual(p.window.Relief.dirtyAny(), false);
+  }
 });
 t("a step done: the view closes, what was done is said above the table, and the list is read again", async () => {
   const p = await page([record({ id: "a", lessons: [LESSON] })]), before = p.reads();

@@ -669,6 +669,27 @@ t("Mark relief not needed: a part sends its lesson's key; Return sends it; a ref
   assert.ok(p.under("k5#1").startsWith("That lesson is before today: it stays as it was."), p.under("k5#1"));
   assert.ok(p.under("k5#1").includes("Mark relief not needed"));
 });
+t("after Mark relief not needed the focus goes to the next row, else the one before, else the line above the rows", async () => {
+  const third = row({ ckey: "k9", key: "k9", p: 9, n: 1, pick: { who: RUTH, by: "team", reason: "" } });
+  let p = await today(day([row(), maya(), third]));
+  await p.press(NN); p.day = day([maya(), third]); await p.press("Mark relief not needed");
+  assert.strictEqual(p.focus(), p.row("k2").querySelector("button"), "the next row's first button");
+  p = await today(day([maya(), row()]));
+  await p.press(NN); p.day = day([maya()]); await p.press("Mark relief not needed");
+  assert.strictEqual(p.focus(), p.row("k2").querySelector("button"), "the row before, when it was the last");
+  p = await today(day([row()]));
+  await p.press(NN); p.day = day([]); await p.press("Mark relief not needed");
+  const line = p.find("#tdTop [data-said]");
+  assert.strictEqual(p.text(line), "1A Science: relief not needed."); assert.strictEqual(line.getAttribute("tabindex"), "-1");
+  assert.strictEqual(p.focus(), line, "the line that says it");
+});
+t("only the newest such line can take the focus", async () => {
+  const p = await today(day([row(), maya()]));
+  await p.press(NN); p.day = day([maya()]); await p.press("Mark relief not needed");
+  await p.press(NN, "k2"); p.day = day([]); await p.press("Mark relief not needed", "k2");
+  assert.deepStrictEqual(p.all("#tdTop [data-said]").map(e => p.text(e)), ["1A Science: relief not needed."]);
+  assert.strictEqual(p.top().length, 2);
+});
 t("what is typed in the box stays through a reading of the day", async () => {
   const p = await today(day([row()], { filling: true }));
   await p.press(NN);

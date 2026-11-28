@@ -335,7 +335,8 @@ t("Or cancel the whole request: the reason is needed, Cancel the request sends i
   same(posted(p), []);
   await p.type('#rcBox input[data-rc="cwhy"]', " Appointment moved ");
   assert.ok(!go().disabled);
-  p.find("#rcBox button", "Keep it");
+  const keep = p.find("#rcBox button", "Keep it");
+  assert.ok(!keep.disabled && keep.getAttribute("data-rc") === "keep", "Keep it is there beside it");
   p.step = no(400, "Say why in a line.");
   await p.click(go());
   has(p, "Say why in a line.");
@@ -352,7 +353,9 @@ t("Keep it: the reason goes, and Cancel the request is off again", async () => {
   await p.click("#rcBox button", "Keep it");
   assert.strictEqual(p.find('#rcBox input[data-rc="cwhy"]').value, "");
   assert.ok(p.find("#rcBox button", "Cancel the request").disabled);
+  assert.strictEqual(p.focus(), p.find('#rcBox input[data-rc="cwhy"]'), "the focus back on the reason");
   same(posted(p), []); same(p.done, []);
+  assert.strictEqual(p.ed.dirty(), false, "nothing typed is left");
 });
 t("everything a lesson or a name says is escaped", async () => {
   const p = await team(rec({ teacher: "<b>Ms X</b>", lessons: [lesson("k<1>", TODAY, 5, 1, { classes: ["<i>1A</i>"], covers: [cover("k<1>", 5, 1, "approved", "<u>Mr Y</u>")] })] }));

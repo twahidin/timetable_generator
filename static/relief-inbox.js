@@ -9,12 +9,15 @@
    list is read with a GET, which never writes; once it is shown, the page posts the list's as_of to
    /api/relief/absences/seen. A request still to come (not cancelled, a date today or later, not a backup for an exam or event)
    has Edit in its last column: the editor (ReliefChange, with its lessons and cancel parts) opens in a row under it across the
-   table, one at a time, kept while the list is drawn again; once something is done it closes, what was done is said above the
-   table and the list is read again. The Submitted cell names the request's last change (Changed by …). */
+   table, one at a time, kept while the list is drawn again with its row (a view without its row closes it, so nothing hidden
+   counts as unsaved); once something is done it closes, what was done is said above the table and the list is read again, as
+   it is after a save refused because the request changed meanwhile (onStale). A request that can no longer be changed when the
+   list is read again (cancelled, every date past, gone) closes its Edit and says so above the table. The Submitted cell names
+   the request's last change (Changed by …). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day;
   const $ = (s, el = document) => el.querySelector(s);
-  const I = { pane: null, list: null, err: null, asOf: "", view: "coming", seq: 0, loading: false, edit: null, said: null };   /* edit: {id, ed} the open Edit; said: what it did */
+  const I = { pane: null, list: null, err: null, asOf: "", view: "coming", seq: 0, loading: false, edit: null, said: null };   /* edit: {id, teacher, ed} the open Edit; said: what it did */
   const COLS = 9;
   const lastDate = r => (r.dates || []).slice().sort().pop() || "";
   const VIEWS = [
@@ -80,6 +83,7 @@
     const box = $("#inBox", I.pane);
     if (!box) return;
     const a = document.activeElement, had = a && box.contains(a) && a.dataset && a.dataset.in ? [a.dataset.in, a.dataset.id || a.dataset.v || ""] : null;
+    checkEdit();
     if (!I.list) {
       box.innerHTML = I.err ? `<div class="card"><p>${R.say(I.err)}</p><p><button type="button" data-in="reload">Try again</button></p></div>` : `<div class="card"><p class="muted">Loading…</p></div>`;
       return;
@@ -106,24 +110,32 @@
     if (b && !b.disabled) b.focus();
   }
 
-  /* the open Edit, into its row once the list is drawn: the same editor, as it was; it ends when the request can no longer be
-     changed (cancelled, its dates past, gone from the list) */
-  function placeEdit() {
+  /* before the list is drawn: an open Edit whose request can no longer be changed (cancelled, every date past, gone from the
+     list) ends, and the line above the table says so */
+  function checkEdit() {
     if (!I.edit || !I.list) return;
     const r = find(I.edit.id);
-    if (!r || !editable(r)) { if (I.edit.ed) I.edit.ed.stop(); I.edit = null; return; }
-    const box = $("#inBox tr.in-edit .in-box", I.pane);
-    if (!box) return;   /* its row is not in the view shown: placed again when it is */
+    if (r && editable(r)) return;
+    if (I.edit.ed) I.edit.ed.stop();
+    I.said = { text: `${(r && r.teacher) || I.edit.teacher}'s request can no longer be changed.`, bad: true };
+    I.edit = null;
+  }
+
+  /* the open Edit, into its row once the list is drawn: the same editor, as it was; closed when its row is not in the view shown */
+  function placeEdit() {
+    if (!I.edit || !I.list) return;
+    const r = find(I.edit.id), box = $("#inBox tr.in-edit .in-box", I.pane);
+    if (!r || !box) { if (I.edit.ed) I.edit.ed.stop(); I.edit = null; return; }   /* nothing hidden counts as unsaved */
     const id = r.id;
     if (I.edit.ed) I.edit.ed.attach(box, r);
-    else I.edit.ed = window.ReliefChange.mount(box, r, { lessons: true, cancel: true, onDone: (rec, said) => editDone(id, rec, said) });
+    else I.edit.ed = window.ReliefChange.mount(box, r, { lessons: true, cancel: true, onDone: (rec, said) => editDone(id, rec, said), onStale: () => load() });
   }
 
   function openEdit(id) {
     const old = I.edit;
     if (old && old.ed && old.ed.busy()) return;   /* one on its way: it finishes first */
     if (old && old.ed) old.ed.stop();
-    I.edit = old && old.id === id ? null : { id, ed: null };   /* Edit again closes it */
+    I.edit = old && old.id === id ? null : { id, teacher: (find(id) || {}).teacher || "", ed: null };   /* Edit again closes it */
     I.said = null;
     paint();
     if (I.edit) { const first = $("#inBox tr.in-edit .rc .seg button.on", I.pane); if (first) first.focus(); }
