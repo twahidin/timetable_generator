@@ -3550,7 +3550,7 @@ def after_is_read_alike_from_the_body_and_the_query_and_never_refused():
         for after in (-3, "x", True, 1.5, [1], {}, "1"):                  # a negative or a non-number counts as 0: never refused
             answered(c.post(u + "/undo", json=dict(step="nope", after=after)), 400, {"error": T.NO_STEP})
         v = answered(c.post(u + "/say", json=dict(text="second", after="2")), 200)
-        same([l["text"] for l in v["lines"]], ["second"])                 # "2" counts as the query's 2 does
+        same([l["text"] for l in v["lines"]][:1], ["second"])             # "2" counts as the query's 2 does (the answer, on its own thread, may be in the reply already)
         w_done(c, id)
         same(len(answered(c.post(u + "/stop", json=dict(after=-1)), 200)["lines"]), 4)
 
@@ -3941,7 +3941,7 @@ def a_list_pasted_over_http_with_the_practice_reader():
                 answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09")), 200)
                 assert w_done(c, id)["exam"], "the practice helper started the exam"
                 v = answered(c.post(f"/api/plan/talks/{id}/list", json=dict(text="Sec 3, English, Paper 1, 90, 2026-10-06, 08:00\nSec 4, Literature, Paper 1, 60")), 200)
-                same(v["lines"][-1]["text"], "Pasted a list of 2 lines.")
+                same([l["text"] for l in v["lines"] if l["kind"] == "me"][-1], "Pasted a list of 2 lines.")   # the job, on its own thread, may have put its lines after it already
                 v = w_done(c, id)
                 same([(l["kind"], l["text"]) for l in v["lines"] if l["kind"] in ("did", "list")][-2:],
                      [("did", "Put 2 papers in the draft: their words are the timetable's own"), ("list", "2 papers are in.")])
@@ -4698,5 +4698,46 @@ def a_new_student_whose_id_moves_a_code_is_told_to_the_ai():
     call = answer(talk, env, f"Ask {TAN}", reply(say("ok")))
     assert talk.names.code(TAN) != old and "The timetable was published again: codes and checks are fresh." not in texts(talk, "sys")
     u = user_texts(call.sent[0]); assert u[-2].startswith("[The app: The people on the timetable changed: the codes of people start again"), u[-2]
+
+# ---------------------------------------------------------------- a view that says "not working" holds all the answer left
+class LateLock:
+    """a talk's lock as a busy machine can make it for one view: the test's thread, coming for it, gets it only when the
+    answer or list job running has ended (the other thread ran the whole time the view's was kept waiting). came is set
+    when it comes"""
+    def __init__(self, talk): self.talk, self.real, self.came, self.me = talk, talk.lock, threading.Event(), threading.current_thread()
+    def __enter__(self):
+        if threading.current_thread() is self.me:
+            self.came.set(); assert T.wait(self.talk, WAIT), "the answer did not end in time"
+        return self.real.__enter__()
+    def __exit__(self, *a): return self.real.__exit__(*a)
+
+def late_view(talk, env, start):
+    """start(wait) starts an answer or a list job whose stand-in calls wait() before it does anything -> the view asked for
+    while it had done nothing yet, and kept waiting at the talk's lock until it had ended"""
+    late = LateLock(talk)
+    start(lambda *a: late.came.wait(WAIT))
+    talk.lock = late
+    try: return T.view(talk, env)
+    finally: talk.lock = late.real
+
+@t
+def a_view_that_says_the_answer_has_ended_shows_the_exam_it_started():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    v = late_view(talk, env, lambda wait: T.say(talk, env, "Plan the mid-year exam", call=Script(
+        reply(use("t1", "start_exam", START_IN)), reply(say("Started.")), before=wait)))
+    same((v["working"], [l["kind"] for l in v["lines"]]), (False, ["me", "did", "ai"]))
+    assert v["exam"] and v["exam"]["id"] == talk.exam, v["exam"]       # the page asks no more after this view: it is the last word
+    same(v, T.view(talk, env))
+
+@t
+def a_view_that_says_the_list_is_read_shows_the_draft_with_its_papers():
+    env, talk = list_talk()
+    before = T.view(talk, env)["checklist"]
+    v = late_view(talk, env, lambda wait: T.paste(talk, env, text="\n".join([ENG, SCI, LIT]), call=a_reader(hook=wait)))
+    same((v["working"], v["lines"][-1]["text"]), (False, "3 papers are in."))
+    now = T.view(talk, env)
+    assert now["checklist"] != before, "the list's papers change the checklist"
+    same(v, now)
 
 print(f"{COUNT} plan tests passed")
