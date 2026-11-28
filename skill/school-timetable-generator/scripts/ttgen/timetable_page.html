@@ -95,8 +95,8 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .mhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}.mhead small{color:var(--muted);font-size:11px}
 .mrow{position:relative;height:7px;margin-top:1px;background:var(--none)}.mrow.wk{margin-top:6px}
 .mrow i{position:absolute;top:0;bottom:0;border-radius:1px;background:var(--muted)}.mrow i.b{background:var(--brk);border-radius:0}.mrow i.dim{background:color-mix(in srgb,var(--muted) 30%,transparent)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cell,:root:not([data-theme="light"]) .dlist .it{background:color-mix(in srgb,var(--a) 26%,var(--panel))}}
-:root[data-theme="dark"] .cell,:root[data-theme="dark"] .dlist .it{background:color-mix(in srgb,var(--a) 26%,var(--panel))}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cell{background:color-mix(in srgb,var(--a) 26%,var(--panel))}:root:not([data-theme="light"]) .dlist .it{background:var(--panel);background:color-mix(in srgb,var(--a) 26%,var(--panel))}}
+:root[data-theme="dark"] .cell{background:color-mix(in srgb,var(--a) 26%,var(--panel))}:root[data-theme="dark"] .dlist .it{background:var(--panel);background:color-mix(in srgb,var(--a) 26%,var(--panel))}
 .legend{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px 22px;font-size:12.5px;color:var(--sub)}
 .legend h3{grid-column:1/-1;font-size:13px;margin:0 0 2px;color:var(--ink)}.legend div{display:flex;gap:8px;align-items:baseline}
 .sw{flex:none;width:10px;height:10px;border-radius:3px;background:var(--t);border:1px solid var(--a);transform:translateY(1px)}
@@ -130,7 +130,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media print{html.inapp{background:#fff}html.inapp .card{background:none;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}}
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
-@media (max-width:700px){.dwrap{display:block}.card:not(.whole) .gridwrap{display:none}.card.whole .pw,.card.whole .pdy,.card.whole .dlist{display:none}.card .lcls .gridwrap{display:block}}   /* a phone: one day as a list in place of the grid, the grid again on Whole week; the Lessons tab's class grids stay grids */
+@media (max-width:700px){.dwrap{display:block}.seg button{min-height:36px}.card:not(.whole) .gridwrap{display:none}.card.whole .pw,.card.whole .pdy,.card.whole .dlist{display:none}.card .lcls .gridwrap{display:block}}   /* a phone: one day as a list in place of the grid, the grid again on Whole week; the Lessons tab's class grids stay grids */
 @media print{@page{size:A4 landscape;margin:9mm}.tt .dl,.tt .wk{position:static}.tt .track{height:calc(var(--h) * 56 / 62)}.tt .row{break-inside:avoid}.tt .ruler{break-after:avoid}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
   .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.vl,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.dwrap{display:none!important}.gridwrap{display:block!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
@@ -368,9 +368,9 @@ function dayItems(v, d) {
   return [...bandsOf(v, d), ...v.cells.filter(c => c.d === d).map(c => ({ a: c.a, b: c.b, c }))].sort((x, y) => x.a - y.a || x.b - y.b || !!x.c - !!y.c);
 }
 function dayListHTML(v) {
-  const d = v.only != null ? v.only : S.pd, wk = Math.min(WEEKS - 1, Math.floor(S.pd / PER_WEEK)), on = b => b ? ` class="on"` : "";
+  const d = v.only != null ? v.only : S.pd, wk = Math.min(WEEKS - 1, Math.floor(S.pd / PER_WEEK)), on = b => ` aria-pressed="${!!b}"${b ? ` class="on"` : ""}`;
   const words = Array.from({ length: WEEKS }, (_, w) => weekDay(DAYS[w * PER_WEEK] || "")[0]);
-  let h = `<div class="dwrap"><div class="seg pv"><button data-pv="day"${on(!S.whole)}>Day</button><button data-pv="week"${on(S.whole)}>Whole week</button></div>`;
+  let h = `<div class="dwrap">${v.only == null ? `<div class="seg pv"><button data-pv="day"${on(!S.whole)}>Day</button><button data-pv="week"${on(S.whole)}>Whole week</button></div>` : ""}`;   /* a date shows one day: no Whole week there, the reader's choice kept for the usual timetable */
   if (v.only == null && WEEKS > 1 && words.every(Boolean)) h += `<div class="seg pw">${words.map((w, i) => `<button data-pw="${i}"${on(i === wk)}>${esc(w)} week</button>`).join("")}</div>`;
   if (v.only == null) { const last = wk === WEEKS - 1 ? ND : (wk + 1) * PER_WEEK; let b = ""; for (let i = wk * PER_WEEK; i < last; i++) b += `<button data-pd="${i}"${on(i === d)}>${esc(weekDay(DAYS[i])[1])}</button>`; h += `<div class="seg pdy">${b}</div>`; }
   const items = dayItems(v, d).map(x => { const c = x.c;
@@ -380,7 +380,8 @@ function dayListHTML(v) {
   return h + `<div class="dlist">${items || `<div class="empty">No lessons this day.</div>`}</div></div>`;
 }
 /* the list's buttons: set the day, the week (the same weekday) or Whole week, then draw the view again as it is now */
-function redraw() {
+function redraw(light) {
+  if (light && S.key === "__build" && $("#bview") && S.current) { $("#bview").innerHTML = builderView(S.current); return; }   /* the answer about today: only the timetable part, the choice boxes stay as they are */
   if (MODE === "personal") return showPersonal();
   if (S.key === "__build") return renderBuilder();   /* its card switches to Whole week, its choices kept */
   if (S.current && S.current.key === S.key) $("#view").innerHTML = viewHTML(S.current);   /* the same page, date and all: the list and hash untouched */
@@ -397,20 +398,26 @@ function startDay(today, wd) {
   const w = String(wd || "").toLowerCase(), i = DAYS.findIndex(n => weekDay(n)[1].slice(0, 3).toLowerCase() === w);
   return i < 0 ? 0 : i;
 }
-let todayAsked = false;
-/* the app's answer for today, asked once on a narrow screen; any failure falls back to the device's weekday, with no message */
+let todayAsked = false, askedOn = "", askNo = 0;
+function dateKey() { const n = new Date(); return n.getFullYear() + "-" + n.getMonth() + "-" + n.getDate(); }
+/* the app's answer for today, asked once a day on a narrow screen; any failure falls back to the device's weekday, with no message */
 function loadToday() {
   if (!APP || todayAsked || !NARROW.matches) return;
-  todayAsked = true;
-  const done = a => { if (S.pdBy) return; const d = startDay(a, deviceDay()); if (d !== S.pd) { S.pd = d; redraw(); } };
+  todayAsked = true; askedOn = dateKey(); const mine = ++askNo;
+  const done = a => { if (S.pdBy || mine !== askNo) return; const d = startDay(a, deviceDay()); if (d !== S.pd) { S.pd = d; redraw(true); } };
   fetch("/api/today", { credentials: "same-origin", cache: "no-store" })
     .then(r => r.status === 200 ? r.json() : null)
     .then(a => done(a && typeof a === "object" && "calendar" in a ? a : null), () => done(null));
 }
+/* a tab kept open over midnight: shown again on a new date, forget the old choice and ask again */
+function dayChanged() {
+  if (dateKey() === askedOn) return;
+  askedOn = dateKey(); S.pdBy = false; S.pd = startDay(null, deviceDay()); todayAsked = false; ++askNo; redraw(true); loadToday();
+}
 function viewHTML(v, extra = "") {
   const stats = COMMITTEE && v.stats.length ? `<div class="stats">${v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("")}</div>` : "";
   const leg = v.legend.map(e => { const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}${COMMITTEE && e.count ? esc(" · " + e.count) : ""}</span></div>`; }).join("");
-  return `<div class="card${S.whole ? " whole" : ""}"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div>${stats}</div>
+  return `<div class="card${S.whole && v.only == null ? " whole" : ""}"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div>${stats}</div>
     <div class="tools">${pdfLink(v)}<button data-act="print">Print</button><button data-act="csv">Download CSV</button>${MODE === "personal" ? "" : `<button data-act="link">Copy link</button>`}${extra}</div>
     ${v.onLine ? `<p class="onday">${esc(v.onLine)}</p>` : ""}
     ${v.noday ? `<div class="empty"><b>Not a school day.</b><br>${esc(v.noday)}</div>` : v.cells.length ? dayListHTML(v) + gridHTML(v) : `<div class="empty">No lessons.</div>`}
@@ -476,6 +483,7 @@ function show(tab, key, opts = {}) {
 }
 
 // ------------------------------------------------------------------ student builder
+function builderView(v) { return viewHTML(v).replace(/^<div class="card[^"]*">/, "<div>"); }
 function renderBuilder(pre) {
   S.key = "__build"; renderList();
   const cls = (pre && pre.cls) || S.bcls || (CLS.find(c => busyClasses.has(c.name)) || {}).name; S.bcls = cls;
@@ -484,13 +492,13 @@ function renderBuilder(pre) {
   const chosen = (pre && pre.groups) || S.bgroups || [];
   const sel = [...opts].map(([k, gs]) => { const cur = [...gs.keys()].find(g => chosen.includes(g)) || [...gs.keys()][0];
     return `<label>${esc(blockLabel(k, (cIx.get(cls) || {}).level))}<select data-b="${esc(k)}">${[...gs].map(([g, x]) => `<option value="${esc(g)}" ${g === cur ? "selected" : ""}>${esc(g)} · ${esc(x.subject)} · ${esc(tshort(x.teachers))}</option>`).join("")}</select></label>`; }).join("");
-  $("#view").innerHTML = `<div class="card${S.whole ? " whole" : ""}"><h1 style="margin:0 0 4px;font-size:20px">${MODE === "student" ? "Build my timetable" : "Build a student timetable"}</h1><div class="sub" style="color:var(--sub)">${MODE === "student" ? "Pick your class, then the group you are in for each block (your subject teacher or form teacher can tell you)." : STU.length ? "Or pick a student from the list." : "This timetable has no student list, so pick the class and the group the student is in for each block."}</div>
+  $("#view").innerHTML = `<div class="card${S.whole && !S.on ? " whole" : ""}"><h1 style="margin:0 0 4px;font-size:20px">${MODE === "student" ? "Build my timetable" : "Build a student timetable"}</h1><div class="sub" style="color:var(--sub)">${MODE === "student" ? "Pick your class, then the group you are in for each block (your subject teacher or form teacher can tell you)." : STU.length ? "Or pick a student from the list." : "This timetable has no student list, so pick the class and the group the student is in for each block."}</div>
     <div class="builder"><label>Class<select id="bcls">${CLS.filter(c => busyClasses.has(c.name)).map(c => `<option ${c.name === cls ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>${sel}</div><div id="bview"></div></div>`;
   const update = () => { const groups = [...document.querySelectorAll("#view select[data-b]")].map(s => s.value); S.bgroups = groups;
     const v = personalView(cls, groups, { key: "custom", cls, groups, kicker: "Student", title: `Class ${cls}`, sub: `Groups ${groups.join(", ") || "-"}` });
     if (S.on) dated(v);
     S.current = v;
-    $("#bview").innerHTML = viewHTML(v).replace(/^<div class="card[^"]*">/, "<div>"); setHash(`#build/${encodeURIComponent(cls)}/${groups.map(encodeURIComponent).join(",")}`); };
+    $("#bview").innerHTML = builderView(v); setHash(`#build/${encodeURIComponent(cls)}/${groups.map(encodeURIComponent).join(",")}`); };
   $("#bcls").onchange = e => { S.bcls = e.target.value; S.bgroups = []; renderBuilder(); };
   document.querySelectorAll("#view select[data-b]").forEach(s => s.onchange = update); update();
 }
@@ -819,11 +827,13 @@ if (APP) {
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";
 window.addEventListener("hashchange", route);
-if (!APP) S.pd = startDay(null, deviceDay());   /* a saved copy asks nothing */
+S.pd = startDay(null, deviceDay()); askedOn = dateKey();   /* the device's weekday until the app answers; a saved copy asks nothing */
 route();
 const NARROW = matchMedia("(max-width:700px)");
 if (NARROW.addEventListener) NARROW.addEventListener("change", loadToday);
 loadToday();
+if (window.addEventListener) window.addEventListener("pageshow", dayChanged);
+if (document.addEventListener) document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") dayChanged(); });
 </script>
 </body>
 </html>

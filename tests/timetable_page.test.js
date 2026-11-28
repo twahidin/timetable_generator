@@ -67,7 +67,7 @@ const EVROW = { id: "ev1", name: TRIP, kind: "event", start: "2026-10-05", end: 
 const STUROW = { id: "ev2", name: "Sec 3 <i>Trip</i>", kind: "event", start: "2026-10-06", end: "2026-10-07", classes: ["3B"], where: "Science Centre & museum",
   days: [{ date: "2026-10-06", start: "07:40", end: "13:00" }, { date: "2026-10-07", start: "07:40", end: "10:40" }] };
 
-function boot(answers, app, tweak, narrow, opt = {}) {   /* opt.day: the device weekday (0 Sun to 6 Sat); opt.hold: a promise that holds back /api/today; opt.noFocus: the page finds no button to focus */   /* narrow: the screen is 700px wide or less (only that query matches) */
+function boot(answers, app, tweak, narrow, opt = {}) {   /* opt.day: the device weekday (0 Sun to 6 Sat, Monday when not given); opt.t: the device clock in ms (changeable later); opt.hold: a promise that holds back /api/today; opt.noFocus: the page finds no button to focus */   /* narrow: the screen is 700px wide or less (only that query matches) */
   const reg = new Map(), fetched = [];
   const el = (id, tag) => {
     const cls = new Set();
@@ -82,17 +82,17 @@ function boot(answers, app, tweak, narrow, opt = {}) {   /* opt.day: the device 
   const scan = e => { for (const m of e._html.matchAll(/id="([^"]+)"/g)) if (!reg.has(m[1])) reg.set(m[1], el(m[1])); };
   for (const id of ["q", "results", "status", "theme", "tabs", "main", "browse", "fq", "chips", "list", "view", "dlg", "dlgT", "dlgB", "school", "ttl"]) reg.set(id, el(id));
   const mq = { matches: !!narrow, ls: [], addEventListener(t, f) { if (t === "change") this.ls.push(f); } }, focused = [];
-  const header = el("", "header"), on = {};   /* on: the page's own document listeners (click, keydown), to call with a fake event */
+  const header = el("", "header"), on = {}, wins = {};   /* on: the page's own document listeners (click, keydown), to call with a fake event */
   const document = {
     documentElement: { classList: el("html").classList, dataset: {} },
     querySelector: sel => sel === "header.top" ? header : sel === ".search" ? el("") : /^\[data-p[dwv]="[^"]*"\]$/.test(sel) ? opt.noFocus ? null : { focus(o) { focused.push(sel + JSON.stringify(o || null)); } } : (/^#([\w-]+)$/.exec(sel) ? reg.get(sel.slice(1)) || null : null),
-    querySelectorAll: () => [], createElement: t => el("", t), addEventListener: (t, f) => { (on[t] = on[t] || []).push(f); }, activeElement: { tagName: "BODY" }
+    querySelectorAll: () => [], createElement: t => el("", t), addEventListener: (t, f) => { (on[t] = on[t] || []).push(f); }, activeElement: { tagName: "BODY" }, visibilityState: "visible"
   };
   const loc = { hash: "", href: "http://x/timetable" };
   const ctx = {
-    document, location: loc, history: { replaceState: (a, b, h) => { loc.hash = h; } }, window: { addEventListener() {}, print() {} },
+    document, location: loc, history: { replaceState: (a, b, h) => { loc.hash = h; } }, window: { addEventListener(t, f) { (wins[t] = wins[t] || []).push(f); }, print() {} },
     localStorage: { getItem: () => null, setItem() {} }, matchMedia: q => q === "(max-width:700px)" ? mq : { matches: false }, CSS: { escape: s => s }, navigator: {},
-    Date: class extends Date { getDay() { return opt.day == null ? super.getDay() : opt.day; } },
+    Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(opt.t == null ? Date.UTC(2026, 9, 8, 12) : opt.t); } getDay() { return opt.day == null ? 1 : opt.day; } },
     setTimeout, clearTimeout, URL, Blob: function () {}, console,
     fetch: url => {
       fetched.push(url);
@@ -110,7 +110,7 @@ function boot(answers, app, tweak, narrow, opt = {}) {   /* opt.day: the device 
   vm.runInContext(SCRIPT, ctx);
   const tick = () => new Promise(r => setImmediate(r)).then(() => new Promise(r => setImmediate(r))).then(() => new Promise(r => setImmediate(r)));
   const pick = async iso => { reg.get("onDate").listeners.change[0]({ target: { value: iso } }); await tick(); };
-  return { run: c => vm.runInContext(c, ctx), view: () => reg.get("view")._html, el: id => reg.get(id), fetched, tick, pick, on, focused, setNarrow: m => { mq.matches = m; mq.ls.forEach(f => f({ matches: m })); } };
+  return { run: c => vm.runInContext(c, ctx), view: () => reg.get("view")._html, el: id => reg.get(id), fetched, tick, pick, on, wins, opt, document, focused, setNarrow: m => { mq.matches = m; mq.ls.forEach(f => f({ matches: m })); } };
 }
 
 const APP = { mode: "teacher", tabs: ["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], pdf: true, logout: "/logout", files: [], dates: true, exams: true, published_at: STAMP };
@@ -420,22 +420,23 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     /* narrow: asked once, opens on the app's day */
     const N = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true);
     await N.tick(); N.run('show("classes", "3A")');
-    assert(list(N.view()).includes('<button data-pd="3" class="on">Thu</button>'), list(N.view()));
+    assert(list(N.view()).includes('<button data-pd="3" aria-pressed="true" class="on">Thu</button>'), list(N.view()));
     N.run('show("classes", "3B")'); await N.tick();
     assert.deepStrictEqual(N.fetched.filter(u => u === "/api/today"), ["/api/today"], "once, also after a second show");
     N.setNarrow(true); await N.tick(); assert.strictEqual(N.fetched.filter(u => u === "/api/today").length, 1, "nothing after its first answer");
     /* failures: the device's weekday, and no message */
-    for (const ans of [{ "/api/today": [401, { error: "Sign in again" }] }, {}, { "/api/today": [200, { error: "x" }] }]) {
+    for (const ans of [{ "/api/today": [401, { error: "Sign in again" }] }, { "/api/today": [403, { error: "Choose a new password first." }] }, {}, { "/api/today": [200, { error: "x" }] }]) {
       const F = boot(Object.assign({ "/api/published/exams": LIST }, ans), APP, null, true, THU); await F.tick(); F.run('show("classes", "3A")');
-      assert.strictEqual(F.run("S.pd"), 3); assert(!/Sign in again|error/i.test(F.view()), F.view().slice(0, 300));
+      assert.strictEqual(F.run("S.pd"), 3); assert(!/Sign in again|error|Choose a new password/i.test(F.view()), F.view().slice(0, 300));
     }
     /* the answer arrives late: the shown page is drawn again by itself, on Thursday; other tabs and a date are left alone */
     let go; const hold = new Promise(r => { go = r; });
-    const H = boot({ "/api/published/exams": LIST, "/api/today": TODAY, "/api/day?date=2026-10-05": [200, DAY] }, APP, null, true, { hold, day: 1 });
+    const WED = [200, { date: "2026-10-07", day: "Odd Wed", calendar: true }];
+    const H = boot({ "/api/published/exams": LIST, "/api/today": WED, "/api/day?date=2026-10-05": [200, DAY] }, APP, null, true, { hold, day: 4 });
     await H.tick(); H.run('show("classes", "3A")');
-    assert(list(H.view()).includes('<button data-pd="0" class="on">Mon</button>'), "before the answer: the device's Monday");
+    assert(list(H.view()).includes('<button data-pd="3" aria-pressed="true" class="on">Thu</button>'), "before the answer: the device's Thursday, first week: " + list(H.view()));
     go(); await H.tick();
-    assert(list(H.view()).includes('<button data-pd="3" class="on">Thu</button>'), "the late answer redraws the shown page: " + list(H.view()));
+    assert(list(H.view()).includes('<button data-pd="2" aria-pressed="true" class="on">Wed</button>'), "the late answer redraws the shown page: " + list(H.view()));
     assert.deepStrictEqual(H.focused, [], "the redraw moves no focus");
     let g2; const hold2 = new Promise(r => { g2 = r; });
     const H2 = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true, { hold: hold2, day: 1 });
@@ -454,10 +455,40 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     assert.strictEqual(H4.el("view").writes, w4, "same day: no redraw");
     /* focusBack with no such button in the new view does not throw */
     const NF = boot({ "/api/published/exams": LIST }, APP, null, false, { noFocus: true }); await NF.tick(); NF.run('show("classes", "3A")'); NF.run("pickDay(2)"); assert.deepStrictEqual(NF.focused, []);
+    /* an answer that never comes: the device's weekday stays */
+    const NV = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true, { hold: new Promise(() => {}), day: 5 });
+    await NV.tick(); NV.run('show("classes", "3A")'); await NV.tick(); assert.strictEqual(NV.run("S.pd"), 4, "Friday, first week");
+    /* every page starts on the device's weekday, narrow or not */
+    const WD = boot({ "/api/published/exams": LIST }, APP, null, false, { day: 3 }); assert.strictEqual(WD.run("S.pd"), 2);
+    /* a staff page asks and opens on the answered day */
+    const ST = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, Object.assign({}, APP, { mode: "staff", tabs: ["classes", "teachers", "exams"], me: "Mr Ben Ong" }), null, true, { day: 1 });
+    await ST.tick(); assert(ST.fetched.includes("/api/today")); assert.strictEqual(ST.run("S.pd"), 3);
+    /* the builder: a late answer redraws only its timetable part, the choice boxes stay */
+    let g5; const hold5 = new Promise(r => { g5 = r; });
+    const BU = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true, { hold: hold5, day: 1 });
+    await BU.tick(); BU.run('show("students", "__build")'); const bw = BU.el("bview").writes, vw = BU.el("view").writes;
+    g5(); await BU.tick();
+    assert.strictEqual(BU.run("S.pd"), 3); assert(list(BU.el("bview").innerHTML).includes('data-pd="3" aria-pressed="true" class="on"'), "the builder's list moved to Thursday");
+    assert.strictEqual(BU.el("view").writes, vw, "the choice boxes were not written again"); assert(BU.el("bview").writes > bw);
+    /* a tab kept open: shown again on the same date nothing changes; on a new date it asks again */
+    const DAY0 = Date.UTC(2026, 9, 8, 12);
+    const TM = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true, { day: 4, t: DAY0 });
+    await TM.tick(); TM.run('show("classes", "3A")'); TM.run("pickDay(1)");
+    TM.wins.pageshow.forEach(f => f({})); await TM.tick();
+    assert.strictEqual(TM.fetched.filter(u => u === "/api/today").length, 1, "same date: not asked again"); assert.strictEqual(TM.run("S.pd"), 1, "a pressed day stays");
+    TM.opt.t = DAY0 + 24 * 3600e3; TM.opt.day = 5; TM.document.visibilityState = "hidden"; TM.on.visibilitychange.forEach(f => f()); await TM.tick();
+    assert.strictEqual(TM.fetched.filter(u => u === "/api/today").length, 1, "hidden: nothing yet");
+    TM.document.visibilityState = "visible"; TM.on.visibilitychange.forEach(f => f()); await TM.tick();
+    assert.strictEqual(TM.fetched.filter(u => u === "/api/today").length, 2, "a new date: asked again"); assert.strictEqual(TM.run("S.pdBy"), false);
+    assert.strictEqual(TM.run("S.pd"), 3, "the new answer's day"); assert(list(TM.view()).includes('data-pd="3" aria-pressed="true" class="on"'));
+    TM.opt.t += 24 * 3600e3; TM.wins.pageshow.forEach(f => f({})); await TM.tick();
+    assert.strictEqual(TM.fetched.filter(u => u === "/api/today").length, 3, "pageshow on yet another date");
+    /* a date view has no Day / Whole week switch; the page keeps the css for old phones */
+    assert(PAGE.includes(".seg button{min-height:36px}") && /\.dlist \.it\{background:var\(--panel\);background:color-mix/.test(PAGE), "tap height and a plain dark background first");
     /* a button pressed before the answer wins */
     const B = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP, null, true);
     B.run('show("classes", "3A")'); B.run("pickDay(1)"); await B.tick();
-    assert.strictEqual(B.run("S.pd"), 1); assert(list(B.view()).includes('<button data-pd="1" class="on">Tue</button>'));
+    assert.strictEqual(B.run("S.pd"), 1); assert(list(B.view()).includes('<button data-pd="1" aria-pressed="true" class="on">Tue</button>'));
     /* not narrow: never asks; narrow later: asks then */
     const W = boot({ "/api/published/exams": LIST, "/api/today": TODAY }, APP); await W.tick();
     assert(!W.fetched.includes("/api/today")); W.setNarrow(true); await W.tick(); assert(W.fetched.includes("/api/today"), "the screen became narrow");
@@ -484,21 +515,21 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     P.run('show("classes", "3A")'); let h = P.view();
     assert(h.indexOf('class="dwrap"') > 0 && h.indexOf('class="dwrap"') < h.indexOf('class="gridwrap"'), "the list comes before the grid, and both are drawn");
     let L = list(h);
-    assert(L.includes('<button data-pv="day" class="on">Day</button><button data-pv="week">Whole week</button>'), L);
-    assert(L.includes('<button data-pw="0" class="on">Odd week</button><button data-pw="1">Even week</button>'), L);
-    assert(L.includes('<button data-pd="0" class="on">Mon</button>') && L.includes('<button data-pd="4">Fri</button>') && !L.includes('data-pd="5"'), "the shown week's days only");
+    assert(L.includes('<button data-pv="day" aria-pressed="true" class="on">Day</button><button data-pv="week" aria-pressed="false">Whole week</button>'), L);
+    assert(L.includes('<button data-pw="0" aria-pressed="true" class="on">Odd week</button><button data-pw="1" aria-pressed="false">Even week</button>'), L);
+    assert(L.includes('<button data-pd="0" aria-pressed="true" class="on">Mon</button>') && L.includes('<button data-pd="4" aria-pressed="false">Fri</button>') && !L.includes('data-pd="5"'), "the shown week's days only");
     assert.strictEqual(P.run('JSON.stringify(dayItems(classView("3A"), 0).map(x => [x.a, x.b, x.name || x.c.title]))'),
       JSON.stringify([[460, 500, "EL"], [540, 560, "Recess"], [580, 640, "CS"]]));
     assert(L.includes('<div class="tm">7.40–8.20</div><div class="it" data-id="0"') && L.includes('<div class="tm q">9.00–9.20</div><div class="bkr">Recess</div>') && !L.includes("Lunch"), L);
     assert(L.includes('<div class="tm">9.40–10.40</div><div class="it" data-id="2" tabindex="0" style="--t:#edd;--a:#322"><b>CS</b><span>3CS1</span><span>Ms Grace Yeo</span><span>3-02</span></div>') && !L.includes("…"), "the title and every line whole: " + L);
     assert.strictEqual(P.run("S.pdBy"), false, "no button pressed yet");
     P.run("pickDay(1)"); L = list(P.view());
-    assert(L.includes('<button data-pd="1" class="on">Tue</button>') && L.includes('<div class="empty">No lessons this day.</div>') && P.run("S.pdBy") === true, L);
+    assert(L.includes('<button data-pd="1" aria-pressed="true" class="on">Tue</button>') && L.includes('<div class="empty">No lessons this day.</div>') && P.run("S.pdBy") === true, L);
     P.run("pickWeek(1)"); assert.strictEqual(P.run("S.pd"), 6, "the same weekday in the other week");
     L = list(P.view());
-    assert(L.includes('<button data-pw="0">Odd week</button><button data-pw="1" class="on">Even week</button>') && L.includes('<button data-pd="6" class="on">Tue</button>') && L.includes('<button data-pd="5">Mon</button>') && !L.includes('data-pd="4"'), L);
+    assert(L.includes('<button data-pw="0" aria-pressed="false">Odd week</button><button data-pw="1" aria-pressed="true" class="on">Even week</button>') && L.includes('<button data-pd="6" aria-pressed="true" class="on">Tue</button>') && L.includes('<button data-pd="5" aria-pressed="false">Mon</button>') && !L.includes('data-pd="4"'), L);
     assert(!/class="card[^"]* whole/.test(P.view()), "Day is the start");
-    P.run("pickWhole(true)"); assert(/class="card[^"]* whole/.test(P.view()) && list(P.view()).includes('<button data-pv="week" class="on">Whole week</button>'), P.view().slice(0, 300));
+    P.run("pickWhole(true)"); assert(/class="card[^"]* whole/.test(P.view()) && list(P.view()).includes('<button data-pv="week" aria-pressed="true" class="on">Whole week</button>'), P.view().slice(0, 300));
     assert.strictEqual(P.run("location.hash"), "#classes/3A", "the same page");
     P.run("pickWhole(false)"); assert(!/class="card[^"]* whole/.test(P.view()));
     /* the buttons and a list item through the page's own click and Enter handling */
@@ -528,23 +559,25 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const A = boot({ "/api/published/exams": LIST }, APP, ONE);
     await A.tick(); A.run('show("classes", "3A")');
     let L = list(A.view());
-    assert(!L.includes('class="seg pw"') && !L.includes("data-pw") && count(L, "data-pd=") === 5 && L.includes('<button data-pd="0" class="on">Mon</button>'), "no week buttons, five days: " + L);
+    assert(!L.includes('class="seg pw"') && !L.includes("data-pw") && count(L, "data-pd=") === 5 && L.includes('<button data-pd="0" aria-pressed="true" class="on">Mon</button>'), "no week buttons, five days: " + L);
     const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, APP);
     await P.tick(); P.run('show("classes", "3A")'); P.run("pickDay(3)"); await P.pick("2026-10-05");
     L = list(P.view());
-    assert(!L.includes("data-pw") && !L.includes("data-pd") && L.includes('<button data-pv="day" class="on">Day</button>'), "a date shows its own day: no week or day buttons: " + L);
+    assert(!L.includes("data-pw") && !L.includes("data-pd") && !L.includes("data-pv"), "a date shows its own day: no switch, week or day buttons: " + L);
     assert(L.includes('<div class="tm">7.40–8.20</div><div class="it x" data-id="0"') && L.includes('<div class="tm">7.50–8.50</div><div class="it exam"><b>Sec 3 English Paper 1</b><span>3-01</span></div>'), "the crossed-out lesson and the paper: " + L);
     P.run("pickWhole(true)");
-    assert(P.view().includes('<p class="onday">') && /class="card[^"]* whole/.test(P.view()) && P.run("S.on.date") === "2026-10-05", "the date stays: " + P.view().slice(0, 400));
+    assert(P.view().includes('<p class="onday">') && !/class="card[^"]* whole/.test(P.view()) && !P.view().includes("data-pv") && P.run("S.whole") === true && P.run("S.on.date") === "2026-10-05", "a date draws no switch and no whole-week card, S.whole kept: " + P.view().slice(0, 400));
+    P.el("onDate").listeners.change[0]({ target: { value: "" } }); await P.tick();
+    assert(/class="card[^"]* whole/.test(P.view()) && list(P.view()).includes('data-pv="week" aria-pressed="true" class="on"'), "the usual timetable: the choice is back");
     P.run("pickWhole(false)");
     P.run('show("students", "__build")'); P.run("pickWhole(true)");
     assert(P.view().startsWith('<div class="card whole">') && P.el("bview").innerHTML.startsWith("<div>") && P.el("bview").innerHTML.includes('class="dwrap"'), "the built timetable: the outer card switches, no card inside: " + P.el("bview").innerHTML.slice(0, 200));
     assert(P.run("location.hash").startsWith("#build/"), P.run("location.hash"));
     const ME = boot({ "/api/me/exams": [200, { schedules: [] }] }, { mode: "personal", exams: true, pdf: true, logout: "/logout", files: [] });
     await ME.tick();
-    assert(list(ME.view()).includes('<button data-pd="0" class="on">Mon</button>'), ME.view().slice(0, 300));
+    assert(list(ME.view()).includes('<button data-pd="0" aria-pressed="true" class="on">Mon</button>'), ME.view().slice(0, 300));
     ME.run("pickDay(2)");
-    assert(list(ME.view()).includes('<button data-pd="2" class="on">Wed</button>') && ME.view().includes("Student 3A-01"), "a student's own page draws again: " + ME.view().slice(0, 300));
+    assert(list(ME.view()).includes('<button data-pd="2" aria-pressed="true" class="on">Wed</button>') && ME.view().includes("Student 3A-01"), "a student's own page draws again: " + ME.view().slice(0, 300));
   });
 
   await t("an after-school lesson looks like any other; three lessons at once make a taller row", async () => {
