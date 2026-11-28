@@ -30,8 +30,9 @@ relief requests on the Relief home, in tabs that show only to those who may use 
   Flexi Adjunct Teachers marked, anyone over a checked limit dimmed but still choosable) or leaving it for the relief
   team; **Planned by me**, where each absence opens with Choose on its open lessons; and **Download** of the relief
   sheet for a range of dates (every absence with lessons then; never the reason).
-- **The relief team:** **All Relief Requests**, read-only: every absence, who sent it and how, the acknowledgement, the work,
-  the relief chosen or open, cancellations, and what is new since they last looked.
+- **The relief team:** **All Relief Requests**: every absence, who sent it and how, the acknowledgement, the work,
+  the relief chosen or open, cancellations, and what is new since they last looked, with **Edit** on each request that is
+  still to come (below, "Changing a request").
 
 Stage 3 is the relief team's module and everyone's cover list:
 - **Today's Relief Assignments** (the relief team): the page for a date. Every lesson needing cover, with its pick: the planner's choice, the
@@ -91,6 +92,34 @@ planning, in the app or on Telegram, and nothing reaches them on Telegram outsid
 request is in, for any date. The teacher who is away sees the relief teacher's name once it is acknowledged ("Being
 arranged" before that). The times are in **Relief settings**; `docs/DEPLOY.md` (section 6, "When messages go") has what
 goes when. The published timetable on a date, with the relief in it, comes later.
+
+**Changing a request.** The absent teacher (on My absences, **Change dates or times**), the head who planned it (on
+Planned by me, the same button) and the relief team (on All Relief Requests, **Edit**) can change a request's dates or
+times with the controls of Ask for relief: Today, Tomorrow or Pick dates, and the whole day or some periods. Before
+**Save the change**, "What this change does" lists each lesson: **Kept** (it keeps its relief teacher, approval,
+acknowledgement and work), **Added** (a relief teacher is picked for it, as for a new request) or **No longer needed**
+(its relief ends, and a relief teacher already told is told so). A lesson of an earlier day, or one of today that has
+started, always stays. The checks are those of a new request (school days only, no overlap with the teacher's other
+absences, a lesson shared with a co-teacher who is there needs no relief: tick **Ask for relief anyway** on it to ask for
+relief all the same), and a reason for the change is optional. Opening the controls again starts from the dates and times
+last chosen, so a request cut back today (a lesson under way stays) shows "Nothing changes yet." When
+somebody else saves from an older list, the save is refused with "look again". All Relief Requests then says who changed
+it and when, and shows it as new. A backup made for an exam duty or an event cannot be changed this way: it follows the
+exam or event schedule, so change the duty instead.
+- **Relief not needed** on one lesson takes an optional reason everywhere: My absences, Planned by me, the Edit view
+  ("Or change one lesson", with **Needed again** to undo it, or **Ask for relief anyway** on a lesson the app marked because
+  a co-teacher is there) and a button on each row of Today's Relief Assignments. On a row that is one part of a split lesson
+  it reads **Relief not needed for the whole lesson** and ends every part. Once a lesson is over, neither can be marked. In
+  the Edit view a lesson's step keeps the Edit open (what was chosen above it stays); the Edit sits under the table, the
+  width of the card, so a phone reaches every control.
+- **Cancel** the whole request is on the Edit view too ("Or cancel the whole request"), and needs a reason, as before.
+- **On Telegram:** when somebody other than the absent teacher changes the request, marks one of its lessons not needed
+  or cancels it, the absent teacher is told what changed and by whom (never the reason typed). When a change adds a lesson
+  to a request a head planned, the absent teacher is asked to acknowledge again and set work for it; a change that only
+  takes lessons away keeps the acknowledgement. When anyone changes a request for today, the rest of the relief team is
+  told (who changed it, when it was not the absent teacher). The counts in these messages are of lessons that need relief:
+  a lesson a co-teacher is there for counts for nothing, and a change of today that moves only such lessons pings nobody. A reporting officer who was told of the absence is told the new dates and times (with the kind of reason alone). Relief teachers already
+  told hear "no longer needed" or "cancelled", as before. When several changes come close together, only the last is told.
 
 Relief also knows what approved exams and events do to a date (stage 3 of exams and events): a lesson whose every period stops for an exam or event shows as "Not happening" and needs no relief while it is stopped (if the exam is withdrawn, an absence sent meanwhile asks for its relief again); someone on an exam duty or going to an event is not offered as free then (a fold under the list says who and why) and cannot be chosen; their duty minutes count in "week so far"; and an absence may be sent even when every lesson stops, because the duty must be replaced and the exams committee sees who is away. The forms list the teacher's duties on each date. An absence sent before the exam or event was approved shows such a lesson as "Not happening", and it cannot be given a relief teacher. The relief team's pages know the same: such a lesson is not picked for, approved or counted (Today's Relief Assignments and Reliefs I'm covering say "Not happening", and a relief given before stands again if the exam is withdrawn); nobody on an exam duty or at an event is picked, and an approved relief who is given a duty then is flagged; Today's Relief Assignments says which duty the teacher of a backup is on; and Term Relief Report's "Week so far" and the numbers the AI is given count exam and event duties and leave out lessons that stop.
 
@@ -614,12 +643,14 @@ node tests/relief_settings.test.js      # relief: the Telegram card in Relief se
 node tests/relief_summary.test.js       # relief: the weekly summary
 node tests/relief_inbox.test.js         # relief: All Relief Requests, how an absence was asked for
 node tests/relief_ahead.test.js         # relief: Planned Relief Assignments, the days after today
+node tests/relief_change.test.js        # relief: changing a request's dates or times, the Edit view
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
 .venv/bin/python tests/test_combined.py # venues made of two or more rooms (add --full for the solve)
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 .venv/bin/python tests/test_relief.py    # relief: personal teacher codes, people, settings, calendar, routes
 .venv/bin/python tests/test_relief_requests.py  # relief requests: lessons, the free-then list, absences, work files, routes
+.venv/bin/python tests/test_relief_change.py    # relief: changing a request, its preview and save routes
 .venv/bin/python tests/test_relief_telegram.py  # relief on Telegram: the client, linking, the queue, messages, answers, reports (no network, no token)
 .venv/bin/python tests/test_exams.py     # exams and events: days, papers, seating, invigilators, routes
 ```

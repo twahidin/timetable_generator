@@ -69,6 +69,36 @@ nav.rtabs button .n:empty{display:none}
 .rd-sum b{font-weight:600}
 .rd-full{font-size:12.5px;color:#9a5b00}
 .rd-note{margin:8px 0 0}
+/* Change the dates or times, on an absence card (relief-change.js) */
+.rc{margin:2px 0 10px;background:#fafbfc;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.rc h3{margin:0 0 10px;font-size:15px}
+.rc .field{margin:0 0 12px}
+.rc-does{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.rc-h{font-weight:600;font-size:13px;margin:0 0 6px}
+.rc-l{margin:4px 0 0}
+.rc-l.rc-gone{color:#7a4b00}
+.rc-why{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center}
+.rc-why label{font-size:12.5px}
+.rc-why input{flex:1 1 240px;max-width:440px}
+.rc-told{margin:6px 0 0}
+/* Or change one lesson, Or cancel the whole request: the relief team's Edit on All Relief Requests (relief-inbox.js) */
+.rc-one,.rc-cancel{margin-top:14px}
+.rc-one h3,.rc-cancel h3{margin:0 0 6px;font-size:14px}
+.rc-ll{padding:7px 0;border-top:1px solid var(--line)}
+.rc-ll:first-child{border-top:0;padding-top:0}
+.rc-ll:last-child{padding-bottom:0}
+.rc-lt{font-size:13.5px}
+.rc-nn{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center}
+.rc-nn label,.rc-cancel label{font-size:12.5px}
+.rc-nn input,.td-nn input{flex:1 1 200px;max-width:360px}
+.rc-cancel input{flex:1 1 240px;max-width:440px}
+.in-edit{margin:12px 0 0;max-width:100%}   /* the Edit of All Relief Requests: under the table, never in its scroller */
+.in-for{font-size:13.5px;margin:0 0 6px;overflow-wrap:anywhere}
+.in-edit .rc{margin:0;background:var(--panel)}
+table.rtable tr.editing td{background:#eef4ff}
+.rc-ask{display:inline-flex;align-items:center;gap:4px;margin-left:6px;white-space:nowrap}
+.in-said{margin:0 0 10px}
+.td-nn label{font-size:12.5px}
 /* the person picker */
 .picker{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px;max-width:440px}
 .picker .row{flex-wrap:nowrap}
@@ -262,6 +292,7 @@ table.sm-table{min-width:620px}
 </main>
 <script src="/static/relief-form.js"></script>
 <script src="/static/relief-dates.js"></script>
+<script src="/static/relief-change.js"></script>
 <script src="/static/relief.js"></script>
 <script src="/static/relief-telegram.js"></script>
 <script src="/static/relief-plan.js"></script>

@@ -20,6 +20,7 @@ NOT_YOURS = "You cannot change this absence."
 CANCELLED = "This absence was cancelled."
 NO_FILES_YET = "Add files after the absence is sent."
 SAY_WHY = "Say why in a line."
+WHY_LONG = "Keep the reason under 200 characters."
 PAST_LESSON = "This lesson is in the past."
 PAST_ABSENCE = "This absence is in the past."
 ACKED = "This was acknowledged already."
@@ -28,7 +29,13 @@ APPROVED_ALREADY = "This lesson's relief is approved already: ask the relief tea
 IS_SPLIT = "This lesson is split: the relief team chooses for each part."
 STARTED = "This lesson has started: ask the relief team to change it."
 NO_LESSONS = "There are no lessons to cover in that time."
+SHARED_ONLY = "There are no lessons to cover in that time: a co-teacher is there for each. Tick “Ask for relief anyway” to ask for relief."
+OVER = "This lesson is over."
 TOO_MANY = "A lesson can have at most 5 files."
+BACKUP = "This relief follows the exam or event schedule: change the duty instead."
+NOTHING = "Nothing changes: choose other dates or times."
+LOOKED = "The request has changed since you looked: look again before saving."
+CHANGED_WHY = "The request changed."     # the history line of a relief a change ends, when no reason is given
 MAX_DATES, MAX_TEXT, MAX_LINK = 20, 2000, 500
 COVER = ("relief", "relief_by", "pick", "approved", "sent_out", "ack", "change", "history", "parts")     # a lesson's cover (relief.cover), moved whole
 
@@ -138,6 +145,16 @@ def something_to_cover(teacher, dates, periods, needed_or_stopped, links):
         raise ValueError(NO_LESSONS)
 
 
+def _check_periods(pub, periods):
+    """None (the whole day) stays None; else [from, to], 0-based, inside the day, or "Choose the periods again." """
+    if periods is None: return None
+    np = ((pub.get("model") or {}).get("NP"))
+    ok = isinstance(periods, (list, tuple)) and len(periods) == 2 and all(_int(x) for x in periods) and 0 <= periods[0] <= periods[1]
+    if ok and _int(np) and periods[1] >= np: ok = False
+    if not ok: raise ValueError("Choose the periods again.")
+    return [periods[0], periods[1]]
+
+
 def new(data, pub, by, how, may_choose=False, links=None) -> dict:
     pub = _pub(pub)
     if how not in ("asked", "planned") or not isinstance(data, dict): raise ValueError(WRONG)
@@ -149,13 +166,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
         raise ValueError(f"{teacher if isinstance(teacher, str) and teacher else 'That person'} is not on the published timetable or the staff list.")
     dates = _iso_dates(data.get("dates"), _lessons.today())
     for d in dates: _lessons.on_date(pub, cal, teacher, d)          # a date that is not a school day, or no calendar, raises its sentence
-    periods = data.get("periods")
-    if periods is not None:
-        np = ((pub.get("model") or {}).get("NP"))
-        ok = isinstance(periods, (list, tuple)) and len(periods) == 2 and all(_int(x) for x in periods) and 0 <= periods[0] <= periods[1]
-        if ok and _int(np) and periods[1] >= np: ok = False
-        if not ok: raise ValueError("Choose the periods again.")
-        periods = [periods[0], periods[1]]
+    periods = _check_periods(pub, data.get("periods"))
     reason, text = data.get("reason"), data.get("reason_text") or ""
     if reason not in REASONS or not isinstance(text, str) or len(text.strip()) > 200 or (reason == "Other" and not text.strip()):
         raise ValueError("Choose a reason; for Other, say why in a line.")
@@ -399,12 +410,145 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
     return r
 
 
-def _gone(r, x, why):
-    """lesson x leaving backup r: its cover ends (the relief written down as dropped), and it is kept in r["gone"] when there
-    is anything to keep"""
+def _order(x):
+    return (str(x.get("date") or ""), int(x.get("p") or 0), str(x.get("key") or ""))
+
+
+def plan_change(r, data, pub, records, links, now) -> dict:
+    """what changing record r's dates and times to data (dates: [ISO], periods: [from, to] or None) does, lesson by lesson; writes
+    nothing. now: a school-time date-time (fill._when), for which lessons of today have started; records: every record.
+    data's ask: the keys of added lessons one of whose other teachers is there that relief is asked for anyway (as new takes a
+    lesson's needed: True): they are needed. -> dict(dates, periods, kept, added, gone, earlier, unchanged, blocked, chosen):
+    kept, the record's lessons dated today or later that stay (in the new choice, or started: a started lesson is never
+    dropped); added, the lessons only in the new choice, built as new builds them (needed unless one of its other teachers is
+    there; one a backup of the teacher holds carries backup_cover: dict(relief, state), its relief there and cover.state's word,
+    as it moves in with it); gone, the record's lessons that go; earlier, how many of its lessons are dated before today (they
+    stay, unlisted); dates, the new dates with every date of the record before today (a day with no lesson left keeps its date)
+    and those of the lessons that stay because they started; periods, the new periods;
+    unchanged, nothing added or gone and the same dates and periods; blocked, SHARED_ONLY when nothing would be left to cover only
+    because a co-teacher is there for each lesson added (the preview still lists them, so relief can be asked for anyway; change
+    refuses it), else ""; chosen, dict(dates, periods) as the person chose them (the dates kept for history left out). Refused
+    as a new request is"""
+    if r.get("cancelled"): raise ValueError(CANCELLED)
+    if r.get("exams"): raise ValueError(BACKUP)
+    today = _lessons.today()
+    if all(datetime.date.fromisoformat(d) < today for d in r.get("dates") or []): raise ValueError(PAST_ABSENCE)
+    if not isinstance(data, dict): raise ValueError(WRONG)
+    pub = _pub(pub)
+    cal = _settings.load(pub)["calendar"]
+    teacher = r["teacher"]
+    dates = _iso_dates(data.get("dates"), today)
+    for d in dates: _lessons.on_date(pub, cal, teacher, d)          # a date that is not a school day, or no calendar, raises its sentence
+    periods = _check_periods(pub, data.get("periods"))
+    ask = set(_keys(data.get("ask")) if data.get("ask") is not None else [])
+    mine = {}
+    for d in dates:
+        for x in _lessons.on_date(pub, cal, teacher, d, periods=tuple(periods) if periods else None):
+            mine[x["key"]] = x
+    kept, gone, earlier, held = [], [], [], set()
+    for x in r["lessons"]:
+        if not isinstance(x, dict): continue
+        held.add(x.get("key"))
+        if datetime.date.fromisoformat(str(x["date"])) < today: earlier.append(x)
+        elif x["key"] in mine or _started(pub, x, now): kept.append(x)
+        else: gone.append(x)
+    added = []
+    for key, x in mine.items():
+        if key in held: continue          # a lesson the record has already is never added
+        x = as_now(records, x, links)
+        there, stopped = x["others"], x.pop("stopped")
+        needed = not there or key in ask          # a shared lesson: needed only when relief is asked for anyway (as new)
+        not_needed = None if needed else dict(by="app", why=f"{' and '.join(there)} is there")
+        added.append(dict(x, date=x["date"].isoformat(), needed=needed, not_needed=not_needed, relief=None, relief_by=None,
+                          work=dict(text="", link="", files=[]), _stopped=bool(stopped)))
+    blocked = ""
+    try:
+        something_to_cover(teacher, dates, periods, [x.get("needed") or bool(_cover.stopped(links, x)) for x in kept]
+                           + [x["needed"] or x["_stopped"] for x in added], links)
+    except ValueError:
+        if not any(x.get("others") and not x["needed"] for x in added): raise
+        blocked = SHARED_ONLY
+    for x in added: x.pop("_stopped")
+    _no_overlap([o for o in records if o.get("id") != r["id"]], teacher, [x for x in added if x["needed"]])
+    by_key = {x["key"]: x for x in added}
+    for o, moved in _moving(records, teacher, [x for x in added if x["needed"]]):     # as change moves them in (_take_over)
+        for key, y in moved.items():
+            by_key[key]["backup_cover"] = dict(relief=y.get("relief"), state=_cover.state(o, y, y))
+    out_dates = sorted({d.isoformat() for d in dates} | {str(d) for d in r.get("dates") or [] if str(d) < today.isoformat()}
+                       | {str(x["date"]) for x in earlier} | {str(x["date"]) for x in kept if x["key"] not in mine})
+    kept.sort(key=_order); added.sort(key=_order); gone.sort(key=_order)
+    unchanged = not added and not gone and out_dates == list(r.get("dates") or []) and periods == r.get("periods")
+    return dict(dates=out_dates, periods=periods, kept=kept, added=added, gone=gone, earlier=len(earlier), unchanged=unchanged,
+                blocked=blocked, chosen=dict(dates=[d.isoformat() for d in dates], periods=periods))
+
+
+def _keys(v):
+    """a list of lesson keys (strings), or WRONG"""
+    if not isinstance(v, list) or len(v) > 500 or not all(isinstance(k, str) for k in v): raise ValueError(WRONG)
+    return sorted(v)
+
+
+def change(id, data, by, pub, *, team=False, links=None, shown=None):
+    """change the absence's dates and times in place, as plan_change works it out (data: dates, periods, why: an optional reason,
+    at most 200). shown: dict(added, gone), the lesson keys of the preview the caller answered (refused, LOOKED, when the plan
+    differs by now), or None for no check. A kept lesson keeps its cover and work; a lesson that goes has its cover ended
+    (why, else CHANGED_WHY, by by) and its work files deleted when no lesson left lists them, and is kept in the gone list when
+    it has a history; an added needed lesson one of the teacher's backups holds moves in with its whole cover (_take_over).
+    data's ask: as plan_change takes it. The change is written down in changes (again: whether it asked the absent teacher to
+    acknowledge again, which it does on a planned absence she had acknowledged when someone else adds a needed lesson;
+    added_needed and gone_needed: the keys of the lessons added that need relief and of those gone that needed it; chosen: the
+    dates and periods as the person chose them, plan_change's). Refused, writing nothing, as plan_change refuses, by whom
+    _may_change refuses, NOTHING when nothing changes, and the plan's blocked when it is so. -> (the record, the plan)"""
+    pub = _pub(pub)
+    if not isinstance(data, dict): raise ValueError(WRONG)
+    why = data.get("why") or ""
+    if not isinstance(why, str): raise ValueError(WRONG)
+    why = why.strip()
+    if len(why) > 200: raise ValueError(WHY_LONG)
+    if shown is not None:
+        if not isinstance(shown, dict): raise ValueError(WRONG)
+        shown = dict(added=_keys(shown.get("added")), gone=_keys(shown.get("gone")))
+    from relief import fill as _fill
+    with _LOCK:
+        r = _editable(id)
+        _may_change(r, by, team)
+        records = all_records()
+        p = plan_change(r, data, pub, records, links, _fill._when(_now()))
+        if p["unchanged"]: raise ValueError(NOTHING)
+        if p["blocked"]: raise ValueError(p["blocked"])
+        added, gone = [x["key"] for x in p["added"]], [x["key"] for x in p["gone"]]
+        if shown is not None and (shown["added"] != sorted(added) or shown["gone"] != sorted(gone)): raise ValueError(LOOKED)
+        at = _now()
+        before = dict(dates=list(r["dates"]), periods=r["periods"])
+        drop = set(gone)
+        new_lessons = [{k: v for k, v in x.items() if k != "backup_cover"} for x in p["added"]]      # the plan's word for the preview only
+        r["lessons"] = sorted([x for x in r["lessons"] if not (isinstance(x, dict) and x.get("key") in drop)] + new_lessons,
+                              key=lambda x: _order(x) if isinstance(x, dict) else ("", 0, ""))
+        for x in p["gone"]: _gone(r, x, why or CHANGED_WHY, by)
+        needed = [x for x in new_lessons if x["needed"]]
+        backups = _take_over(_moving(records, r["teacher"], needed), r)
+        r["dates"], r["periods"] = p["dates"], p["periods"]
+        again = r.get("how") == "planned" and by != r["teacher"] and bool(needed) and bool(r.get("acknowledged"))
+        r.setdefault("changes", []).append(dict(at=at, by=by, why=why, dates=list(p["dates"]), periods=p["periods"], before=before,
+                                                added=added, gone=gone, again=again, chosen=p["chosen"],
+                                                added_needed=[x["key"] for x in needed], gone_needed=[x["key"] for x in p["gone"] if x.get("needed")]))
+        r["changed_at"] = at
+        if again: r["acknowledged"] = None
+        _save(r)
+        for o in backups: _save(o)      # after the absence: a lesson is never left in neither
+        still = {f.get("id") for x in r["lessons"] if isinstance(x, dict) for f in (x.get("work") or {}).get("files") or [] if isinstance(f, dict)}
+        for x in p["gone"]:
+            for f in (x.get("work") or {}).get("files") or []:
+                if isinstance(f, dict) and f.get("id") not in still: _files.delete(r["id"], f.get("id"))
+    return r, p
+
+
+def _gone(r, x, why, by="app"):
+    """lesson x leaving absence r (a backup's sync, or a change by by): its cover ends (the relief written down as dropped by
+    by), and it is kept in r["gone"] when there is anything to keep"""
     if not isinstance(x.get("parts") or [], list): return
     now = _now()
-    _cover.clear(r, x, "app", why, now)
+    _cover.clear(r, x, by, why, now)
     if not any(c.get("history") for c in [x] + list(x.get("parts") or [])): return
     r.setdefault("gone", []).append(dict({k: v for k, v in x.items() if k != "work"}, gone=dict(at=now, why=why)))
 
@@ -502,26 +646,43 @@ def _may_change(r, by, team):
     if not _owner(r, by) and not team: raise ValueError(NOT_YOURS)
 
 
-def not_needed(id, key, why, by, *, team=False):
+def _over(pub, x, now):
+    """the lesson's last period has ended by now (a date-time; hours.ends): never for a lesson of a later day than today (the
+    school's), as _started"""
+    from relief import hours as _hours
+    return datetime.date.fromisoformat(str(x["date"])) <= _lessons.today() and now >= _hours.ends(_pub(pub), x, x)
+
+
+def _not_over(pub, x):
+    """refuse a step on a lesson of today that is over (OVER)"""
+    from relief import fill as _fill
+    if _over(pub, x, _fill._when(_now())): raise ValueError(OVER)
+
+
+def not_needed(id, key, why, by, *, team=False, pub=None):
+    """the lesson's relief is not needed (why: optional, at most 200); refused once it is over (OVER)"""
     why = why.strip() if isinstance(why, str) else ""
     with _LOCK:
         r = _editable(id)
         _may_change(r, by, team)
         x = _lesson(r, key)
         _past(x)
-        if not 1 <= len(why) <= 200: raise ValueError(SAY_WHY)
+        _not_over(pub, x)
+        if len(why) > 200: raise ValueError(WHY_LONG)
         _cover.clear(r, x, by, why, _now())       # its relief, pick, approval, acknowledgement and request to change end
-        x["needed"], x["not_needed"], x["relief"], x["relief_by"] = False, dict(by=by, why=why), None, None
+        x["needed"], x["not_needed"], x["relief"], x["relief_by"] = False, dict(by=by, why=why, at=_now()), None, None
         _save(r)
     return r
 
 
-def needed_again(id, key, by, *, team=False):
+def needed_again(id, key, by, *, team=False, pub=None):
+    """the lesson needs relief again (one the app marked, a co-teacher being there, too); refused once it is over (OVER)"""
     with _LOCK:
         r = _editable(id)
         _may_change(r, by, team)
         x = _lesson(r, key)
         _past(x)
+        _not_over(pub, x)
         _no_overlap([o for o in all_records() if o["id"] != r["id"]], r["teacher"], [x])
         x["needed"], x["not_needed"] = True, None
         _save(r)
