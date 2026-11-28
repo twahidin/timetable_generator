@@ -227,7 +227,19 @@ today. The space the figures used at the top right is left empty.
 The published page's exam parts wrote times as 13:00 while the grid writes 1.00. Every time the published page shows
 is now written the grid's way: the Exams and events tab (papers, the roster, an event's days and duties, "Your
 duties"), "My exam timetable" (papers, event days, the report time) and the duty line of a date view. The committee's
-exam planning pages and the exam printouts keep the 24-hour form until the lead says otherwise. Built with step 2.
+exam planning pages and the exam printouts kept the 24-hour form at first. Built with step 2.
+
+**Extended on the lead's word of 2026-11-28 ("Yes please"):**
+
+- **The exam printouts (PDF)** write every time the same way: the exam timetable, the seating plans, door lists,
+  attendance sheets and the two rosters ("1.00 to 2.30"). `exams.days.school(m)` writes it. The Excel export of the
+  same data keeps `13:00`, so its columns still sort.
+- **The exam planning pages** (the Exams page and its settings page) show every time the same way. The server's
+  answers and sentences and the page's own working are not changed: a small script, `static/schooltime.js`, rewrites
+  the times in the text the page shows (`SchoolTime.text`, `walk`, `watch`). It leaves alone what a person is typing
+  or will send back: text boxes, the time boxes (they keep the browser's own form), and choices whose text is their
+  value.
+- Not included: the Plan with AI page, the relief pages, Telegram messages and history lines.
 
 ## The steps
 

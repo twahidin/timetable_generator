@@ -63,7 +63,12 @@ Until the school calendar has its terms, a phone opens on its own weekday in the
 
 1. Times have no am or pm, on the grid and now on the exam parts too. A span of twelve hours would read the same at
    both ends ("7.40–7.40"). School hours make that very unlikely.
-2. The committee's own exam planning pages and the exam printouts (seating plans, roster sheets) still write 13:00.
+2. (Settled 2026-11-28, branch `exam-times`.) The exam printouts and the exam planning pages now write 1.00 too:
+   see the design's section 9. Still writing 13:00: the Excel export of an exam, the Plan with AI page, the relief
+   pages, Telegram messages and history lines. On the planning pages a typed text that looks like a time ("Paper 1:30")
+   is shown as "1.30"; what is stored is never changed. Not tried on the real Exams page with a real schedule in a
+   browser: the script was tried in a real browser engine on a made-up page, and its tests fail when it is broken on
+   purpose (two ways tried).
 3. On a weekend the list opens on the first day (Odd Mon), not on the next school day.
 4. At phone width the page's header squeezes the school's name while the date box is empty. It is so on main too.
 
