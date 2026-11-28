@@ -327,6 +327,19 @@ def the_files_are_remade_and_carry_the_change():
     assert not os.path.isdir(os.path.join(store.PUB, "PDF", "Students"))
 
 @t
+def files_made_by_an_older_look_are_made_again():
+    from ttgen import export as E
+    fresh(); meta = store.published()["meta"]
+    assert meta["files_look"] == E.LOOK and store.files_stale(meta) is False
+    old = {k: v for k, v in meta.items() if k != "files_look"}          # a publish made before the look was numbered
+    store.write_json(os.path.join(store.PUB, "meta.json"), old); store._cache.update(stamp=None, value=None)
+    meta = store.published()["meta"]; assert "files_look" not in meta and store.files_stale(meta) is True
+    assert students.files_now() is True
+    meta2 = store.published()["meta"]
+    assert meta2["files_look"] == E.LOOK and meta2["files_behind"] is False and meta2["published_at"] == meta["published_at"]
+    assert store.files_stale(meta2) is False and os.path.exists(os.path.join(store.PUB, meta2["files"]["books"]["classes"]))
+
+@t
 def a_change_during_the_remake_is_kept():
     fresh(); students.FILES_WAIT = 3600; change(["set", "students", row_id("S002"), "name", "Ben K"])
     from ttgen import export as E; real = E.export_all
@@ -401,6 +414,23 @@ def the_thread_runs_after_the_wait_and_after_a_restart():
         while store.published()["meta"].get("files_behind") and time.time() < deadline: time.sleep(0.2)
         assert store.published()["meta"]["files_behind"] is False
     finally: students.FILES_WAIT = 3600
+
+@t
+def a_restart_remakes_files_made_by_an_older_look():
+    fresh(); students.FILES_WAIT = 0
+    try:
+        mp = os.path.join(store.PUB, "meta.json"); meta = json.load(open(mp, encoding="utf-8"))
+        meta.pop("files_look", None); meta["files_behind"] = False; store.write_json(mp, meta)   # an older publish: no look written, no student change
+        with store._publishing: store.swap_model(store.published()["model"])                  # the cache reads the meta again
+        assert "files_look" not in store.published()["meta"] and store.files_stale(store.published()["meta"])
+        students.resume_files(); deadline = time.time() + 60
+        while (students._files["running"] or store.published()["meta"].get("files_look") != E.LOOK) and time.time() < deadline: time.sleep(0.2)
+        assert not students._files["running"]
+        meta = store.published()["meta"]
+        assert meta["files_look"] == E.LOOK and not store.files_stale(meta), meta
+    finally: students.FILES_WAIT = 3600
+    assert store.files_stale(dict(store.published()["meta"], files_look=E.LOOK - 1, files_behind=False))      # made by the look before this one
+    assert not store.files_stale(dict(store.published()["meta"], files_look=E.LOOK, files_behind=False))
 
 @t
 def the_skeleton_holds_what_the_screen_needs():

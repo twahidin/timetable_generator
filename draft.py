@@ -487,7 +487,7 @@ def board():
     return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
                 subjects={k: [v.get("short") or k, v.get("color"), v.get("dept") or ""] for k, v in m["subjects"].items()},
                 palette=[list(c) for c in PALETTE], cards=cards, unplaced=unplaced,
-                staff=[{k: v for k, v in x.items() if k != "key"} for x in staff_cells(m) if x["p"] is not None], teachers=_teacher_groups(m, pool, tshort), rooms=_room_groups(m, pool), room_parts=m.get("room_parts") or {},
+                staff=[{k: v for k, v in x.items() if k not in ("key", "m0", "m1")} for x in staff_cells(m) if x["p"] is not None], teachers=_teacher_groups(m, pool, tshort), rooms=_room_groups(m, pool), room_parts=m.get("room_parts") or {},
                 day=["".join("L" if any(g[d][p] in "LA" for g in m["grid"].values()) else "." for p in range(NP)) for d in range(nd)],
                 short=[dict(s, classes=list(_planned(m["checked_setup"], s["key"])["classes"])) for s in fixes.short(m, m["checked_setup"], pool)])
 

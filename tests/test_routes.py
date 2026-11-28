@@ -760,7 +760,7 @@ def a_teacher_gets_only_their_own_teacher_only_periods():
     try:
         mine = client(person(TINA, "code")).get("/api/timetable/my-periods"); j = mine.get_json()
         assert mine.status_code == 200 and j["lines"] == ["Zone computing class · Tue · 3.00 to 5.30 · West Zone centre"], j
-        assert j["staff"] and all(r[0] == TINA and r[4] == "Zone computing class" and r[6:] == ["3.00", "5.30", False, True] for r in j["staff"]), j
+        assert j["staff"] and all(r[0] == TINA and r[4] == "Zone computing class" and r[6:10] == ["3.00", "5.30", False, True] and r[10] < r[11] for r in j["staff"]), j
         other = client(person(HAL, "password")).get("/api/timetable/my-periods")
         assert other.status_code == 200 and other.get_json() == {"staff": [], "lines": []}, other.get_json()
         assert client(dict(role="committee")).get("/api/timetable/my-periods").get_json() == {"staff": [], "lines": []}   # the shared committee code is nobody's

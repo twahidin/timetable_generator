@@ -340,9 +340,10 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
       subjects and the number of groups, or "<subject> only" when just some groups meet; the legend under the grid
       lists every group with teacher and room. Teacher: subject, group or class, room. Room: subject, who, teacher.
       Student: their class's whole-class lessons plus their groups' lessons, with teacher and room.
-    - PDF (reportlab): A4 landscape, one page each; days down the side (Odd/Even week bands), periods across with
-      start times; shaded breaks labelled Assembly/Recess/Lunch, pale yellow after-school slots; overlapping lessons
-      share the row height; legend under the grid; bookmarks per level/department/class.
+    - PDF (reportlab): A4 landscape, one page each; days down the side (Odd/Even week bands), a clock scale across
+      counted in hours above each week; each lesson with its own start and end time; striped breaks labelled
+      Assembly/Recess/Lunch, drawn only when a lesson follows them that day; overlapping lessons share the row height;
+      legend under the grid; bookmarks per level/department/class.
     - Excel: the same grid with merged cells, one block of rows per timetable and a page break after each.
     - HTML: one file with the data embedded as JSON and plain JavaScript (no external files) for search, lists,
       grids, the lesson filter table, the free finder and the student builder.

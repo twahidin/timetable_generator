@@ -263,7 +263,7 @@ def the_teachers_view_gets_the_box_and_the_line_and_no_new_counts():
     boxes = [c for c in v["cells"] if c.get("staff")]
     assert v["stats"] == v0["stats"] and v["subtitle"] == v0["subtitle"] and len(v["cells"]) == len(v0["cells"]) + len(boxes)
     assert len(boxes) == sum(1 for d in m["days"] if d.split()[-1] in ("Tue", "Thu")) and all((c["p"], c["n"], c["after"], c["before"]) == (22, 4, True, False) for c in boxes)
-    assert boxes[0]["title"] == "Zone computing class" and boxes[0]["lines"] == ["3.00 (to 5.30)", "West Zone centre"] and boxes[0]["id"] is None
+    assert boxes[0]["title"] == "Zone computing class" and boxes[0]["time"] == "3.00 (to 5.30)" and boxes[0]["lines"] == ["West Zone centre"] and boxes[0]["id"] is None
     assert [e["text"] for e in v["legend"] if e.get("staff")] == [LINE]
     assert [e for e in v["legend"] if not e.get("staff")] == v0["legend"]
     assert not any(c.get("staff") for c in export.class_view(m, CLS)["cells"]) and not any(c.get("staff") for c in export.room_view(m, ROOM)["cells"])
@@ -276,9 +276,9 @@ def the_time_words_and_old_models():
     m_ = dict(m); m_.pop("setup"); assert export.staff_cells(m_) == [] and export.staff_lines(m_, T) == []
     plain = dict(ZONE5, times=["09:00", "10:20"], days=["Mon"])
     mm = model_for(dict(sp0, staff_periods=[plain]), PLACED); c = [c for c in export.teacher_view(mm, T)["cells"] if c.get("staff")][0]
-    assert c["lines"][0] == "9.00–10.20" and not c["before"] and not c["after"], c
+    assert c["time"] == "9.00–10.20" and not c["before"] and not c["after"], c
     mb = model_for(dict(sp0, staff_periods=[dict(plain, times=["07:00", "08:00"])]), PLACED); c = [c for c in export.teacher_view(mb, T)["cells"] if c.get("staff")][0]
-    assert c["lines"][0] == "(from 7.00) 8.00" and c["before"] and not c["after"] and c["p"] == 0, c
+    assert c["time"] == "(from 7.00) 8.00" and c["before"] and not c["after"] and c["p"] == 0, c
     assert export.staff_cells(m, "Nobody") == [] and {x["teacher"] for x in export.staff_cells(m)} == {T}
 
 @t
@@ -291,7 +291,7 @@ def a_period_wholly_outside_the_day_is_a_line_only():
 def the_page_data_by_view():
     m = model_for(sp_with_zone, PLACED)
     full = export.html_data(m, "full")
-    assert [T, m["days"].index(next(d for d in m["days"] if d.endswith("Tue"))), 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", False, True] in full["staff"]
+    assert [T, m["days"].index(next(d for d in m["days"] if d.endswith("Tue"))), 22, 4, "Zone computing class", "West Zone centre", "3.00", "5.30", False, True] == [r[:10] for r in full["staff"] if r[0] == T and r[1] == m["days"].index(next(d for d in m["days"] if d.endswith("Tue")))][0]
     assert full["staff_lines"] == {T: [LINE]}
     for view in ("student", "staff"): assert export.html_data(m, view)["staff"] == [] and export.html_data(m, view)["staff_lines"] == {}
     sid = m["students"][0]["id"]; assert export.html_data(m, "personal", student_id=sid)["staff"] == []
@@ -313,6 +313,42 @@ def the_printout_and_the_excel_file_keep_the_lesson():
     assert f" / Zone computing class" in text, "the lesson's cell gains the period's name"
     cs_ = [c for row in ws.iter_rows() for c in row if c.value and " / Zone computing class" in str(c.value)]
     assert cs_ and all(c.fill.fgColor.rgb != "00FFFFFF" for c in cs_)          # it keeps the lesson's own fill
+
+# ---- Task 10: the box on the published timetable's new look (placed by the clock, cut to the day, counted by the span and the breaks)
+EARLY = [(TUE, 0, 2, [CLS], SUBJECT, export.ENTIRE, [T], ROOM)]     # Tue 7.40 to 8.20: the only lesson of the day, ends long before the zone class
+BRIEF2 = dict(BRIEF, times=["07:00", "08:00"], days=["Fri"])
+
+@t
+def a_box_is_cut_to_the_day_and_placed_by_its_minutes():
+    m = model_for(sp_with_zone, EARLY); v = export.teacher_view(m, T)
+    boxes = [c for c in v["cells"] if c.get("staff")]
+    assert boxes and all((c["a"], c["b"], c["m0"], c["m1"]) == (900, 980, 900, 980) and c["after"] and not c["before"] for c in boxes), "the zone class 3.00 to 5.30 is a box from 3.00 to 4.20, the day's end, with the broken right edge"
+    assert all(c["time"] == "3.00 (to 5.30)" and c["start"] == "3.00" and c["lines"] == ["West Zone centre"] for c in boxes)
+    cs = [c for c in export.staff_cells(m) if c["p"] is not None]; assert all((c["m0"], c["m1"]) == (900, 980) for c in cs)
+    mb = model_for(dict(sp0, staff_periods=[BRIEF2]), EARLY); b = [c for c in export.teacher_view(mb, T)["cells"] if c.get("staff")]
+    assert b and all((c["a"], c["b"], c["before"], c["after"], c["time"]) == (460, 480, True, False, "(from 7.00) 8.00") for c in b), "a briefing 7.00 to 8.00 on a day that starts 7.40 is a box from 7.40 to 8.00, the broken left edge"
+    assert [r[10:] for r in export.html_data(m, "full")["staff"] if r[2] is not None][0] == [900, 980], "the page's rows end with the box's minutes"
+    assert all(r[10:] == [None, None] for r in export.html_data(model_for(sp_with_briefing, EARLY), "full")["staff"]), "a period with no box has no minutes"
+
+@t
+def the_span_reaches_a_box_but_not_a_legend_only_period():
+    m0 = model_for(sp0, EARLY); m = model_for(sp_with_zone, EARLY); mo = model_for(sp_with_briefing, EARLY)
+    assert export._span(m0, export.teacher_view(m0, T)) == (460, 500)
+    assert export._span(m, export.teacher_view(m, T)) == (460, 980), "a lesson that ends at 8.20 and a box that ends at 4.20: the page runs to 4.20"
+    assert export._span(mo, export.teacher_view(mo, T)) == (460, 500), "a period wholly outside the day has a legend line and no box, so it does not stretch the page"
+
+@t
+def a_break_is_drawn_when_a_box_is_all_that_follows_it():
+    m0 = model_for(sp0, EARLY); m = model_for(sp_with_zone, EARLY)
+    v0, v = export.teacher_view(m0, T), export.teacher_view(m, T)
+    assert export._bands(m0, v0, TUE) == [] and [x[2] for x in export._bands(m, v, TUE)] == ["Assembly", "Recess", "Lunch"], export._bands(m, v, TUE)
+
+@t
+def the_boxs_first_line_is_its_time_and_a_narrow_box_keeps_its_start():
+    m = model_for(sp_with_zone, EARLY); c = [c for c in export.teacher_view(m, T)["cells"] if c.get("staff")][0]
+    wide = export._box_lines(c, 140, 40); assert wide[0][0] == "3.00 (to 5.30)" and wide[1][0] == "Zone computing class" and wide[2][0] == "West Zone centre", wide
+    narrow = export._box_lines(c, 30, 40); assert narrow[0][0] == "3.00", narrow
+    assert len(export.pdf_bytes(m, export.teacher_view(m, T))) > 1000
 
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

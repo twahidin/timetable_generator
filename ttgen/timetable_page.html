@@ -6,11 +6,11 @@
 <title>__TITLE__</title>
 <style>
 :root{--bg:#F4F6F8;--panel:#FFFFFF;--ink:#1B2330;--sub:#4A5566;--muted:#7A8494;--line:#E1E5EA;--soft:#EEF1F4;--accent:#26364A;--link:#1F63B0;
-  --brk:#ECEFF3;--none:#F7F8FA;--slot:#FFF9EA;--ok:#2E7D32;--bad:#B3261E;--shadow:0 1px 2px rgba(20,30,45,.06),0 4px 14px rgba(20,30,45,.05);color-scheme:light}
+  --brk:#ECEFF3;--none:#F7F8FA;--stripe:#EEF1F5;--stripe2:#F7F9FB;--hourline:#B9C3D1;--hourlabel:#16202E;--ok:#2E7D32;--bad:#B3261E;--shadow:0 1px 2px rgba(20,30,45,.06),0 4px 14px rgba(20,30,45,.05);color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1318;--panel:#171C23;--ink:#E7EBF0;--sub:#B4BDC9;--muted:#8792A2;--line:#2A313B;--soft:#1F252D;
-  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--slot:#272214;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}}
+  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--stripe:#232A33;--stripe2:#1A2028;--hourline:#4B5666;--hourlabel:#E7EBF0;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#0F1318;--panel:#171C23;--ink:#E7EBF0;--sub:#B4BDC9;--muted:#8792A2;--line:#2A313B;--soft:#1F252D;
-  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--slot:#272214;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}
+  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--stripe:#232A33;--stripe2:#1A2028;--hourline:#4B5666;--hourlabel:#E7EBF0;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
 a{color:var(--link);text-decoration:none;cursor:pointer}a:hover{text-decoration:underline}
@@ -48,23 +48,28 @@ main{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;padding:16p
 a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:none}a.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
 .applinks{display:flex;gap:6px;flex-wrap:wrap}.applinks .btn{font-size:12.5px;padding:5px 9px}
 .gridwrap{overflow-x:auto;padding-bottom:4px}
-.tt{min-width:calc(var(--np)*var(--cw) + 64px)}
-.tt .head{display:grid;grid-template-columns:64px 1fr}.tt .ph{display:grid;grid-template-columns:repeat(var(--np),1fr)}
-.tt .ph div{text-align:center;font-size:10px;color:var(--muted);line-height:1.2;padding-bottom:5px}.tt .ph b{display:block;color:var(--ink);font-size:11.5px}
-.tt .row{display:grid;grid-template-columns:64px 1fr;border-top:1px solid var(--line)}.tt .row.wk{border-top:2px solid color-mix(in srgb,var(--muted) 60%,transparent)}
+.tt{min-width:calc(var(--w) + 74px)}
+.tt .ruler,.tt .row{display:grid;grid-template-columns:74px 1fr}.tt .row + .ruler{margin-top:12px}
+.tt .ruler .ax{position:relative;height:28px}.tt .wk{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);padding:8px 0 0 4px;white-space:nowrap}
+.tt .hr{position:absolute;top:6px;transform:translateX(-50%);font-weight:700;font-size:13px;color:var(--hourlabel);white-space:nowrap}.tt .hr small{font-weight:600;color:var(--muted);font-size:10.5px;margin-left:2px}.tt .hr.l{transform:none}.tt .hr.r{transform:translateX(-100%)}
+.tt .row{border-top:1px solid var(--line)}
 .tt .row:last-child{border-bottom:1px solid var(--line)}
 .tt .dl{display:flex;flex-direction:column;justify-content:center;padding-left:4px;font-weight:700;font-size:13px}.tt .dl small{font-weight:600;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.tt .track{position:relative;height:var(--rh);background-image:linear-gradient(to right,var(--line) 1px,transparent 1px);background-size:calc(100% / var(--np)) 100%}
-.tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--muted);background:var(--brk)}
-.tt .bk.none{background:var(--none)}.tt .bk.slot{background:var(--slot)}.tt .bk span{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:100%}.tt .bk.v span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px}
-.cell{position:absolute;padding:3px 5px 3px 7px;border-radius:5px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);
-  box-shadow:inset 3px 0 0 var(--a);font-size:11px;line-height:1.25;color:var(--sub);display:flex;flex-direction:column;justify-content:center;margin:1px}
-.cell b{color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span.m{color:var(--muted)}
-.cell.staff{background:#fff;border:1.5px solid #5B6677;border-left-width:4px;box-shadow:none;color:inherit;cursor:default}
+.tt .dl,.tt .wk{position:sticky;left:0;z-index:3;background:var(--panel)}   /* the day names stay in place when the grid moves sideways (opaque, over the cells, also on the glass card) */
+.tt .track{position:relative;height:var(--h)}
+.tt .vl{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}.tt .vl.h{background:var(--hourline)}
+.tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;font-size:11px;color:var(--muted);background:repeating-linear-gradient(135deg,var(--stripe) 0 6px,var(--stripe2) 6px 12px)}
+.tt .bk span{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:100%}.tt .bk.v span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;max-width:none;max-height:100%}
+.cell{position:absolute;padding:2px 4px 1px;border-radius:7px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);border-left:4px solid var(--a);
+  font-size:11px;line-height:1.15;color:var(--sub);display:flex;flex-direction:column;margin-left:1px}
+.cell b{color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .t{color:var(--ink);font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;opacity:.85;flex:none;overflow:visible;text-overflow:clip}.cell.s{padding:2px 1px 1px;border-left-width:2px}.cell.s .t{font-size:9.5px;letter-spacing:-.02em}.cell .m{color:var(--sub)}
+.cell{container-type:inline-size}.cell .ts{display:none}@container (max-width:75px){.cell .tf{display:none}.cell .ts{display:inline}}   /* a box too narrow for the full time shows the start alone, judged by its real width (75px of content holds the widest, 10.40–11.20) */
+.cell.staff,:root:not([data-theme="light"]) .cell.staff,:root[data-theme="dark"] .cell.staff{--a:#5B6677;background:#fff;border:1.5px solid #5B6677;border-left:4px solid #5B6677;cursor:default}   /* a teacher-only period: white with a dark outline in every theme, so its dark text always reads */
+.cell.staff b,.cell.staff .t{color:#1B2330}.cell.staff .m,.cell.staff span{color:#4A5566}
 .cell.staff.cut-r{border-right-style:dashed}.cell.staff.cut-l{border-left-style:dashed}
 .cell.staff:hover{outline:2px solid color-mix(in srgb,#5B6677 50%,transparent)}
 .legend .sw.staff{background:#fff;border:1.5px solid #5B6677}
-.cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
 .cell.x{opacity:.5;filter:grayscale(.7)}.cell.x b,.cell.x span{text-decoration:line-through}
@@ -120,8 +125,8 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media print{html.inapp{background:#fff}html.inapp .card{background:none;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}}
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
-@media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
-  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
+@media print{@page{size:A4 landscape;margin:9mm}.tt .dl,.tt .wk{position:static}.tt .track{height:calc(var(--h) * 56 / 62)}.tt .row{break-inside:avoid}.tt .ruler{break-after:avoid}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
+  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.vl,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
 </style>
 </head>
@@ -143,6 +148,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 "use strict";
 const D = DATA, $ = (s, el = document) => el.querySelector(s);
 const APP = D.app || null, MODE = APP ? APP.mode : "full";
+const COMMITTEE = !APP || APP.mode === "committee";   /* planning figures, period counts and after-school words are the committee's only; a saved copy with no APP is theirs */
 if (APP) document.documentElement.classList.add("inapp");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const NP = D.NP, DAYS = D.days, ND = DAYS.length, WEEKS = D.school.weeks || 1, PER_WEEK = Math.max(1, Math.floor(ND / WEEKS));
@@ -160,7 +166,7 @@ const uniq = a => [...new Set(a)];
 const short = s => (D.subjects[s] || [s])[0];
 const colorOf = s => (D.subjects[s] || [s, 0])[1];
 const deptOf = s => (D.subjects[s] || [])[2] || "";   // an older page's data has no department
-let STAFF = D.staff || [], STAFF_LINES = D.staff_lines || {};   /* teacher-only periods: [teacher, day, first period or null, periods, name, place, from, to, starts before the day, ends after it]; the full page holds everyone's, a teacher's own page gets theirs by /api/timetable/my-periods */
+let STAFF = D.staff || [], STAFF_LINES = D.staff_lines || {};   /* teacher-only periods: [teacher, day, first period or null, periods, name, place, from, to, starts before the day, ends after it, box start and end in minutes (cut to the day)]; the full page holds everyone's, a teacher's own page gets theirs by /api/timetable/my-periods */
 const staffTime = r => r[8] && r[9] ? `(from ${r[6]} to ${r[7]})` : r[9] ? `${r[6]} (to ${r[7]})` : r[8] ? `(from ${r[6]}) ${r[7]}` : `${r[6]}–${r[7]}`;
 const pal = i => D.palette[i % D.palette.length];
 const untag = s => short(s).replace(/\s+(G[123]|Std|Fdn)$/, "");
@@ -181,6 +187,31 @@ const PB = (() => {
   let last = -1, add = 0;
   return D.times.map(two => two.map(t => { let v = mins(t); if (v === null) return last; v += add; while (v < last) { add += 720; v += 720; } last = v; return v; }));
 })();
+/* the clock sums: a lesson is placed by its start and end in minutes (a, b), not by period number */
+const clk = m => `${((Math.floor(m / 60) + 11) % 12) + 1}.${String(m % 60).padStart(2, "0")}`;   /* minutes after midnight as the school writes a time: 480 is "8.00", 780 is "1.00" */
+const edge = (p, n) => { const hi = PB.length - 1, i = q => Math.max(0, Math.min(hi, Math.floor(q))); return [PB[i(p)][0], PB[i(Math.ceil(p + n) - 1)][1]]; };   /* p held inside the day as time() holds it */
+const cellTime = c => c.time || `${clk(c.a)}–${clk(c.b)}`, cellStart = c => c.start || clk(c.a);   /* a box holds both; its real width decides which shows */
+/* the runs of assembly, recess and lunch on day d, in minutes, kept only when a lesson (or exam, event) of that day starts at or after the run's end */
+function bandsOf(v, d) {
+  const row = v.codes ? v.codes[d] : null, out = [];
+  if (!row) return out;
+  for (let p = 0; p < NP;) { const ch = row[p]; let q = p; while (q + 1 < NP && row[q + 1] === ch) q++;
+    if (BREAK[ch]) { const a = PB[p][0], b = PB[q][1]; if (v.cells.some(c => c.d === d && c.a >= b)) out.push({ a, b, name: BREAK[ch] }); } p = q + 1; }
+  return out;
+}
+/* the page's length: the earliest start of a lesson or kept band to the latest end of a lesson, over all days; null when nothing is drawn */
+function spanOf(v) {
+  if (!v.cells.length) return null;
+  let a0 = Math.min(...v.cells.map(c => c.a)), b1 = Math.max(...v.cells.map(c => c.b));
+  for (let d = 0; d < ND; d++) bandsOf(v, d).forEach(x => { a0 = Math.min(a0, x.a); });
+  return [a0, b1];
+}
+/* a mark for each whole hour in a0..b1: "8 am" first, then "9", "12 noon", "1 pm", "2" */
+function hourMarks(a0, b1) {
+  const out = [];
+  for (let h = Math.ceil(a0 / 60); h * 60 <= b1; h++) out.push({ m: h * 60, text: String(((h + 11) % 12) + 1), sub: h === 12 ? "noon" : h === 13 ? "pm" : out.length ? "" : h < 12 ? "am" : "pm" });
+  return out;
+}
 function weekDay(n) { const p = String(n).split(" "); return p.length > 1 ? [p[0], p[p.length - 1]] : ["", p[0]]; }
 function compact(cs) {
   cs = [...cs].sort((a, b) => a.length - b.length || a.localeCompare(b));
@@ -201,7 +232,7 @@ function codesFor(levels) {
 }
 
 // ------------------------------------------------------------------ views
-function cellOf(xs, title, lines) { const x0 = xs[0]; return { d: x0.d, p: x0.p, n: x0.n, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id, ix: xs.map(x => x.i) }; }
+function cellOf(xs, title, lines) { const x0 = xs[0], [a, b] = edge(x0.p, x0.n); return { d: x0.d, p: x0.p, n: x0.n, a, b, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id, ix: xs.map(x => x.i) }; }
 function classView(c) {
   const info = cIx.get(c), rows = L.filter(x => x.classes.includes(c)), bg = {};
   rows.forEach(x => { if (x.block) (bg[x.block] = bg[x.block] || new Set()).add(x.group); });
@@ -218,11 +249,11 @@ function classView(c) {
     for (const x of xs) { const k = x.group === ENTIRE ? "|" + x.subject : x.block + "|" + x.group; let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
   }
   const legend = [], blocks = new Map();
-  for (const [k, e] of ent) { if (k.startsWith("|")) legend.push({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` });
+  for (const [k, e] of ent) { if (k.startsWith("|")) legend.push({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"}`, count: `${e.periods} periods` });
     else { const b = e.x.block || e.x.group; if (!blocks.has(b)) blocks.set(b, []); blocks.get(b).push(e); } }
-  for (const [b, es] of blocks) legend.push({ color: colorOf(es[0].x.subject), label: blockLabel(b, info.level), text: `${Math.max(...es.map(e => e.periods))} periods · ` + es.map(e => `${short(e.x.subject)} ${e.x.group} (${tshort(e.x.teachers)}, ${common(e.rooms) || "-"})`).join("; ") });
-  return { kind: "class", key: c, kicker: "Class", title: `Class ${c}`, sub: `${info.level} · ${info.size || "-"} students · home room ${info.home || "-"}${parentsLine(c)}`,
-    stats: [[info.level, "level"], [info.size || "-", "students"], [info.home || "-", "home room"], [used.size, "periods a cycle"]], codes: (D.cgrid || {})[c] || codesFor([info.level]), cells, legend, lt: "Subjects, teachers and rooms", rows };
+  for (const [b, es] of blocks) legend.push({ color: colorOf(es[0].x.subject), label: blockLabel(b, info.level), count: `${Math.max(...es.map(e => e.periods))} periods`, text: es.map(e => `${short(e.x.subject)} ${e.x.group} (${tshort(e.x.teachers)}, ${common(e.rooms) || "-"})`).join("; ") });
+  return { kind: "class", key: c, kicker: "Class", title: `Class ${c}`, sub: `${info.level} · home room ${info.home || "-"}${parentsLine(c)}`,
+    stats: [], codes: (D.cgrid || {})[c] || codesFor([info.level]), cells, legend, lt: "Subjects, teachers and rooms", rows };
 }
 function teacherView(t) {
   const info = tIx.get(t) || { name: t, short: t, dept: "" }, rows = L.filter(x => x.teachers.includes(t)), cells = [], per = {}, ent = new Map(); let total = 0;
@@ -232,9 +263,9 @@ function teacherView(t) {
     total += x0.n; per[x0.d] = (per[x0.d] || 0) + x0.n;
     for (const x of xs) { const k = x.subject + "|" + (x.group !== ENTIRE ? x.group : x.classes.join(", ")); let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
   }
-  const legend = [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? `${e.x.group} (${compact(e.x.classes)})` : e.x.classes.join(", ")} · ${e.periods} periods · ${common(e.rooms) || "-"}` }));
+  const legend = [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? `${e.x.group} (${compact(e.x.classes)})` : e.x.classes.join(", ")} · ${common(e.rooms) || "-"}`, count: `${e.periods} periods` }));
   const days = Object.values(per), mine = CLS.filter(c => c.parents.includes(t)).map(c => c.name);
-  STAFF.filter(r => r[0] === t && r[2] != null).forEach(r => cells.push({ d: r[1], p: r[2], n: r[3], title: r[4], lines: [staffTime(r), r[5]].filter(Boolean), color: null, ext: false, id: null, staff: true, before: !!r[8], after: !!r[9], ix: [] }));   /* a teacher-only period: a box, never counted in the stats */
+  STAFF.filter(r => r[0] === t && r[2] != null).forEach(r => { const [a, b] = r[10] != null ? [r[10], r[11]] : edge(r[2], r[3]); cells.push({ d: r[1], p: r[2], n: r[3], a, b, title: r[4], lines: [r[5]].filter(Boolean), color: null, ext: false, id: null, staff: true, before: !!r[8], after: !!r[9], time: staffTime(r), start: r[6], ix: [] }); });   /* a teacher-only period: a box placed by its own minutes (cut to the day's first and last period), never counted in the stats */
   (STAFF_LINES[t] || []).forEach(line => legend.push({ color: null, label: "", text: line, staff: true }));
   const base = [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · ");
   return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: mine.length ? `${base || "Teacher"} · ${PNAME} of ${mine.join(", ")}` : base,
@@ -250,7 +281,7 @@ function roomView(r) {
   const codes = codesFor(rows.map(x => x.level)), open = codes ? codes.join("").split("").filter(c => c === "L").length : ND * NP;
   return { kind: "room", key: r, kicker: "Room", title: r, sub: `${info.kind || ""}${info.cap > 1 ? ` · ${info.cap} groups at once` : ""}${(info.equipment || []).length ? ` · Equipment: ${info.equipment.join(", ")}` : ""}${info.config ? ` · Configuration: ${info.config}` : ""}${(info.parts || []).length ? ` · made of ${info.parts.join(" + ")}` : ""}`,
     stats: [[info.kind || "-", "kind"], [used.size, "periods used"], [Math.round(100 * used.size / Math.max(1, open)) + "%", "of lesson time"]], codes, cells,
-    legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? e.x.group : e.x.classes.join(", ")} · ${tshort(e.x.teachers)} · ${e.periods} periods` })), lt: "Used by", rows };
+    legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? e.x.group : e.x.classes.join(", ")} · ${tshort(e.x.teachers)}`, count: `${e.periods} periods` })), lt: "Used by", rows };
 }
 function personalView(cls, groups, head) {
   const gs = new Set(groups), rows = L.filter(x => (x.group === ENTIRE && x.classes.includes(cls)) || (x.group !== ENTIRE && gs.has(x.group))), cells = [], used = new Set(), ent = new Map();
@@ -262,7 +293,7 @@ function personalView(cls, groups, head) {
   const lv = (cIx.get(cls) || {}).level;
   return Object.assign({ kind: "student", codes: (D.cgrid || {})[cls] || codesFor([lv]), cells, lt: "Subjects, teachers and rooms", rows,
     stats: [[cls, "class"], [lv || "-", "level"], [groups.length, "groups"], [used.size, "periods a cycle"]],
-    legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` })) }, head);
+    legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"}`, count: `${e.periods} periods` })) }, head);
 }
 const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.groups, { key: id, kicker: "Student", title: s.name, sub: `${s.id} · Class ${s.cls} · ${(cIx.get(s.cls) || {}).level || ""}${parentsLine(s.cls)}` }); };
 /* a room, the combined venues made with it and its own rooms, as exams/seating.py _related reads them: one space for exams */
@@ -271,9 +302,11 @@ const relatedRooms = r => uniq([r, ...ROOMS.filter(x => x.parts.includes(r)).map
    times it still runs, and the exams and events of the class (a student: their class), the teacher (with an event duty) or the room. The PDF, CSV and legend stay the usual timetable */
 function dated(v) {
   const on = S.on, ex = on.exams || {}, nd = niceDate(on.date);
+  v.span = spanOf(v);   /* over all days, before the cells are cut to the day */
   if (!on.day) { v.noday = `${nd} is outside the terms or a holiday in the school calendar.`; v.cells = []; return v; }
   const only = DAYS.indexOf(on.day), stop = new Set(ex.stopped || []), runs = new Map();
-  (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push(`${a}–${b}`); });
+  const hm = t => mins(t) === null ? t : clk(mins(t));   /* "08:20" as the school writes it: "8.20" */
+  (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push(`${hm(a)}–${hm(b)}`); });
   v.only = only;
   v.cells = v.cells.filter(c => c.d === only);
   v.cells.forEach(c => {
@@ -284,12 +317,13 @@ function dated(v) {
   const cls = v.kind === "class" ? v.key : v.kind === "student" ? (v.cls || (sIx.get(v.key) || {}).cls) : null;
   const inRoom = r => relatedRooms(r).flatMap(q => ((ex.rooms || {})[q] || []).map(it => q === r ? it : Object.assign({}, it, { via: q })));   /* a combined venue and its rooms count as one room */
   const items = cls ? (ex.classes || {})[cls] : v.kind === "teacher" ? (ex.teachers || {})[v.key] : v.kind === "room" ? inRoom(v.key) : null;
-  const tm = it => `${it.start}–${it.end}`;
   (items || []).forEach(it => {
     const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : it.kind === "event" ? "Event" : "Exam";
-    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), v.kind === "teacher" ? it.duty : "", it.via ? `in ${it.via}` : ""];
-    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
+    const lines = cls ? [it.room, it.seat_note] : [it.label, v.kind === "teacher" ? it.duty : "", it.via ? `in ${it.via}` : ""];
+    const s0 = mins(it.start), e0 = mins(it.end), [a, b] = s0 !== null && e0 !== null ? [s0, e0] : edge(+it.p || 0, +it.n || 0);
+    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, a, b, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day}) ${clk(a)}–${clk(b)}` });
   });
+  if (v.cells.length) v.span = [Math.min(...(v.span ? [v.span[0]] : []), ...v.cells.map(c => c.a)), Math.max(...(v.span ? [v.span[1]] : []), ...v.cells.map(c => c.b))];   /* a view with no lessons still has its exams' span */
   v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams, tests or events. This is the usual ${on.day} timetable.`;
   return v;
 }
@@ -298,40 +332,43 @@ function dated(v) {
 function lanes(cells) {
   const out = new Map();
   for (let d = 0; d < ND; d++) {
-    const cs = cells.filter(c => c.d === d).sort((a, b) => a.p - b.p || b.n - a.n); let cl = [], end = -1;
-    const flush = () => { const ln = []; cl.forEach(c => { let i = ln.findIndex(e => e <= c.p); if (i < 0) { ln.push(0); i = ln.length - 1; } ln[i] = c.p + c.n; out.set(c, [i, 0]); }); cl.forEach(c => out.get(c)[1] = ln.length); };
-    for (const c of cs) { if (cl.length && c.p >= end) { flush(); cl = []; end = -1; } cl.push(c); end = Math.max(end, c.p + c.n); }
+    const cs = cells.filter(c => c.d === d).sort((a, b) => a.a - b.a || b.b - a.b); let cl = [], end = -1;
+    const flush = () => { const ln = []; cl.forEach(c => { let i = ln.findIndex(e => e <= c.a); if (i < 0) { ln.push(0); i = ln.length - 1; } ln[i] = c.b; out.set(c, [i, 0]); }); cl.forEach(c => out.get(c)[1] = ln.length); };
+    for (const c of cs) { if (cl.length && c.a >= end) { flush(); cl = []; end = -1; } cl.push(c); end = Math.max(end, c.b); }
     if (cl.length) flush();
   }
   return out;
 }
 function gridHTML(v) {
-  const ln = lanes(v.cells), cw = NP > 18 ? 34 : 58, rh = NP > 18 ? 58 : 66;
+  const sp = v.span || spanOf(v); if (!sp) return "";
+  const [a0, b1] = sp, len = Math.max(1, b1 - a0), hrs = hourMarks(a0, b1), ln = lanes(v.cells);
+  const at = m => Math.min(b1, Math.max(a0, m)), pc = m => +((at(m) - a0) / len * 100).toFixed(3) + "%", wd = (a, b) => +((at(b) - at(a)) / len * 100).toFixed(3) + "%";   /* by minutes against the page's span */
   const most = Array(ND).fill(1); for (const [c, [, n]] of ln) most[c.d] = Math.max(most[c.d], n);
-  let h = `<div class="gridwrap"><div class="tt" style="--np:${NP};--cw:${cw}px;--rh:${rh}px"><div class="head"><div></div><div class="ph">${D.times.map((t, p) => `<div>${p}<b>${esc(t[0])}</b></div>`).join("")}</div></div>`;
+  const lines = uniq(PB.flat()).filter(m => m > a0 && m < b1 && m % 60).map(m => `<i class="vl" style="left:${pc(m)}"></i>`).join("") + hrs.map(x => `<i class="vl h" style="left:${pc(x.m)}"></i>`).join("");
+  const ruler = wk => `<div class="ruler"><div class="wk">${esc(wk)}</div><div class="ax">${hrs.map(x => `<span class="hr${x.m - a0 < 15 ? " l" : b1 - x.m < 15 ? " r" : ""}" style="left:${pc(x.m)}">${esc(x.text)}${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</span>`).join("")}</div></div>`;
+  let h = `<div class="gridwrap"><div class="tt" style="--w:${+(len * 1.8).toFixed(1)}px">`;
   for (let d = 0; d < ND; d++) {
     if (v.only != null && d !== v.only) continue;   /* a view on a date: that day's row only */
-    const [wk, dn] = weekDay(DAYS[d]); let inner = "";
-    const codes = v.codes ? v.codes[d] : null;
-    if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
-      if (BREAK[ch] || ch === "." || ch === "A") inner += `<div class="bk ${ch === "." ? "none" : ch === "A" ? "slot" : ""}${q === p && NP > 18 ? " v" : ""}" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"><span>${esc(BREAK[ch] || "")}</span></div>`; p = q + 1; }
+    const [wk, dn] = weekDay(DAYS[d]); let inner = lines;
+    if (v.only != null) h += ruler(""); else if (d % PER_WEEK === 0) h += ruler(WEEKS > 1 && wk ? `${wk.toUpperCase()} WEEK` : "");   /* an hour row above each week */
+    for (const x of bandsOf(v, d)) if (x.b > a0 && x.a < b1) inner += `<div class="bk${x.b - x.a < 40 ? " v" : ""}" style="left:${pc(x.a)};width:${wd(x.a, x.b)}"><span>${esc(x.name)}</span></div>`;
     for (const c of v.cells.filter(c => c.d === d)) {
-      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam || c.staff ? [] : c.ext ? D.ext : pal(c.color);   /* an exam takes its colours from .cell.exam */
-      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.staff ? " staff" + (c.after ? " cut-r" : "") + (c.before ? " cut-l" : "") : ""}"${c.exam || c.staff ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px)${c.exam || c.staff ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
+      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : pal(c.color);   /* an exam takes its colours from .cell.exam */
+      inner += `<div class="cell${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}${c.staff ? " staff" + (c.after ? " cut-r" : "") + (c.before ? " cut-l" : "") : ""}${c.b - c.a < 40 ? " s" : ""}"${c.exam || c.staff ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:${pc(c.a)};width:calc(${wd(c.a, c.b)} - 2px);top:calc(${+(i / n * 100).toFixed(3)}% + 2px);height:calc(${+(100 / n).toFixed(3)}% - 4px)${c.exam || c.staff ? "" : `;--t:#${t};--a:#${a}`}" title="${esc((c.staff ? [c.title, c.time, ...c.lines] : [c.title, ...c.lines, c.when || when(c)]).join("\n"))}"><span class="t"><span class="tf">${esc(cellTime(c))}</span><span class="ts">${esc(cellStart(c))}</span></span><b>${esc(c.title)}</b>${c.lines.length ? `<span class="m">${esc(c.lines.join(" · "))}</span>` : ""}</div>`;
     }
-    h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d && v.only == null ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
+    h += `<div class="row"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track" style="--h:${most[d] > 1 ? 48 * most[d] : 62}px">${inner}</div></div>`;
   }
   return h + "</div></div>";
 }
 function viewHTML(v, extra = "") {
-  const stats = v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("");
-  const leg = v.legend.map(e => { if (e.staff) return `<div><i class="sw staff"></i><span>${esc(e.text)}</span></div>`; const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}</span></div>`; }).join("");
-  return `<div class="card"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div><div class="stats">${stats}</div></div>
+  const stats = COMMITTEE && v.stats.length ? `<div class="stats">${v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("")}</div>` : "";
+  const leg = v.legend.map(e => { if (e.staff) return `<div><i class="sw staff"></i><span>${esc(e.text)}</span></div>`; const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}${COMMITTEE && e.count ? esc(" · " + e.count) : ""}</span></div>`; }).join("");
+  return `<div class="card"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div>${stats}</div>
     <div class="tools">${pdfLink(v)}<button data-act="print">Print</button><button data-act="csv">Download CSV</button>${MODE === "personal" ? "" : `<button data-act="link">Copy link</button>`}${extra}</div>
     ${v.onLine ? `<p class="onday">${esc(v.onLine)}</p>` : ""}
     ${v.noday ? `<div class="empty"><b>Not a school day.</b><br>${esc(v.noday)}</div>` : v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}
     <div class="legend"><h3>${esc(v.lt)}</h3>${leg}</div>
-    <div class="note">Times are period start times. Grey columns are breaks; pale yellow is an after-school slot, used only when needed. Click a lesson for every group, teacher and room in it.</div></div>`;
+    <div class="note">Striped bands are breaks. Click a lesson for every group, teacher and room in it.</div></div>`;
 }
 
 function pdfLink(v) {
@@ -420,7 +457,7 @@ function lessonMatches(x, f) {
   if (x.p + x.n - 1 < a || x.p > b) return false;
   if (f.level && x.level !== f.level) return false; if (f.dept && deptOf(x.subject) !== f.dept) return false; if (f.subject && x.subject !== f.subject) return false; if (f.teacher && !x.teachers.includes(f.teacher)) return false;
   if (f.room && x.room !== f.room && !singles(x.room).includes(f.room)) return false; if (f.cls && !x.classes.includes(f.cls)) return false; if (f.block && x.block !== f.block) return false;
-  if (f.group && x.group !== f.group) return false; if (f.ext && !x.ext) return false;
+  if (f.group && x.group !== f.group) return false; if (COMMITTEE && f.ext && !x.ext) return false;
   if (f.q) { const s = [DAYS[x.d], x.level, x.block, x.classes.join(" "), x.subject, short(x.subject), x.group, x.teachers.join(" "), tshort(x.teachers), x.room].join(" ").toLowerCase(); if (!f.q.toLowerCase().split(/\s+/).every(w => s.includes(w))) return false; }
   return true;
 }
@@ -444,7 +481,7 @@ function renderLessons() {
     <label>Room<select data-f="room">${opt([...busyRooms].sort().map(r => [r, r]), f.room)}</select></label>
     ${blocks.length ? `<label>Band<select data-f="block">${opt(blocks.map(b => [b, b]), f.block)}</select></label>` : ""}
     ${f.group ? `<label>Group<select data-f="group">${opt([[f.group, f.group]], f.group)}</select></label>` : ""}
-    <label class="chk"><input type="checkbox" data-f="ext" ${f.ext ? "checked" : ""}> After school only</label>
+    ${COMMITTEE ? `<label class="chk"><input type="checkbox" data-f="ext" ${f.ext ? "checked" : ""}> After school only</label>` : ""}
     <button class="btn" data-act="clear">Clear</button><button class="btn" data-act="lcsv">Download CSV</button></div>
     <div class="lsw">${LVIEWS.map(([k, t]) => `<button class="${S.lview === k ? "on" : ""}" data-lview="${k}">${t}</button>`).join("")}</div><div id="ltab"></div></div>`;
   drawLessons(); lessonsHash();
@@ -466,7 +503,7 @@ function byLevel(cls, one, wrap) {   // under a heading for each level, in the s
 function drawLessonGrids() {
   const { active, hit, cls, count } = lessonClasses();
   const one = c => { const v = classView(c.name), ids = hit.get(c.name); if (active) v.cells.forEach(k => { k.dim = !ids.has(k.id); });
-    return `<section class="lcls"><h2><a tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}">Class ${esc(c.name)}</a><small>${active ? `${ids.size} lesson time${ids.size === 1 ? "" : "s"} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></h2>${gridHTML(v)}</section>`; };
+    return `<section class="lcls"><h2><a tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}">Class ${esc(c.name)}</a><small>${active ? `${ids.size} lesson time${ids.size === 1 ? "" : "s"} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></h2>${v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}</section>`; };
   $("#ltab").innerHTML = count + byLevel(cls, one);
 }
 /* One page: every class at once, each a small timetable of blocks; a click opens the class */
@@ -477,7 +514,7 @@ function drawLessonPage() {
       if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
         if (BREAK[ch] || ch === ".") inner += `<i class="b" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"></i>`; p = q + 1; }
       const on = k => !active || ids.has(k.id);
-      for (const k of v.cells.filter(k => k.d === d).sort((a, b) => on(a) - on(b))) { const [, a] = k.ext ? D.ext : pal(k.color);   // a match is drawn last, over a lesson beside it
+      for (const k of v.cells.filter(k => k.d === d).sort((a, b) => on(a) - on(b))) { const [, a] = pal(k.color);   // a match is drawn last, over a lesson beside it
         inner += `<i${on(k) ? "" : ` class="dim"`} style="left:${k.p / NP * 100}%;width:calc(${k.n / NP * 100}% - 1px)${on(k) ? `;background:#${a}` : ""}" title="${esc(`${k.title} · ${when(k)}`)}"></i>`; }
       h += `<div class="mrow${WEEKS > 1 && d % PER_WEEK === 0 && d ? " wk" : ""}">${inner}</div>`; }
     return `<a class="mcard" tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}"><span class="mhead"><b>${esc(c.name)}</b><small>${active ? `${ids.size} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></span>${h}</a>`; };
@@ -492,8 +529,8 @@ function drawLessonTable() {
   const rows = filteredLessons(), lim = S.showAll ? rows.length : Math.min(rows.length, 400), lc = new Set(rows.map(x => x.id)).size;
   const link = (t, k, v) => `<a data-go="${t}" data-key="${esc(k)}">${esc(v)}</a>`;
   $("#ltab").innerHTML = `<p class="count">${rows.length} group lessons (${lc} lesson times)${rows.length > lim ? ` · showing ${lim} <button class="btn" data-act="all">Show all</button>` : ""}</p>
-    <div class="tablebox"><table class="lt"><thead><tr>${LCOLS.map(([k, t]) => `<th data-sort="${k}">${t}${S.sort[0] === k ? (S.sort[1] > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>
-    ${rows.slice(0, lim).map(x => { const [t, a] = x.ext ? D.ext : pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td><td>${x.n}</td><td>${esc(x.level)}</td>
+    <div class="tablebox"><table class="lt"><thead><tr>${LCOLS.filter(([k]) => COMMITTEE || k !== "n").map(([k, t]) => `<th data-sort="${k}">${t}${S.sort[0] === k ? (S.sort[1] > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>
+    ${rows.slice(0, lim).map(x => { const [t, a] = pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${COMMITTEE && x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td>${COMMITTEE ? `<td>${x.n}</td>` : ""}<td>${esc(x.level)}</td>
       <td>${x.classes.map(c => link("classes", c, c)).join(", ")}</td><td><i class="sw" style="--t:#${t};--a:#${a}"></i>${esc(x.subject)}</td><td>${esc(x.group)}${x.block ? `<br><small style="color:var(--muted)">${esc(x.block)}</small>` : ""}</td>
       <td>${x.teachers.map(tt => link("teachers", tt, tt)).join(", ")}</td><td>${x.room ? link("rooms", x.room, x.room) : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
@@ -628,7 +665,7 @@ function myExams() {
 function lessonDialog(id) {
   const xs = lessonRows.get(id); if (!xs) return; const x0 = xs[0];
   const has = k => TABS.some(t => t[0] === k), go = (tab, k, ok = true) => ok && has(tab) ? `<a data-go="${tab}" data-key="${esc(k)}">${esc(k)}</a>` : esc(k);   /* a name is a link only to a tab this page has; staff mode links only the viewer's own name */
-  $("#dlgT").innerHTML = `<b style="font-size:16px">${esc(x0.block || short(x0.subject))}</b><div style="color:var(--sub);font-size:13px">${esc(when(x0))} · ${x0.n} periods${x0.ext ? " · after school" : ""}</div>`;
+  $("#dlgT").innerHTML = `<b style="font-size:16px">${esc(x0.block || short(x0.subject))}</b><div style="color:var(--sub);font-size:13px">${esc(when(x0))}${COMMITTEE ? ` · ${x0.n} periods` : ""}</div>`;
   $("#dlgB").innerHTML = `<table>${xs.map(x => `<tr><td><b>${esc(x.subject)}</b><br><small style="color:var(--muted)">${esc(x.group)}</small></td><td>${x.classes.map(c => go("classes", c)).join(", ")}</td>
     <td>${x.teachers.map(t => go("teachers", t, MODE !== "staff" || t === APP.me)).join("<br>")}</td><td>${x.room ? go("rooms", x.room) : "-"}${x.rain ? `<br><small>rain: ${esc(x.rain)}</small>` : ""}</td>
     <td>${x.group !== ENTIRE && has("lessons") ? `<a data-go="lessons" data-group="${esc(x.group)}">all lessons</a>` : ""}</td></tr>`).join("")}</table>`;
@@ -654,9 +691,9 @@ function search(q) {
 }
 function pick(e) { $("#results").classList.remove("on"); $("#q").value = ""; if (e.f) show("lessons", null, { filters: e.f }); else show(e.t, e.k); }
 function csvDownload(rows, name) {
-  const head = ["Day", "Start", "End", "Periods", "Level", "Band", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"];
+  const head = ["Day", "Start", "End", ...(COMMITTEE ? ["Periods"] : []), "Level", "Band", "Classes", "Subject", "Group", "Teachers", "Room", ...(COMMITTEE ? ["After school"] : []), "Rain room"];
   const q = v => /[",\n]/.test(v = String(v ?? "")) ? `"${v.replace(/"/g, '""')}"` : v;
-  const body = rows.map(x => [DAYS[x.d], time(x.p)[0], time(x.p + x.n - 1)[1], x.n, x.level, x.block, x.classes.join(", "), x.subject, x.group, x.teachers.join(", "), x.room, x.ext ? "yes" : "", x.rain].map(q).join(","));
+  const body = rows.map(x => [DAYS[x.d], time(x.p)[0], time(x.p + x.n - 1)[1], ...(COMMITTEE ? [x.n] : []), x.level, x.block, x.classes.join(", "), x.subject, x.group, x.teachers.join(", "), x.room, ...(COMMITTEE ? [x.ext ? "yes" : ""] : []), x.rain].map(q).join(","));
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + [head.join(","), ...body].join("\r\n")], { type: "text/csv" })); a.download = name.replace(/[\\/:*?"<>|]+/g, "-") + ".csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 document.addEventListener("click", e => {
@@ -707,7 +744,7 @@ function showPersonal() {
 function route() {
   if (MODE === "personal") return showPersonal();
   const h = decodeURIComponent(location.hash.slice(1));
-  if (h.startsWith("lessons")) { const f = {}; S.lview = "grids"; /* a link with no view named opens on Class grids */ (location.hash.split("?")[1] || "").split("&").filter(Boolean).forEach(kv => { const [k, v] = kv.split("="); if (k === "view") { if (LVIEWS.some(x => x[0] === v)) S.lview = v; return; } f[k] = k === "ext" ? true : decodeURIComponent(v || ""); }); return show("lessons", null, { filters: f }); }
+  if (h.startsWith("lessons")) { const f = {}; S.lview = "grids"; /* a link with no view named opens on Class grids */ (location.hash.split("?")[1] || "").split("&").filter(Boolean).forEach(kv => { const [k, v] = kv.split("="); if (k === "view") { if (LVIEWS.some(x => x[0] === v)) S.lview = v; return; } if (k === "ext" && !COMMITTEE) return; f[k] = k === "ext" ? true : decodeURIComponent(v || ""); }); return show("lessons", null, { filters: f }); }
   if (h === "free" || h === "checks" || h === "exams") return show(h, null);
   if (h.startsWith("build/")) { const [, c, g] = location.hash.slice(1).split("/"); return show("students", "__build", { build: { cls: decodeURIComponent(c || ""), groups: (g || "").split(",").map(decodeURIComponent) } }); }
   const i = h.indexOf("/"); if (i > 0) { const t = h.slice(0, i), k = h.slice(i + 1); const ok = { classes: cIx, teachers: tIx, rooms: rIx, students: sIx }[t]; if (ok && ok.has(k)) return show(t, k); }
