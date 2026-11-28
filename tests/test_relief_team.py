@@ -1625,7 +1625,7 @@ import access, history as H  # noqa: E402
 from relief import files as RF  # noqa: E402
 # who plans and who is on the team: the accounts. Grace is a school leader (relief.plan); Mr Team Lee has the Relief team extra
 AP.update(lambda d: d["people"].update({GRACE: dict(group="leader"), TEAMER: dict(extras=dict(relief=True, exams=None, admin=False))}))
-TEAM_ONLY = "Only the relief team can open What's in."
+TEAM_ONLY = "Only the relief team can open this."
 NOT_YOURS = "This absence is not yours to open."
 GONE_ABS = "That absence is not there any more."
 SIGN_IN = "Please sign in again."
@@ -1672,6 +1672,19 @@ def rt(f):
 
 ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
        "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty", "told", "linked", "out", "goes_at", "sent_out", "asked_after", "planned_by", "away"}
+
+class app_logged:
+    """the records the app's logger gets in a block"""
+    def __enter__(s):
+        s.got = []
+        class Keep(logging.Handler):
+            def emit(h, rec): s.got.append(rec)
+        s.keep, s.level, s.propagate = Keep(), A.app.logger.level, A.app.logger.propagate
+        s.handlers = A.app.logger.handlers[:]                                        # taken before this block's own handler is added
+        A.app.logger.setLevel(logging.ERROR); A.app.logger.propagate = False         # nothing reaches the screen or a root handler
+        A.app.logger.handlers[:] = [s.keep]
+        return s.got
+    def __exit__(s, *a): A.app.logger.handlers[:] = s.handlers; A.app.logger.setLevel(s.level); A.app.logger.propagate = s.propagate
 
 @rt
 def today_lists_covers_in_time_order_with_counts_and_no_reason():
@@ -2069,6 +2082,42 @@ def whats_in_counts_covers_and_marks_the_nudge():
     with at("2026-10-15T15:00:00+08:00"): assert got()[k][1] is False, "acknowledged"
     AB.cancel(i, "Better", GRACE)
     with at("2026-10-12T15:00:00+08:00"): assert got()[i] == (dict(total=0, approved=0, waiting=0, open=0), False), "cancelled"
+
+@rt
+def whats_in_lists_todays_relief_teachers_who_have_not_acknowledged():
+    fresh(); team = staff(TEAMER)
+    i = absent()["id"]                                                         # Tue 13 Oct, as the other tests' absence
+    un = lambda: {x["id"]: x["unacked"] for x in ok(team.get("/api/relief/absences"))["absences"]}[i]
+    with at("2026-10-13T07:00:00+08:00"):
+        assert un() == [], "nobody approved"
+        CV.change(i, K5, SAM, TEAMER, PUB, ST); assert un() == [], "approved, not sent out"
+        CV.send_out(i, K5, SAM, TEAMER, PUB, ST)
+        p5 = [x for x in AB.load(i)["lessons"] if x["key"] == K5][0]
+        assert un() == [dict(who=SAM, p=p5["p"], n=p5["n"], started=False)], "as soon as it reaches them"
+    with at("2026-10-12T10:00:00+08:00"): assert un() == [], "the day before: not a relief of today"
+    with at("2026-10-13T14:55:00+08:00"): assert un()[0]["started"] is True, "its lesson has started: still listed"
+    with at("2026-10-13T07:00:00+08:00"):
+        CV.acknowledge(i, K5, SAM); assert un() == [], "acknowledged"
+    with at("2026-10-14T07:00:00+08:00"): assert un() == [], "the day is over"
+
+@rt
+def unacked_lists_each_part_of_a_split_lesson_and_reads_cover_by_cover():
+    fresh(); team = staff(TEAMER)
+    un = lambda i: {x["id"]: x["unacked"] for x in ok(team.get("/api/relief/absences"))["absences"]}[i]
+    i = absent()["id"]
+    with at("2026-10-13T07:00:00+08:00"):
+        CV.split(i, K2, 3, TEAMER)
+        for part, who in ((1, FLEX), (0, SAM)):
+            CV.change(i, f"{K2}#{part}", who, TEAMER, PUB, ST); CV.send_out(i, f"{K2}#{part}", who, TEAMER, PUB, ST)
+        parts = [x for x in AB.load(i)["lessons"] if x["key"] == K2][0]["parts"]
+        assert un(i) == [dict(who=w, p=c["p"], n=c["n"], started=False) for w, c in sorted(((w, parts[j]) for j, w in ((0, SAM), (1, FLEX))), key=lambda t: t[1]["p"])], un(i)
+        assert len(un(i)) == 2 and un(i)[0]["p"] < un(i)[1]["p"], "each part with its own p and n, in period order"
+        CV.change(i, K5, MAYA, TEAMER, PUB, ST); CV.send_out(i, K5, MAYA, TEAMER, PUB, ST)
+        r = AB.load(i); [x for x in r["lessons"] if x["key"] == K2][0]["parts"][0]["sent_out"]["at"] = "not a time"; AB._save(r)   # a part changed by hand: it cannot be read
+        with app_logged() as lines: got = un(i)
+        assert [u["who"] for u in got] == [FLEX, MAYA], got
+        assert len(lines) == 1 and "ValueError" in lines[0].getMessage() and "not a time" not in lines[0].getMessage() and SAM not in lines[0].getMessage(), [g.getMessage() for g in lines]
+        AB.cancel(i, "Better", EVE); assert un(i) == [], "a cancelled absence lists none"
 
 @rt
 def an_absence_for_today_gets_its_picks_at_once():
@@ -2487,6 +2536,105 @@ def after_the_cut_off_the_next_day_says_how_many_of_today_are_still_to_arrange()
         with at("2026-10-13T14:30:00+08:00"): assert left() == 0, "its lesson has started"
         with at("2026-10-13T13:50:00+08:00"): assert left("?date=2026-10-14") == 0, "before the cut-off"
     finally: store.published = old
+
+from relief import calendar as RC  # noqa: E402
+
+@rt
+def ahead_lists_the_days_after_today():
+    fresh(); team = staff(TEAMER)
+    get = lambda q="": ok(team.get("/api/relief/ahead" + q))
+    with at("2026-10-12T09:00:00+08:00"):                                        # Mon 12 Oct
+        i = absent()["id"]                                                     # Tue 13
+        k = absent(teacher=MAYA, dates=["2026-10-16"])["id"]                   # Fri 16
+        j = get()
+        assert (j["span"], j["until"]) == ("weeks", "2026-10-26") and [d["date"] for d in j["days"]] == ["2026-10-13", "2026-10-16"], j
+        tue = j["days"][0]
+        assert tue["away"] == 1 and all(r["id"] == i for r in tue["rows"]) and tue["counts"]["need"] == len(tue["rows"]), tue
+        assert [r["p"] for r in tue["rows"]] == sorted(r["p"] for r in tue["rows"])
+        assert all(r["warn"] is None and r["nobody"] is False and r["stale"] is False for d in j["days"] for r in d["rows"]), "who is free is not worked out"
+        today_rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
+        assert [(r["ckey"], r["state"], r["pick"], r["out"]) for r in tue["rows"]] == [(r["ckey"], r["state"], r["pick"], r["out"]) for r in today_rows], "as Today words them"
+        CV.split(i, K2, 3, TEAMER)
+        assert len(get()["days"][0]["rows"]) == len(tue["rows"]) + 1, "a split lesson: a row a part"
+        AB.cancel(k, "Better", MAYA); assert [d["date"] for d in get()["days"]] == ["2026-10-13"], "a cancelled absence is left out"
+        assert get("?span=nonsense")["span"] == "weeks"
+    with at("2026-10-13T09:00:00+08:00"): assert get()["days"] == [], "the absence of today (Tue 13) is never in the list"
+
+@rt
+def ahead_this_term_reaches_the_end_of_the_term_and_over_a_holiday_the_next():
+    fresh(); team = staff(TEAMER)
+    term = RC.term_of(ST["calendar"], D13)
+    with at("2026-10-12T09:00:00+08:00"):
+        j = ok(team.get("/api/relief/ahead?span=term")); assert (j["span"], j["until"]) == ("term", str(term["end"])[:10]), j
+    after = (datetime.date.fromisoformat(str(term["end"])[:10]) + datetime.timedelta(days=1)).isoformat()
+    with at(after + "T09:00:00+08:00"):
+        j = ok(team.get("/api/relief/ahead?span=term"))
+        assert j["until"] == (datetime.date.fromisoformat(after) + datetime.timedelta(days=14)).isoformat(), "no later term: as weeks"
+    nxt = dict(name="Term 1", start="2027-01-04", end="2027-03-12", starts_as="Odd")
+    with saved_settings(calendar=dict(CAL, terms=CAL["terms"] + [nxt])), at(after + "T09:00:00+08:00"):
+        assert ok(team.get("/api/relief/ahead?span=term"))["until"] == "2027-03-12", "between terms: the end of the next term"
+
+@rt
+def ahead_is_the_relief_teams():
+    fresh()
+    for name in (SAM, GRACE): no(staff(name).get("/api/relief/ahead"), 403, TEAM_ONLY)
+
+@rt
+def ahead_leaves_out_today_while_it_lists_the_days_to_come():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"): i = absent(dates=["2026-10-13", "2026-10-16"])["id"]
+    with at("2026-10-13T09:00:00+08:00"):
+        j = ok(team.get("/api/relief/ahead")); assert [d["date"] for d in j["days"]] == ["2026-10-16"], j["days"]
+
+@rt
+def ahead_includes_the_last_day_and_not_the_day_after():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"): absent(dates=["2026-10-30"])
+    with at("2026-10-16T09:00:00+08:00"):                                        # Fri 16 + 14 = Fri 30
+        j = ok(team.get("/api/relief/ahead")); assert (j["until"], [d["date"] for d in j["days"]]) == ("2026-10-30", ["2026-10-30"]), j
+    with at("2026-10-15T09:00:00+08:00"):                                        # Thu 15 + 14 = Thu 29: Fri 30 is the day after
+        j = ok(team.get("/api/relief/ahead")); assert (j["until"], j["days"]) == ("2026-10-29", []), j
+
+@rt
+def ahead_passes_over_a_record_it_cannot_read():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"):
+        i = absent()["id"]; k = absent(teacher=MAYA, dates=["2026-10-16"])["id"]
+        n = len(ok(team.get("/api/relief/ahead"))["days"][0]["rows"])
+        dates = lambda j: [d["date"] for d in j["days"]]
+        with app_logged() as got:
+            r = AB.load(k); r["lessons"].append("changed by hand"); AB._save(r)
+            j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n, "a lesson that is not a dict"
+            assert len(got) == 1 and "AttributeError" in got[0].getMessage() and MAYA not in got[0].getMessage() and "changed by hand" not in got[0].getMessage(), [g.getMessage() for g in got]
+        r = AB.load(k); r["lessons"].pop(); AB._save(r)
+        with app_logged() as got:
+            r = AB.load(i); c = CV.covers(r["lessons"][0])[0]; c.pop("p"); AB._save(r)
+            j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13", "2026-10-16"] and len(j["days"][0]["rows"]) == n - 1, "a cover with no p"
+            assert len(got) == 1 and EVE not in got[0].getMessage(), [g.getMessage() for g in got]
+            r = AB.load(k)
+            for x in r["lessons"]: CV.covers(x)[0].pop("p")
+            AB._save(r)
+            got.clear(); j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13"], "a day whose only cover cannot be read is left out"
+            assert len(got) == 1, [g.getMessage() for g in got]
+            r = AB.load(k); r["lessons"] = 5; AB._save(r)
+            got.clear(); j = ok(team.get("/api/relief/ahead")); assert dates(j) == ["2026-10-13"], "lessons that are not a list"
+            assert len(got) == 1 and "TypeError" in got[0].getMessage() and MAYA not in got[0].getMessage(), [g.getMessage() for g in got]
+        with open(os.path.join(ADIR, "bad.json"), "w") as f: f.write("[1, 2]")      # a record file that is not a dict
+        with app_logged() as got:
+            assert dates(ok(team.get("/api/relief/ahead"))) == ["2026-10-13"]
+            assert ok(team.get("/api/relief/ahead?span=term"))["span"] == "term"
+            assert len(got) == 2 and all(g.getMessage().endswith("(KeyError, TypeError)") for g in got), [g.getMessage() for g in got]   # one line per request, from the two records still unreadable: the file that is not a record is skipped by the store and adds none
+
+@rt
+def ahead_gives_each_part_of_a_split_lesson_its_own_row():
+    fresh(); team = staff(TEAMER)
+    with at("2026-10-12T09:00:00+08:00"):
+        i = absent()["id"]; CV.split(i, K2, 3, TEAMER)
+        rows = [r for r in ok(team.get("/api/relief/ahead"))["days"][0]["rows"] if r["split"]]
+        assert [(r["p"], r["n"]) for r in rows] == [(2, 1), (3, 2)] and rows[0]["ckey"] != rows[1]["ckey"], rows
+        CV.change(i, rows[0]["ckey"], SAM, TEAMER, PUB, ST)
+        a, b = [r for r in ok(team.get("/api/relief/ahead"))["days"][0]["rows"] if r["split"]]
+        assert a["state"] != b["state"] and a["pick"] is not None and a["state"] in ("approved", "waiting") and b["pick"] is None, (a, b)
 
 assert REAL == [], "a test reached the real call"
 

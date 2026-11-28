@@ -1,6 +1,6 @@
 """The relief request routes (stage 2): a teacher asks for relief and sets work for each lesson; management and the
 relief team plan relief for a colleague and choose relief teachers; the absent teacher acknowledges, sets work or
-cancels; the relief team sees What's in. Registered from app.py after init(has=..., me=..., need=...).
+cancels; the relief team sees All Relief Requests. Registered from app.py after init(has=..., me=..., need=...).
 
 Every route answers 401 {"error": "Please sign in again."} without a person signed in by name who has the relief right
 (app.py's need("relief"), as every other route of the app), 409 with NO_PUB when nothing is published, 403 {"error":
@@ -22,11 +22,11 @@ reason, reason_text, remarks, reporting_officer, lessons=[{key, needed, relief, 
 {text, link, files: [{id, name}], known: [the file ids the page started from]} (a missing or other body is refused,
 never read as "no work"); POST …/not-needed and …/cancel take {why}; PUT …/relief takes {relief: a name, or
 null to take the choice off}; POST …/files takes one file in the multipart field "file"; POST /api/relief/absences/seen
-takes {at}: the as_of the What's in list answered (now when left out). Periods are 0-based, as in the records.
+takes {at}: the as_of the All Relief Requests list answered (now when left out). Periods are 0-based, as in the records.
 
 Stage 3 (relief/cover.py, pick.py, fill.py). A cover is a lesson, or one part of a split lesson, by its cover key (the
 lesson's key, or key#i for part i); every list of covers is sent in time order (by p). The relief team (relief.team,
-asked inside with TEAM_ONLY before the absence is opened): Today (GET /today?date=), Approve (POST …/covers/<ckey>/approve
+asked inside with TEAM_ONLY before the absence is opened): Today's Relief Assignments (GET /today?date=), Approve (POST …/covers/<ckey>/approve
 {who: the pick the page showed}), Approve all waiting (POST /today/approve-all {date, covers: [{id, ckey, who}], the
 waiting rows the page showed}), each refused or skipped with cover.PICK_CHANGED once that pick is no longer who; Send out
 (POST …/covers/<ckey>/send-out {who, approved_at: the relief and the approval the page showed}) and Send out all approved
@@ -47,7 +47,7 @@ force, always after the save and the absences lock. Each save here is one histor
 Stage 4: each save, after its history entry, asks relief.tell (_tell_soon) what there is to say on Telegram; nothing is sent
 from a route, and a message that cannot be worked out never fails the save. What a person may also do on Telegram
 (relief/bot.py) has its history entry's words and what follows the save in STEPS, the same for both; so has an absence asked for there
-(relief/asking.py) in created. via ("telegram") in a record: it was asked for there (What's in alone shows it)."""
+(relief/asking.py) in created. via ("telegram") in a record: it was asked for there (All Relief Requests alone shows it)."""
 import csv, datetime, io, os, threading
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -78,7 +78,7 @@ NO_PUB = "Publish the timetable first: relief reads the teachers from it."
 SIGN_IN = "Please sign in again."
 PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
 CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
-TEAM_ONLY = "Only the relief team can open What's in."
+TEAM_ONLY = "Only the relief team can open this."
 NOT_YOURS = "This absence is not yours to open."
 GONE = "That absence is not there any more."
 NO_FILE = "That file is not there any more."
@@ -220,7 +220,7 @@ def _out(r, pub, me, cal=None, links=None):
     relief.team) sees a relief teacher's name only once that teacher has acknowledged it (relief and relief_by None before), and no pick,
     request to change or history, on the lesson and on each part (Decision 4). Everyone else sees the relief as it is, and
     planned: the planner's own choice, waiting for the relief team or still their own approved choice (_planned, None
-    otherwise), and may_choose: whether me may choose again for the lesson on the Plan page (absences.may_choose_again)."""
+    otherwise), and may_choose: whether me may choose again for the lesson on the Relief Planning tab (absences.may_choose_again)."""
     cal = cal if cal is not None else _cal(pub)
     v = _absences.matches_now(r, pub, cal)
     v.pop("gone", None)
@@ -541,9 +541,10 @@ def _seen_at(name):
 @need("relief")
 def whats_in():
     """every absence, newest first; new = submitted, or given a lesson (a backup's changed_at), at or after the time this
-    person last marked What's in as seen (never: all new); cover = dict(total, approved, waiting, open): its covers that
+    person last marked All Relief Requests as seen (never: all new); cover = dict(total, approved, waiting, open): its covers that
     need relief, each part of a split lesson one, less the lessons an exam or event stops (approved: approved, acknowledged
-    or asked to change); nudge: planned by
+    or asked to change); unacked: today's reliefs that have reached their teacher and are neither acknowledged nor asked to
+    change, dict(who, p, n, started) in period order; nudge: planned by
     someone else, not acknowledged, not cancelled, not over, and now past times.remind_at on the school day before its
     first lesson (fill.due_at). Reads only: the page posts /seen after showing the list."""
     pub, me, err = _gate("relief.team", TEAM_ONLY)
@@ -551,13 +552,15 @@ def whats_in():
     since, as_of = _seen_at(me), _clock().isoformat()
     settings = _settings.load(pub)
     now, today = _fill._when(None), _lessons.today()
-    out, links = [], _links_or_none(pub, settings["calendar"])
+    out, links, bad = [], _links_or_none(pub, settings["calendar"]), set()
     for r in _absences.all_records():
         v = _out(r, pub, me, settings["calendar"])                      # _links keeps one Links for the request
         at, changed = _time(v.get("at")), _time(v.get("changed_at"))
         v["new"] = since is None or at is None or at >= since or (changed is not None and changed >= since)
         v["cover"], v["nudge"] = _cover_counts(r, links), _nudge(r, pub, settings, now, today)
+        v["unacked"] = _unacked(r, pub, settings, links, now, today, bad)
         out.append(v)
+    if bad: current_app.logger.error("relief: today's reliefs not yet acknowledged could not all be worked out (%s)", ", ".join(sorted(bad)))
     return jsonify(absences=out, new_since=since.isoformat() if since else None, as_of=as_of)
 
 
@@ -573,10 +576,28 @@ def _cover_counts(r, links=None):
     return n
 
 
+def _unacked(r, pub, settings, links, now, today, bad):
+    """the covers of r dated today (the school's date), needed, not stopped, approved and not acknowledged nor asked to change,
+    that have reached their teacher, as dict(who, p, n, started: its lesson has begun), in period order. A lesson or cover that
+    cannot be read is passed over on its own (the readable ones stay) and its error's kind is added to the set bad"""
+    out, day = [], today.isoformat()
+    for x in r.get("lessons") or []:
+        try:
+            if x.get("date") != day or _cover.stopped(links, x): continue
+            parts = _cover.covers(x)
+        except Exception as e: bad.add(type(e).__name__); continue
+        for c in parts:
+            try:
+                if _cover.state(r, x, c) != "approved" or not _cover.reached(r, x, c, now, settings, pub): continue
+                out.append(dict(who=c["relief"], p=int(c["p"]), n=int(c.get("n") or 1), started=_hours.starts(pub, x, c) <= now))
+            except Exception as e: bad.add(type(e).__name__)
+    return sorted(out, key=lambda u: (u["p"], u["n"]))
+
+
 @bp.post("/api/relief/absences/seen")
 @need("relief")
 def seen():
-    """records when this person last saw What's in: the as_of posted back, never later than now"""
+    """records when this person last saw All Relief Requests: the as_of posted back, never later than now"""
     pub, me, err = _gate("relief.team", TEAM_ONLY)
     if err: return err
     now, at = _clock(), _time(_body().get("at"))
@@ -780,7 +801,7 @@ def planned_csv():
     return Response("﻿" + buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-# ---- the relief team (relief stage 3): Today, approving, changing, splitting, Fill now
+# ---- the relief team (relief stage 3): Today's Relief Assignments, approving, changing, splitting, Fill now
 def _date_in(v):
     """a date sent in a body as YYYY-MM-DD; anything else is WRONG (never fromisoformat's own words)"""
     if not isinstance(v, str): raise ValueError(_absences.WRONG)
@@ -800,7 +821,7 @@ def _released(settings, pub, x, c, s, now):
     return ("sent" if goes is not None and _fill._when(now) >= goes else "held"), goes.isoformat() if goes else None, dict(by=so.get("by"), at=so.get("at"))
 
 
-def _row(pub, settings, records, r, x, c, i, links=None, now=None):
+def _row(pub, settings, records, r, x, c, i, links=None, now=None, light=False):
     """one cover as Today lists it. state "stopped" (stopped: why) for a lesson an approved exam or event stops: nothing is
     to be done for it, and its pick or relief (pick) is shown as it was; duty: why its teacher is not there when they are in
     school, on an exam duty or at an event (a backup's reason), else "". stale: its relief teacher (waiting or approved) is no longer free then; over_now: the
@@ -808,7 +829,8 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
     these, and OVER_ONLY for an open cover whose free people are all over a limit (the app picks none of them); change: a
     request to change, with its new pick (stale too when that person is no longer free); away: the relief teacher it was approved
     to, who is away then, while it is open or waiting again since (cover.was_away), else None; out, goes_at and sent_out (_released, at
-    now: absences._now() when None). One free_then for the cover gives them all; never the absence's reason. told and linked:
+    now: absences._now() when None). light: the row as it stands before who is free is worked out (stale, over_now, nobody False,
+    warn None: a term's list stays quick). One free_then for the cover gives them all; never the absence's reason. told and linked:
     today() puts them there"""
     s = _cover.state(r, x, c)
     ckey, p, n = _cover.cover_key(x, i), int(c["p"]), int(c.get("n") or 1)
@@ -832,6 +854,7 @@ def _row(pub, settings, records, r, x, c, i, links=None, now=None):
     if s == "cancelled": return row
     why = _cover.stopped(links, x)
     if why: return dict(row, state="stopped", stopped=why, out=None, goes_at=None, sent_out=None)
+    if light: return row
     try: got = _free.free_then(pub, settings, records, dict(x, key=ckey, p=p, n=n), r["teacher"], links=links)
     except ValueError: return row                # no longer a school day in the calendar: nothing to say
     free = {q["name"]: q for g in got["groups"] for q in g["people"]}
@@ -916,6 +939,17 @@ def _today_left(pub, records, links, hrs, date, now):
     return n
 
 
+def _counts(rows):
+    """dict(need, waiting, approved, unsent, held, acknowledged, change, nobody, open) of Today's rows: a cancelled or stopped row is
+    not counted; an approved relief counts as unsent, held or approved by its out"""
+    counts = dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0)
+    for v in rows:
+        if v["state"] in ("cancelled", "stopped"): continue
+        counts["need"] += 1; counts["nobody"] += v["nobody"]
+        counts[dict(unsent="unsent", held="held").get(v["out"], "approved") if v["state"] == "approved" else v["state"]] += 1
+    return counts
+
+
 @bp.get("/api/relief/today")
 @need("relief")
 def today():
@@ -947,13 +981,51 @@ def today():
                 who = c.get("relief")
                 rows.append(dict(row, told=_told(said, r, c, row), linked=isinstance(who, str) and who in reach, asked_after=_asked_after(r, date, hrs, cut)))
     rows.sort(key=lambda v: (v["p"], v["absent"], v["ckey"]))
-    counts = dict(need=0, waiting=0, approved=0, unsent=0, held=0, acknowledged=0, change=0, nobody=0, open=0)
-    for v in rows:
-        if v["state"] in ("cancelled", "stopped"): continue
-        counts["need"] += 1; counts["nobody"] += v["nobody"]
-        counts[dict(unsent="unsent", held="held").get(v["out"], "approved") if v["state"] == "approved" else v["state"]] += 1
+    counts = _counts(rows)
     hrs = dict(hrs, today_left=_today_left(pub, records, links, hrs, date, now))
     return jsonify(date=date, filling=filling, counts=counts, rows=rows, telegram=_connected(), hours=hrs)
+
+
+@bp.get("/api/relief/ahead")
+@need("relief")
+def ahead():
+    """the covers of every school day after today up to until (?span=weeks: today + 14 days, the default; ?span=term: the end of the
+    term today is in, else of the first term that starts later, else as weeks) -> dict(as_of, span, until, days=[dict(date,
+    away: how many different teachers are absent that day, not counting a row an exam or event stops, counts: as Today's, rows: one a cover of an absence not cancelled, _row light, in
+    (p, absent, ckey) order)]); a date with no row is left out. Who is free is not worked out, and told and linked are left empty; relief.team"""
+    pub, me, err = _gate(*TEAM)
+    if err: return err
+    settings, now = _settings.load(pub), _absences._now()
+    today_ = _lessons.today()
+    span = "term" if request.args.get("span") == "term" else "weeks"
+    until, cal = today_ + datetime.timedelta(days=14), settings["calendar"]
+    if span == "term" and isinstance(cal, dict):
+        try:
+            term = term_of(cal, today_) or min((t for t in cal.get("terms", []) if datetime.date.fromisoformat(str(t["start"])[:10]) > today_), key=lambda t: str(t["start"])[:10], default=None)
+            if term: until = datetime.date.fromisoformat(str(term["end"])[:10])
+        except (TypeError, ValueError, KeyError, AttributeError) as e: current_app.logger.error("relief: the end of the term could not be read (%s)", type(e).__name__)
+    first, last = today_.isoformat(), until.isoformat()
+    records = _absences.all_records()
+    links = _links_or_none(pub, cal if isinstance(cal, dict) else {})
+    by_day, bad = {}, set()
+    for r in records:
+        try:
+            if r.get("cancelled"): continue
+            for x in r.get("lessons") or []:
+                try:
+                    if not x.get("needed") or not isinstance(x.get("date"), str) or not first < x["date"] <= last: continue
+                    for i, c in enumerate(_cover.covers(x)):
+                        try: row = _row(pub, settings, records, r, x, c, i, links, now, light=True)
+                        except Exception as e: bad.add(type(e).__name__); continue
+                        by_day.setdefault(x["date"], []).append(row)         # a date is made only by a row
+                except Exception as e: bad.add(type(e).__name__)             # a record changed by hand: passed over, never the page's failure
+        except Exception as e: bad.add(type(e).__name__)
+    if bad: current_app.logger.error("relief: a lesson or record to come could not be read and was passed over (%s)", ", ".join(sorted(bad)))
+    days = []
+    for date in sorted(by_day):
+        rows = sorted(by_day[date], key=lambda v: (v["p"], v["absent"], v["ckey"]))
+        days.append(dict(date=date, away=len({v["absent"] for v in rows if v["state"] not in ("stopped", "cancelled")}), counts=_counts(rows), rows=rows))
+    return jsonify(as_of=_fill._when(now).isoformat(), span=span, until=last, days=days)
 
 
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/approve")

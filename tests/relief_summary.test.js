@@ -90,8 +90,8 @@ t("a late answer for another week is not shown", async () => {
   await p.give(4, week()); has(p, "43%");
 });
 t("a refusal is the server's sentence, with Try again", async () => {
-  const p = open(""); await p.give(0, refused("Only the relief team can open What's in."));
-  has(p, "Only the relief team can open What&#39;s in.", AGAIN); hasNot(p, LOADING, "undefined"); assert.strictEqual(p.title(), "Week of Mon 12 Oct");
+  const p = open(""); await p.give(0, refused("Only the relief team can open this."));
+  has(p, "Only the relief team can open this.", AGAIN); hasNot(p, LOADING, "undefined"); assert.strictEqual(p.title(), "Week of Mon 12 Oct");
   p.press("reload"); assert.deepStrictEqual(p.asked, [url(W12), url(W12)]); has(p, LOADING); hasNot(p, "Only the relief team", AGAIN);
   await p.give(1, refused("Could not reach the server.", 0)); has(p, "Could not reach the server.", AGAIN);
   p.press("before"); assert.strictEqual(p.asked[2], url(W5)); has(p, LOADING); hasNot(p, AGAIN, "Could not reach");

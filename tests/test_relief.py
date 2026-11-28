@@ -532,7 +532,7 @@ def the_relief_home_moves_the_lists_too():
         c = staff("Mr Darren Lim")
         assert AP.load()["migrated"] is False
         j = c.get("/api/relief/me").get_json()
-        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the What's in tab, on the first open
+        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the All Relief Requests tab, on the first open
         assert AP.load()["migrated"] is True and AP.record(AP.load(), "Mr Darren Lim")["extras"]["relief"] is True
         assert A.move_relief_lists() is None and c.get("/api/relief/me").get_json()["can_team"] is True   # once only
     _reset(); fresh()

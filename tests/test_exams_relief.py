@@ -495,7 +495,7 @@ from exams import make as MK  # noqa: E402
 
 CHLOE, HAFIZ = "Ms Chloe Tan", "Mr Hafiz Rahman"
 store.write_json(RS.PATH, dict(calendar=CAL, limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
-# and now on the relief team too: the Relief team extra (relief.team, for What's in)
+# and now on the relief team too: the Relief team extra (relief.team, for All Relief Requests)
 ACC.update(lambda d: d["people"][GRACE].update(extras=dict(relief=True, exams=None, admin=False)))
 DKEY = RL.key_of(M, 2, MON, "Odd Mon")      # Daniel's 4A Mathematics, periods 2-3 (08:00-08:40): 4A is not on a Sec 3 exam
 DUTY_KEY = ISO + " 07:50"
@@ -550,7 +550,7 @@ def approve_sends_backups():
         assert r["cancelled"] is None and r["acknowledged"] is None
         assert [(x["key"], x["needed"], x["relief"]) for x in r["lessons"]] == [(DKEY, True, None)], r["lessons"]
         j = ok(staff(GRACE).get("/api/relief/absences"))
-        assert r["id"] in [x["id"] for x in j["absences"]], "it shows in What's in"
+        assert r["id"] in [x["id"] for x in j["absences"]], "it shows in All Relief Requests"
         v = ok(c.get(f"/api/exams/{id}/view"))
         item = next(x for x in v["lessons"]["backup"] if x["key"] == DKEY)
         assert item["teacher"] == DANIEL and item["state"] == "sent" and item["relief"] is None, item
@@ -1021,7 +1021,7 @@ def an_absence_sent_before_approval_marks_its_stopped_lesson():
         x = ok(d.get("/api/relief/absences/" + j["id"]))["lessons"][0]
         assert x["stopped"] == why and x["needed"] is True, x
         mine = next(r for r in ok(g.get("/api/relief/absences"))["absences"] if r["id"] == j["id"])
-        assert mine["lessons"][0]["stopped"] == why, "What's in marks it too"
+        assert mine["lessons"][0]["stopped"] == why, "All Relief Requests marks it too"
         url = "/api/relief/absences/%s/lessons/%s/relief" % (j["id"], urllib.parse.quote(DKEY))
         r = g.put(url, json=dict(relief=CHLOE))
         assert r.status_code == 400 and r.get_json() == {"error": "This lesson is not happening: %s." % why}, r.get_data(as_text=True)
@@ -2122,6 +2122,39 @@ def a_new_teacher_in_charge_takes_the_events_backups():
         assert AB.load(b["id"])["cancelled"]["why"] == "Handled by the teacher in charge."
         ok(d.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=False)))
         assert [r["by"] for r in _backups(id)] == [DANIEL], "sent again by the new one"
+
+
+@t
+def stopped_lesson_is_not_unacknowledged_and_is_not_happening_ahead():
+    """a lesson an approved exam stops: never in unacked, even when its relief was approved, sent out and not acknowledged; a row of
+    the Planned Relief Assignments list with state "stopped" and its reason, out of that day's need and of away when it is the only row"""
+    _fresh(); _exam()
+    with published(PUB):
+        mine = LS.on_date(PUB, CAL, AISHA, MON)
+        stopped = [x for x in mine if "3A" in x["classes"]]
+        assert stopped
+        r = AB.new(_ask(AISHA, [dict(key=x["key"], needed=True) for x in stopped]), PUB, GRACE, "planned", may_choose=True, links=_links())
+        for x in r["lessons"]:
+            x["relief"], x["approved"] = BEN, dict(by=GRACE, at="2026-11-01T08:00:00+08:00")      # approved and (an old approval counts as) sent out, long ago
+        _put(r)
+        c, old = staff(GRACE), LS.today
+        def unacked():
+            LS.today = lambda: MON                                    # unacked reads the school's today: the exam day is today
+            try: j = ok(c.get("/api/relief/absences"))
+            finally: LS.today = old
+            return [u for a in j["absences"] if a["id"] == r["id"] for u in a["unacked"]]
+        def ahead():
+            j = ok(c.get("/api/relief/ahead?span=term"))
+            return next((d for d in j["days"] if d["date"] == ISO), None)
+        d = ahead()
+        assert d and [(v["state"], bool(v["stopped"])) for v in d["rows"]] == [("stopped", True)] * len(stopped), d
+        assert all(v["stopped"] == "3A is on " + EXAM for v in d["rows"]) and d["counts"]["need"] == 0 and d["away"] == 0, d
+        assert unacked() == [], "a lesson that does not happen is not waiting to be acknowledged"
+        _clear()                                                      # the exam withdrawn: the same record is now an ordinary one
+        assert len(unacked()) == len(stopped) and unacked()[0]["who"] == BEN
+        d = ahead()
+        assert [v["state"] for v in d["rows"]] == ["approved"] * len(stopped) and d["counts"]["need"] == len(stopped) and d["away"] == 1, d
+        AB.cancel(r["id"], "test", GRACE, team=True); _drop(r)
 
 
 _clear()

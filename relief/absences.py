@@ -361,7 +361,7 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
     later whose key is not in keep_keys goes (a lesson dated before today always stays: it is history and counts in relief's
     periods), add_lessons come in (as from_exams decides; a key it holds already is left), by and reason_text are brought up
     to date (None: as they are), acknowledged is cleared and changed_at stamped when a lesson came in (the person must look
-    again; What's in shows it new), and dates and periods follow the lessons. A lesson that goes with a relief or a history has
+    again; All Relief Requests shows it new), and dates and periods follow the lessons. A lesson that goes with a relief or a history has
     its cover ended first (relief.cover.clear, why) and is kept, without its work, in the record's gone list (gone: dict(at,
     why)), so its history is not lost. Cancelled (why) only when no lesson at all is left. today: the caller's (one clock).
     -> the record; {} when it is not there; a cancelled one as it is"""
@@ -536,12 +536,12 @@ def _started(pub, x, now):
 
 def _may_choose(r, x, by):
     """the planner may choose for lesson x: while nobody is approved for it, or on a planned absence while it is still by's own
-    choice (on a teacher's own absence, which took a head's choice over from a backup, the relief team changes it on Today)"""
+    choice (on a teacher's own absence, which took a head's choice over from a backup, the relief team changes it on Today's Relief Assignments)"""
     return _cover.state(r, x, x) in ("open", "waiting") or (r.get("how") == "planned" and _cover.planned_by(x) == by)
 
 
 def may_choose_again(r, x, me, pub) -> bool:
-    """me may choose (or choose again) the relief teacher of lesson x of record r on the Plan page: one lesson, not split,
+    """me may choose (or choose again) the relief teacher of lesson x of record r on the Relief Planning tab: one lesson, not split,
     needed, not started, and nobody approved for it yet or it is still me's own choice (choose)"""
     try:
         if r.get("cancelled") or x.get("parts") or not x.get("needed") or not _may_choose(r, x, me): return False
@@ -556,7 +556,7 @@ def choose(id, key, relief_name, by, pub, links=None):
     the choice is approved and sent out at once by the planner (cover.chose); on a teacher's own it is a pick waiting for the
     relief team, as before, with no approval, send out, acknowledgement or request to change left on it. Allowed while nobody
     is approved for the lesson, or on a planned absence while it is still by's own choice (cover.planned_by), else
-    APPROVED_ALREADY: it is changed on the team's Today page (choosing their own choice again changes
+    APPROVED_ALREADY: it is changed on the team's Today's Relief Assignments tab (choosing their own choice again changes
     nothing, so nobody is told twice); refused once the team has split the
     lesson (IS_SPLIT) and once its first period has begun (STARTED). Taking an approved choice off writes it down as dropped
     and the cover goes back to open, for the AI to pick and the team to approve. A lesson an approved exam or event stops
@@ -617,7 +617,7 @@ def cancel(id, why, by, *, team=False):
 
 def matches_now(record, pub, cal):
     """the record with each lesson marked changed when the teacher no longer has it on the published timetable; a lesson
-    dated before today is not read again (changed False): it is history, and What's in stays quick over a year of records"""
+    dated before today is not read again (changed False): it is history, and All Relief Requests stays quick over a year of records"""
     today, out = _lessons.today(), dict(record)
     out["lessons"] = [dict(x, changed=datetime.date.fromisoformat(x["date"]) >= today and not _lessons.still_there(pub, cal, record["teacher"], x))
                       for x in record["lessons"]]
