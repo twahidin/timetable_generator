@@ -27,14 +27,16 @@ kept:{absent}:{ckey}:{when} to the teacher who asked to change; ask:{absent}:{ck
 with the new pick, or two minutes after the request without one, and then askpick:… once when a pick (another than the ask
 carried) is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer, and officer:{id}:{at}
 to them of the absence's last change (changes[-1], at its at) once officer:{id} was sent or unsure, unless they made it;
-changed:{id}:{at} to the absent teacher, of the last change when someone else made it (its numbers of lessons added and no
-longer needed, and "acknowledge again" when it cleared the acknowledgement); notneeded:{id}:{key}:{at} to the absent teacher, of
+changed:{id}:{at} to the absent teacher, of the last change when someone else made it (its numbers of lessons needing relief
+added and of those no longer needed, and "acknowledge again" while she has not acknowledged and it, or a change since the last
+one she was told of, cleared the acknowledgement); notneeded:{id}:{key}:{at} to the absent teacher, of
 a lesson someone else (not the app, which marks one a co-teacher is there for) marked not needed, while it is not over;
-edited:{id}:{at}:{name}, to each of the team but the absent teacher, of the last change when the teacher made it today (the
-school's date) and it added or took away a lesson of today, in the team's window and made again in it as unlinked is; a
-relief teacher of a lesson a change drops hears gone, as of any cover that ends;
-cancelled:{id}:{name} to the team, the planner, the absent teacher, and the officer when told of the absence (officer sent or
-unsure), never to who cancelled; of a backup (exams) that ended by itself ("app":
+edited:{id}:{at}:{name}, to each of the team but who made it and the absent teacher, of the last change when it was made today
+(the school's date), by anyone, and it added a lesson of today that needs relief or took away one that needed it (counted; a
+lesson a co-teacher is there for counts for nothing; "Changed by {who}" when it was not the absent teacher), in the team's
+window and made again in it as unlinked is; a relief teacher of a lesson a change drops hears gone, as of any cover that ends;
+cancelled:{id}:{name} to the team, the planner, the absent teacher (in her own words when a person cancelled it: "Your relief
+request on … was cancelled by …"), and the officer when told of the absence (officer sent or unsure), never to who cancelled; of a backup (exams) that ended by itself ("app":
 withdrawn, a changed duty, handled by the committee) to those told of it alone, since a whole exam's end at once; late:{id}:{name}, the late request,
 to each of the team but who sent it and the absent teacher, once, of an absence sent for today on a duty day at or after its
 morning time and before its cut-off (never a backup), when a lesson of it today waits for their approval: picked, or open five
@@ -198,20 +200,24 @@ def officer_text(absent, days, away, kind, relief=True):
     return f"{absent} is away on {days} ({away}): {kind}." + ("\nRelief is being arranged." if relief else "")
 
 
-def cancelled_text(by, absent, days):
-    """by "app": no person did (a duty changed, an exam withdrawn), and nobody is named"""
+def cancelled_text(by, absent, days, own=False):
+    """by "app": no person did (a duty changed, an exam withdrawn), and nobody is named; own: to the absent teacher herself, in
+    her own words when a person cancelled it"""
+    if own and by != "app": return f"❌ Your relief request on {days} was cancelled by {by}. Its reliefs are no longer needed."
     return f"❌ Cancelled{'' if by == 'app' else f' by {by}'}: {absent}'s absence on {days}. Its reliefs are no longer needed."
 
 
 def _parts(added, gone):
-    """'1 lesson added · 2 lessons no longer needed': what a change did, by how many lessons; "No lesson changed." when nothing"""
+    """'1 lesson needing relief added · 2 lessons no longer needed': what a change did, by how many lessons that need relief (or
+    needed it); "No lesson needing relief changed." when none"""
     n = lambda k: f"{k} {'lesson' if k == 1 else 'lessons'}"
-    got = ([f"{n(added)} added"] if added else []) + ([f"{n(gone)} no longer needed"] if gone else [])
-    return " · ".join(got) or "No lesson changed."
+    got = ([f"{n(added)} needing relief added"] if added else []) + ([f"{n(gone)} no longer needed"] if gone else [])
+    return " · ".join(got) or "No lesson needing relief changed."
 
 
 def changed_text(by, days, away, added, gone, again):
-    """to the absent teacher: someone else changed the request; added, gone: how many lessons; again: they must acknowledge again"""
+    """to the absent teacher: someone else changed the request; added, gone: how many lessons that need relief came in and went
+    (_needs); again: they must acknowledge again"""
     return f"✏️ Your relief request was changed by {by}\nNow: {days} · {away}\n{_parts(added, gone)}" + ("\nPlease acknowledge again and set work for the new lessons." if again else "")
 
 
@@ -219,9 +225,10 @@ def notneeded_text(by, lesson, periods, day):
     return f"🚫 Relief not needed · {day}\n{lesson} · {periods}\nMarked by {by}."
 
 
-def edited_text(absent, away, added, gone):
-    """to the relief team: a teacher changed their own request, touching a lesson of today"""
-    return f"✏️ Changed request for today · {absent}\nNow: {away}\n{_parts(added, gone)}"
+def edited_text(absent, away, added, gone, by=None):
+    """to the relief team: a request was changed, touching a lesson of today that needs relief (or needed it); by: who changed it,
+    when not the absent teacher"""
+    return f"✏️ Changed request for today · {absent}\nNow: {away}\n" + (f"Changed by {by}\n" if by and by != absent else "") + _parts(added, gone)
 
 
 def officer_changed_text(absent, days, away, kind):
@@ -511,8 +518,8 @@ def _cancelled(w, r):
     told = [w.told.get(f"{kind}:{r['id']}") for kind in ("planned", "remind", "officer")]
     names = [] if by_itself else ([r.get("by")] if r.get("how") == "planned" else []) + [r["teacher"]]       # the planner, and the absent teacher
     names = {n for n in names + [t["name"] for t in told if t and t["state"] in SENT] if n in w.reach}
-    text = cancelled_text(gone.get("by"), r["teacher"], words.days(r))
-    return [_item(f"cancelled:{r['id']}:{n}", n, "cancelled", text, ref=dict(id=r["id"], team=n not in names))        # team: as the team alone
+    text = lambda n: cancelled_text(gone.get("by"), r["teacher"], words.days(r), own=n == r["teacher"])
+    return [_item(f"cancelled:{r['id']}:{n}", n, "cancelled", text(n), ref=dict(id=r["id"], team=n not in names))        # team: as the team alone
             for n in sorted((names | set(() if by_itself else w.team)) - {gone.get("by")})]
 
 
@@ -601,12 +608,31 @@ def _last_change(r):
     return ch if isinstance(ch, dict) and isinstance(ch.get("at"), str) else None
 
 
+def _needs(ch):
+    """(added, gone): the keys of the lessons a change added that need relief and of those it took away that needed it
+    (added_needed, gone_needed; a change written before they were kept: every lesson added and gone)"""
+    pick = lambda f: ch.get(f"{f}_needed") if isinstance(ch.get(f"{f}_needed"), list) else ch.get(f) or []
+    return pick("added"), pick("gone")
+
+
+def _again(w, r, ch):
+    """the absent teacher must acknowledge again: the record is not acknowledged, and the change ch or one before it since the
+    last change she was told of (changed:{id}:{at} sent or unsure) cleared the acknowledgement"""
+    if r.get("acknowledged"): return False
+    for c in reversed([c for c in r.get("changes") or [] if isinstance(c, dict) and isinstance(c.get("at"), str)]):
+        if c is not ch and (w.told.get(f"changed:{r['id']}:{c['at']}") or {}).get("state") in SENT: break
+        if c.get("again"): return True
+    return False
+
+
 def _changed(w, r):
     """changed:{id}:{at}, to the absent teacher, of the last change when someone else made it, since the bot was connected: how
-    many lessons it added and took away, and whether they must acknowledge again (the change's again). Any hour (ANY_HOUR)"""
+    many lessons needing relief it added and took away (_needs), and whether they must acknowledge again (_again: this change or
+    one since the last she was told of asked it, and she has not). Any hour (ANY_HOUR)"""
     ch = _last_change(r)
     if ch is None or ch.get("by") == r["teacher"] or r["teacher"] not in w.reach or not _since(w, ch["at"]): return []
-    text = changed_text(ch.get("by"), words.days(r), words.away(r), len(ch.get("added") or []), len(ch.get("gone") or []), bool(ch.get("again")))
+    added, gone = _needs(ch)
+    text = changed_text(ch.get("by"), words.days(r), words.away(r), len(added), len(gone), _again(w, r, ch))
     return [_item(f"changed:{r['id']}:{ch['at']}", r["teacher"], "changed", text, [[dict(text=OPEN, url=w.base + "/relief#mine")]], ref=dict(id=r["id"], at=ch["at"]))]
 
 
@@ -627,15 +653,17 @@ def _notneeded(w, r):
 
 
 def _edited(w, r):
-    """edited:{id}:{at}:{name}, to each of the team but the absent teacher, of the last change when the teacher made it today (the
-    school's date), since the bot was connected, and it added or took away a lesson of today: those are counted. In the team's
-    window (GATES), made again in it as unlinked is"""
+    """edited:{id}:{at}:{name}, to each of the team but who made it and the absent teacher, of the last change when it was made
+    today (the school's date), by anyone, since the bot was connected, and it added a lesson of today that needs relief or took
+    away one that needed it (_needs): those are counted, and the text names who changed it when it was not the absent teacher.
+    In the team's window (GATES), made again in it as unlinked is"""
     ch, today = _last_change(r), w.today.isoformat()
-    if ch is None or ch.get("by") != r["teacher"] or ch["at"][:10] != today or not _since(w, ch["at"]): return []
-    added, gone = ([k for k in ch.get(f) or [] if str(k)[:10] == today] for f in ("added", "gone"))
+    if ch is None or ch["at"][:10] != today or not _since(w, ch["at"]): return []
+    added, gone = ([k for k in f if str(k)[:10] == today] for f in _needs(ch))
     if not added and not gone: return []
-    text, buttons = edited_text(r["teacher"], words.away(r), len(added), len(gone)), [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]]
-    return [_item(f"edited:{r['id']}:{ch['at']}:{n}", n, "edited", text, buttons, ref=dict(id=r["id"], at=ch["at"], date=today)) for n in w.team if n != r["teacher"]]
+    by = ch.get("by")
+    text, buttons = edited_text(r["teacher"], words.away(r), len(added), len(gone), by), [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]]
+    return [_item(f"edited:{r['id']}:{ch['at']}:{n}", n, "edited", text, buttons, ref=dict(id=r["id"], at=ch["at"], date=today)) for n in w.team if n not in (r["teacher"], by)]
 
 
 def _of_cover(w, r, x, c, ckey):

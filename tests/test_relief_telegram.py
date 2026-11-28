@@ -2176,6 +2176,7 @@ REMIND_EVE = "⏰ Reminder: please acknowledge your relief for Tue 13 Oct and se
 OFFICER_EVE = "Ms Evelyn Koh is away on Tue 13 Oct (whole day): Medical.\nRelief is being arranged."
 CANCELLED_EVE = "❌ Cancelled by {}: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."
 CANCELLED_BY_APP = "❌ Cancelled: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."
+CANCELLED_OWN = "❌ Your relief request on Tue 13 Oct was cancelled by {}. Its reliefs are no longer needed."      # to the absent teacher herself
 
 @t
 def every_text_is_the_plans():
@@ -2201,6 +2202,8 @@ def every_text_is_the_plans():
     assert TE.planned_text("Tue 13 Oct", "whole day", HUGO, 2) == PLANNED_EVE and "\n1 lesson will be covered.\n" in TE.planned_text("d", "whole day", HUGO, 1)
     assert TE.remind_text("Tue 13 Oct") == REMIND_EVE and TE.officer_text(EVE, "Tue 13 Oct", "whole day", "Medical") == OFFICER_EVE
     assert TE.cancelled_text(HUGO, EVE, "Tue 13 Oct") == CANCELLED_EVE.format(HUGO) and TE.cancelled_text("app", EVE, "Tue 13 Oct") == CANCELLED_BY_APP
+    assert TE.cancelled_text(HUGO, EVE, "Tue 13 Oct", own=True) == CANCELLED_OWN.format(HUGO)
+    assert TE.cancelled_text("app", EVE, "Tue 13 Oct", own=True) == CANCELLED_BY_APP, "a backup that ended by itself: as to anyone told of it"
     assert TE.gone_text("1A, 1B Science (G2)", "P6–P7", "10:30", "Tue 13 Oct") == GONE_K5 and "Art P1 on Tue" in TE.gone_text("Art", "P1", "", "Tue")
     assert TE.moved_text("1A, 1B Science (G2)", "P6–P7", "Tue 13 Oct") == MOVED_K5 and TE.kept_text("1A, 1B Science (G2)", "P6–P7", "Tue 13 Oct") == KEPT_K5
     ask = lambda **k: TE.ask_text(SAM, "1A, 1B Science (G2)", "P6–P7", "10:30", "Tue 13 Oct", "A parent meeting", **k)
@@ -2924,7 +2927,7 @@ def cancel_tells_the_team_the_planner_and_the_told():
     with school(TEAM, LEE):                                                                # a team member who is the absent teacher and cancels
         i = absent(teacher=SAM, lessons=[]); absences.cancel(i, "Better", SAM); swept(); assert {n for k, n in told_of("cancelled")} == {TEAM, LEE}
     with record(EVE, extras=dict(relief=True, exams=None, admin=False)), school(EVE, TEAM):  # told of it, and on the team: one message
-        i = absent(by=HUGO); swept(); absences.cancel(i, "Better", HUGO); swept(); assert sorted(told_of("cancelled")) == [("cancelled", EVE), ("cancelled", TEAM)] and said(EVE) == [PLANNED_EVE, CANCELLED_EVE.format(HUGO)]
+        i = absent(by=HUGO); swept(); absences.cancel(i, "Better", HUGO); swept(); assert sorted(told_of("cancelled")) == [("cancelled", EVE), ("cancelled", TEAM)] and said(EVE) == [PLANNED_EVE, CANCELLED_OWN.format(HUGO)]
     with school(TEAM):                                                                     # long after, to somebody on the team now: nothing about what is past
         i = absent(); absences.cancel(i, "Better", EVE); at("09:00", 14); assert dues() == []
 
@@ -2935,26 +2938,26 @@ def cancelled_reaches_whoever_was_told_of_the_absence():
         with school(EVE, ROSA, TEAM):
             i = absent(by=HUGO); TE.sweep(); [put(f"{k}:{i}", state=s) for k in ("planned", "officer")]; absences.cancel(i, "a made-up why", HUGO)
             assert {x["name"] for x in dues() if x["kind"] == "cancelled"} == {TEAM, EVE} | ({ROSA} if told else set()), s
-            TE.sweep(); assert {(r["key"], r["text"]) for r in outs("cancelled")} == {(f"cancelled:{i}:{n}", CANCELLED_EVE.format(HUGO)) for n in {TEAM, EVE} | ({ROSA} if told else set())}, s
+            TE.sweep(); assert {(r["key"], r["text"]) for r in outs("cancelled")} == {(f"cancelled:{i}:{n}", (CANCELLED_OWN if n == EVE else CANCELLED_EVE).format(HUGO)) for n in {TEAM, EVE} | ({ROSA} if told else set())}, s
     with school(EVE, ROSA):                                                                # the officer by their own message alone; the absent teacher anyway
         i = absent(by=HUGO); TE.sweep(); put(f"planned:{i}", state="failed"); put(f"officer:{i}", state="failed"); absences.cancel(i, "x", HUGO); assert [x["name"] for x in dues()] == [EVE]
         put(f"officer:{i}", state="sent"); assert sorted(x["name"] for x in dues()) == sorted([EVE, ROSA])
     with school(EVE, TEAM, since="2026-10-12T09:30:00+08:00"):                             # planned before the bot was connected: told by the reminder alone
-        i = absent(by=HUGO); at("15:00"); swept(); assert said(EVE) == [REMIND_EVE]; absences.cancel(i, "x", HUGO); swept(); assert said(EVE) == [REMIND_EVE, CANCELLED_EVE.format(HUGO)]
+        i = absent(by=HUGO); at("15:00"); swept(); assert said(EVE) == [REMIND_EVE]; absences.cancel(i, "x", HUGO); swept(); assert said(EVE) == [REMIND_EVE, CANCELLED_OWN.format(HUGO)]
     with school(TEAM):                                                                     # not linked then: never told of it, nor of its end (the absent teacher is told of its end)
-        i = absent(by=HUGO); swept(); absences.cancel(i, "x", HUGO); [links.link(n, CHATS[n], None) for n in (EVE, ROSA)]; swept(); assert said(ROSA) == [] and said(EVE) == [CANCELLED_EVE.format(HUGO)]
+        i = absent(by=HUGO); swept(); absences.cancel(i, "x", HUGO); [links.link(n, CHATS[n], None) for n in (EVE, ROSA)]; swept(); assert said(ROSA) == [] and said(EVE) == [CANCELLED_OWN.format(HUGO)]
     with school(EVE, ROSA, TEAM):                                                          # queued and cancelled before it went: the officer not, the absent teacher of its end alone
-        i = absent(by=HUGO); TE.sweep(); absences.cancel(i, "x", HUGO); send(); swept(); assert said(ROSA) == [] and said(EVE) == said(TEAM) == [CANCELLED_EVE.format(HUGO)]
+        i = absent(by=HUGO); TE.sweep(); absences.cancel(i, "x", HUGO); send(); swept(); assert said(ROSA) == [] and said(EVE) == [CANCELLED_OWN.format(HUGO)] and said(TEAM) == [CANCELLED_EVE.format(HUGO)]
     for by in (EVE, ROSA):                                                                 # the canceller never
         with school(EVE, ROSA):
             i = absent(by=HUGO); swept(); absences.cancel(i, "x", by, team=True); swept(); assert told_of("cancelled") == [("cancelled", ROSA if by == EVE else EVE)], by
     with school(EVE, ROSA):                                                                # asked by the teacher, cancelled by the team: the officer and the teacher
-        i = absent(); swept(); absences.cancel(i, "x", TEAM, team=True); swept(); assert set(told_of("cancelled")) == {("cancelled", ROSA), ("cancelled", EVE)} and said(EVE) == [CANCELLED_EVE.format(TEAM)]
+        i = absent(); swept(); absences.cancel(i, "x", TEAM, team=True); swept(); assert set(told_of("cancelled")) == {("cancelled", ROSA), ("cancelled", EVE)} and said(EVE) == [CANCELLED_OWN.format(TEAM)] and said(ROSA)[-1] == CANCELLED_EVE.format(TEAM)
         j = absent(dates=["2026-10-16"]); swept(); absences.cancel(j, "x", TEAM, team=True); links.unlink(ROSA); assert [x["name"] for x in dues()] == [EVE], "the officer is not reached now"
         links.link(ROSA, CHATS[ROSA], None); at("09:00", 17); assert dues() == [], "past"
 
 # ---- a request changed, a lesson not needed, a request cancelled: by someone else (relief piece 2)
-CHANGED_BY_TEAM = "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct · P1–P5\n2 lessons no longer needed"
+CHANGED_BY_TEAM = "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct · P1–P5\n1 lesson no longer needed"      # K8 needed no relief: Mr Busy Chan is there
 NOT_NEEDED_K5 = "🚫 Relief not needed · Tue 13 Oct\n1A, 1B Science (G2) · P6–P7\nMarked by Ms Team Tan."
 EDITED_K2 = "✏️ Changed request for today · Ms Evelyn Koh\nNow: P6–P12\n1 lesson no longer needed"
 def changed(i, by, dates=("2026-10-13",), periods=None, why="a made-up why", team=True):
@@ -2963,11 +2966,12 @@ def changed(i, by, dates=("2026-10-13",), periods=None, why="a made-up why", tea
 
 @t
 def the_texts_of_a_change():
-    assert TE.changed_text(TEAM, "Tue 13 Oct", "whole day", 1, 0, False) == "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct · whole day\n1 lesson added"
-    assert TE.changed_text(TEAM, "d", "P1", 2, 1, True) == "✏️ Your relief request was changed by Ms Team Tan\nNow: d · P1\n2 lessons added · 1 lesson no longer needed\nPlease acknowledge again and set work for the new lessons."
-    assert TE.changed_text(TEAM, "d", "P1", 0, 0, False).splitlines()[-1] == "No lesson changed."
+    assert TE.changed_text(TEAM, "Tue 13 Oct", "whole day", 1, 0, False) == "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct · whole day\n1 lesson needing relief added"
+    assert TE.changed_text(TEAM, "d", "P1", 2, 1, True) == "✏️ Your relief request was changed by Ms Team Tan\nNow: d · P1\n2 lessons needing relief added · 1 lesson no longer needed\nPlease acknowledge again and set work for the new lessons."
+    assert TE.changed_text(TEAM, "d", "P1", 0, 0, False).splitlines()[-1] == "No lesson needing relief changed."
     assert TE.notneeded_text(TEAM, "1A Art", "P1", "Fri 16 Oct") == "🚫 Relief not needed · Fri 16 Oct\n1A Art · P1\nMarked by Ms Team Tan."
-    assert TE.edited_text(EVE, "whole day", 0, 2) == "✏️ Changed request for today · Ms Evelyn Koh\nNow: whole day\n2 lessons no longer needed"
+    assert TE.edited_text(EVE, "whole day", 0, 2) == "✏️ Changed request for today · Ms Evelyn Koh\nNow: whole day\n2 lessons no longer needed" == TE.edited_text(EVE, "whole day", 0, 2, EVE)
+    assert TE.edited_text(EVE, "P1", 1, 0, HUGO) == "✏️ Changed request for today · Ms Evelyn Koh\nNow: P1\nChanged by Mr Hugo Ong\n1 lesson needing relief added"
     assert TE.officer_changed_text(EVE, "Tue 13 Oct", "P1–P5", "Medical") == "Ms Evelyn Koh's absence has changed: now Tue 13 Oct (P1–P5): Medical."
     assert (WO.KINDS["changed"], WO.KINDS["notneeded"], WO.KINDS["edited"]) == ("Request changed", "Relief not needed", "Changed request for today")
     assert TE.TOLD[-4:] == ("changed:", "notneeded:", "edited:", "late:")
@@ -2980,16 +2984,16 @@ def a_change_by_someone_else_tells_the_absent_teacher():
         assert said(EVE)[n:] == [CHANGED_BY_TEAM] and "made-up why" not in str(rows("outbox")) and told_of("edited") == [], "once; the team is not told of a change it made"
         assert swept() == 0
         at("09:05"); when = changed(i, TEAM, dates=["2026-10-13", "2026-10-14"], periods=[0, 4]); swept()
-        assert said(EVE)[-1] == "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct, Wed 14 Oct · P1–P5\n1 lesson added" and len(outs("changed")) == 2
+        assert said(EVE)[-1] == "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct, Wed 14 Oct · P1–P5\n1 lesson needing relief added" and len(outs("changed")) == 2
     with school(EVE, TEAM):                                                                # two changes before a sweep: one message, of the last
         i = absent(); changed(i, TEAM, periods=[0, 4]); at("09:05"); when = changed(i, TEAM, dates=["2026-10-14"]); swept()
-        assert [(r["key"], r["text"]) for r in outs("changed")] == [(f"changed:{i}:{when}", "✏️ Your relief request was changed by Ms Team Tan\nNow: Wed 14 Oct · whole day\n1 lesson added · 1 lesson no longer needed")]
+        assert [(r["key"], r["text"]) for r in outs("changed")] == [(f"changed:{i}:{when}", "✏️ Your relief request was changed by Ms Team Tan\nNow: Wed 14 Oct · whole day\n1 lesson needing relief added · 1 lesson no longer needed")]
     with school(EVE, TEAM):                                                                # queued, then changed again before it went: the first is dropped
         i = absent(); first = changed(i, TEAM, periods=[0, 4]); TE.sweep(); at("09:05"); last = changed(i, TEAM, dates=["2026-10-14"]); send()
         assert state(f"changed:{i}:{first}") == "dropped"; swept(); assert [x.splitlines()[1] for x in said(EVE) if x.startswith("✏️ Your")] == ["Now: Wed 14 Oct · whole day"]
     with school(EVE, TEAM):                                                                # queued, then cancelled: dropped, and the cancel is said
         i = absent(); when = changed(i, TEAM, periods=[0, 4]); TE.sweep(); absences.cancel(i, "x", TEAM, team=True); swept()
-        assert state(f"changed:{i}:{when}") == "dropped" and said(EVE) == [CANCELLED_EVE.format(TEAM)]
+        assert state(f"changed:{i}:{when}") == "dropped" and said(EVE) == [CANCELLED_OWN.format(TEAM)]
     with school(EVE, TEAM):                                                                # by the teacher herself: nothing to her
         i = absent(); changed(i, EVE, periods=[0, 4], team=False); swept(); assert told_of("changed") == []
     with school(EVE, HUGO):                                                                # by the head who planned it
@@ -3005,7 +3009,7 @@ def a_change_by_someone_else_tells_the_absent_teacher():
 
 @t
 def a_planned_teacher_is_asked_to_acknowledge_again():
-    added = "✏️ Your relief request was changed by Mr Hugo Ong\nNow: Tue 13 Oct, Wed 14 Oct · whole day\n1 lesson added"
+    added = "✏️ Your relief request was changed by Mr Hugo Ong\nNow: Tue 13 Oct, Wed 14 Oct · whole day\n1 lesson needing relief added"
     with school(EVE, HUGO):
         i = absent(by=HUGO); swept(); absences.acknowledge(i, EVE); changed(i, HUGO, dates=["2026-10-13", "2026-10-14"], team=False); swept()
         assert said(EVE)[-1] == added + "\nPlease acknowledge again and set work for the new lessons." and absences.load(i)["acknowledged"] is None
@@ -3057,6 +3061,50 @@ def the_team_hears_when_a_teacher_changes_today():
         assert [r["state"] for r in outs("edited")] == ["dropped", "dropped"]
 
 @t
+def the_team_hears_when_anyone_else_changes_today():
+    """I3: a head's or a team member's change of today's lessons tells the rest of the team, naming who changed it"""
+    by_hugo = EDITED_K2.replace("\nNow: P6–P12\n", "\nNow: P6–P12\nChanged by Mr Hugo Ong\n")
+    with school(EVE, TEAM, LEE, HUGO):
+        i = absent(by=HUGO); swept(); at("08:00", 13); when = changed(i, HUGO, periods=[5, 11], team=False); swept()
+        got = sorted((r["key"], r["name"], r["text"]) for r in outs("edited"))
+        assert got == [(f"edited:{i}:{when}:{n}", n, by_hugo) for n in (LEE, TEAM)], got
+        assert told_of("edited", EVE) == [] and told_of("edited", HUGO) == [] and "made-up why" not in str(rows("outbox"))
+    with school(EVE, TEAM, LEE):                                                           # by a team member: the others alone
+        i = absent(); swept(); at("08:00", 13); when = changed(i, TEAM, periods=[5, 11]); swept()
+        assert [(r["key"], r["name"]) for r in outs("edited")] == [(f"edited:{i}:{when}:{LEE}", LEE)] and said(LEE)[-1] == EDITED_K2.replace("\nNow: P6–P12\n", "\nNow: P6–P12\nChanged by Ms Team Tan\n")
+        assert told_of("edited", TEAM) == [] and told_of("changed") == [("changed", EVE)]
+
+@t
+def a_change_of_lessons_that_need_no_relief_is_counted_as_none():
+    """I4: a lesson a co-teacher is there for (K8) is not counted; the team hears nothing of a change of today that moves only such lessons"""
+    with school(EVE, TEAM, LEE):
+        i = absent(periods=[0, 7]); swept(); at("08:00", 13); changed(i, EVE, team=False); swept()
+        assert [x["key"] for x in absences.load(i)["lessons"]] == [K2, K5, K8] and told_of("edited") == [], "only K8 came in: nothing to cover"
+    with school(EVE, TEAM):
+        i = absent(periods=[0, 7]); swept(); changed(i, TEAM); swept()
+        assert said(EVE)[-1] == "✏️ Your relief request was changed by Ms Team Tan\nNow: Tue 13 Oct · whole day\nNo lesson needing relief changed."
+    with school(EVE, TEAM, LEE):                                                           # today's K2 goes, and K8 with it: one is counted
+        i = absent(); swept(); at("08:00", 13); changed(i, EVE, periods=[5, 7], team=False); swept()
+        assert said(LEE)[-1] == "✏️ Changed request for today · Ms Evelyn Koh\nNow: P6–P8\n1 lesson no longer needed"
+
+@t
+def acknowledge_again_is_said_of_any_change_not_told_yet():
+    """M8: a change that cleared the acknowledgement and one after it before the sweep: the one message asks again; once she was
+    told, a later change that asks nothing does not"""
+    again = "\nPlease acknowledge again and set work for the new lessons."
+    with school(EVE, HUGO):
+        i = absent(by=HUGO); swept(); absences.acknowledge(i, EVE); changed(i, HUGO, dates=["2026-10-13", "2026-10-14"], team=False)
+        at("09:05"); changed(i, HUGO, dates=["2026-10-13", "2026-10-14"], periods=[0, 4], team=False); swept()
+        assert said(EVE)[-1] == "✏️ Your relief request was changed by Mr Hugo Ong\nNow: Tue 13 Oct, Wed 14 Oct · P1–P5\n1 lesson no longer needed" + again, said(EVE)
+        at("09:10"); changed(i, HUGO, dates=["2026-10-14"], periods=[0, 4], team=False); swept()
+        assert not said(EVE)[-1].endswith(again) and said(EVE)[-1].startswith("✏️ Your relief request"), "she was told already"
+    with school(EVE, HUGO):                                                                # acknowledged meanwhile: not asked again
+        i = absent(by=HUGO); swept(); absences.acknowledge(i, EVE); changed(i, HUGO, dates=["2026-10-13", "2026-10-14"], team=False)
+        absences.acknowledge(i, EVE); at("09:05"); changed(i, HUGO, dates=["2026-10-13", "2026-10-14"], periods=[0, 4], team=False); swept()
+        assert not said(EVE)[-1].endswith(again), said(EVE)
+
+
+@t
 def the_officer_hears_the_new_dates():
     new = "Ms Evelyn Koh's absence has changed: now Tue 13 Oct, Wed 14 Oct (whole day): Medical."
     with school(EVE, ROSA, TEAM):
@@ -3080,7 +3128,7 @@ def the_officer_hears_the_new_dates():
 def a_teacher_hears_their_request_was_cancelled_by_someone_else():
     with school(EVE, TEAM):
         i = absent(); swept(); absences.cancel(i, "a made-up why", TEAM, team=True); swept()
-        assert said(EVE) == [CANCELLED_EVE.format(TEAM)] and told_of("cancelled", EVE) == [("cancelled", EVE)] and "made-up why" not in str(rows("outbox"))
+        assert said(EVE) == [CANCELLED_OWN.format(TEAM)] and told_of("cancelled", EVE) == [("cancelled", EVE)] and "made-up why" not in str(rows("outbox"))
         assert json.loads(outs("cancelled", EVE)[0]["ref"])["team"] is False
     with school(EVE, TEAM):                                                                # she cancelled it herself: nothing to her
         i = absent(); swept(); absences.cancel(i, "x", EVE); swept(); assert told_of("cancelled", EVE) == [] and said(EVE) == []
@@ -5829,7 +5877,7 @@ def a_lesson_stopped_when_its_absence_was_sent_is_told_once_it_is_on():
             again_on(e); swept(); assert said(SAM)[1:] == [STOPPED_K5] and row()["told"] is None
     with exam_school(EVE, SAM, TEAM):                                                      # every lesson of it stopped: the absence is taken, and says nothing of them
         exam("1A", "1B", "1C"); i = sent_by(HUGO, teacher=EVE); swept(); assert told_of() == [("planned", EVE)] and said(EVE) == [PLANNED_N(0)] and FL.run(ids=[i]) == dict(picked=0, nobody=0) and swept() == 0
-        absences.cancel(i, "x", HUGO); swept(); assert said(EVE)[1:] == said(TEAM) == [CANCELLED_EVE.format(HUGO)] and said(SAM) == []
+        absences.cancel(i, "x", HUGO); swept(); assert said(EVE)[1:] == [CANCELLED_OWN.format(HUGO)] and said(TEAM) == [CANCELLED_EVE.format(HUGO)] and said(SAM) == []
 
 # ---- Task 6b, fix round 1
 @t
